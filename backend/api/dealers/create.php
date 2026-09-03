@@ -1,0 +1,57 @@
+<?php
+require_once '../../config/database.php';
+require_once '../../utils/response.php';
+require_once '../../utils/date.php';
+require_once '../../utils/validation.php';
+require_once '../../utils/dealer_validation.php';
+require_once '../../middleware/auth.php';
+
+handlePreflight();
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    sendResponse(false, "Method not allowed", [], [], 405);
+}
+
+authenticate();
+requirePermission('dealers.add');
+
+$data = json_decode(file_get_contents("php://input"), true);
+
+if (!$data) {
+    sendResponse(false, "Invalid request payload", [], [], 400);
+}
+
+$validation = validateDealerFields($data);
+if (!empty($validation['errors'])) {
+    sendResponse(false, $validation['errors'][0], ['errors' => $validation['errors']], [], 400);
+}
+
+$validData = $validation['data'];
+
+$db = new Database();
+$conn = $db->getConnection();
+
+if (!$conn) {
+    sendResponse(false, "Database connection failed", [], [], 500);
+}
+
+$dbErrors = checkDealerDuplicatesInDb($conn, $validData['dealer_name'], $validData['mobile_no']);
+if (!empty($dbErrors)) {
+    $conn->close();
+    sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
+}
+
+$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("sssssss", $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['notes']);
+
+if ($stmt->execute()) {
+    sendResponse(true, "Dealer created successfully", ["id" => $conn->insert_id]);
+} else {
+    sendResponse(false, "Failed to create dealer: " . $stmt->error, [], [], 500);
+}
+
+
+if ($stmt->errno === 1062) sendResponse(false, 'Dealer mobile number already exists.', [], [], 400);
+$stmt->close();
+$conn->close();
+?>
