@@ -111,7 +111,14 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'sim_validity.view' => ['permission_name' => 'SIM Validity View', 'module' => 'sim_validity', 'action' => 'VIEW'],
         'sim_validity.add' => ['permission_name' => 'SIM Validity Add', 'module' => 'sim_validity', 'action' => 'ADD'],
         'sim_validity.edit' => ['permission_name' => 'SIM Validity Edit', 'module' => 'sim_validity', 'action' => 'EDIT'],
-        'sim_validity.delete' => ['permission_name' => 'SIM Validity Delete', 'module' => 'sim_validity', 'action' => 'DELETE']
+        'sim_validity.delete' => ['permission_name' => 'SIM Validity Delete', 'module' => 'sim_validity', 'action' => 'DELETE'],
+        'stock_transfer.view' => ['permission_name' => 'Stock Transfer View', 'module' => 'stock_transfer', 'action' => 'VIEW'],
+        'stock_transfer.add' => ['permission_name' => 'Stock Transfer Add', 'module' => 'stock_transfer', 'action' => 'ADD'],
+        'customer_reports.view' => ['permission_name' => 'Customer Reports View', 'module' => 'customer_reports', 'action' => 'VIEW'],
+        'customer_renewals.view' => ['permission_name' => 'Customer Renewals View', 'module' => 'customer_renewals', 'action' => 'VIEW'],
+        'customer_renewals.edit' => ['permission_name' => 'Customer Renewals Edit', 'module' => 'customer_renewals', 'action' => 'EDIT'],
+        'customer_renewals.renew' => ['permission_name' => 'Customer Renewals Renew', 'module' => 'customer_renewals', 'action' => 'RENEW'],
+        'customer_renewals.history' => ['permission_name' => 'Customer Renewals History', 'module' => 'customer_renewals', 'action' => 'HISTORY']
     ];
 
     foreach ($permissionKeys as $key) {

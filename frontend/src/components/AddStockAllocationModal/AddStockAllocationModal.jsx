@@ -5,6 +5,7 @@ import SearchableDropdown from '../SearchableDropdown/SearchableDropdown';
 import Modal from '../Modal/Modal';
 import DateInput from '../DateInput';
 import { softwareDropdownOptions } from '../../constants/software';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) => {
     const safeOwnersList = Array.isArray(ownersList) ? ownersList : [];
@@ -40,6 +41,11 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     const [stockLoading, setStockLoading] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     const selectedDealer = ownerType === 'dealer' ? safeOwnersList.find(d => Number(d.id) === Number(selectedOwner)) : null;
     const dealerRequiresPayment = ownerType === 'dealer' && selectedDealer?.installation_status === 'Not Willing';
@@ -133,6 +139,9 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             const allItems = type === 'device' ? [...updated, ...sims] : [...devices, ...updated];
             const newTotal = allItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
             setTotalAmount(newTotal.toFixed(2));
+            if (amountPaid !== '' && Number(amountPaid) <= newTotal) {
+                setError((currentError) => currentError === 'Amount Paid cannot be greater than Total Amount.' ? '' : currentError);
+            }
         }
     };
 
@@ -146,6 +155,9 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             const allItems = type === 'device' ? [...updated, ...sims] : [...devices, ...updated];
             const newTotal = allItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
             setTotalAmount(newTotal.toFixed(2));
+            if (amountPaid !== '' && Number(amountPaid) <= newTotal) {
+                setError((currentError) => currentError === 'Amount Paid cannot be greater than Total Amount.' ? '' : currentError);
+            }
         }
     };
 
@@ -153,7 +165,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         event.preventDefault();
         setError('');
 
-        if (!selectedOwner) return setError(`Please select a ${ownerType}`);
+        if (!selectedOwner) return triggerError(`Please select a ${ownerType}`);
 
         const validateRows = (rows, type) => {
             const seenItems = new Set();
@@ -168,21 +180,25 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         };
         const deviceError = validateRows(activeDevices, 'device');
         const simError = validateRows(activeSims, 'SIM');
-        if (deviceError || simError) return setError(deviceError || simError);
-        if (amountPaid !== '' && (!Number.isFinite(Number(amountPaid)) || Number(amountPaid) < 0 || Number(amountPaid) > Number(totalAmount))) {
-            return setError('Amount Paid cannot be greater than Total Amount.');
+        if (deviceError || simError) return triggerError(deviceError || simError);
+        const currentTotalAmount = activeDevices.concat(activeSims).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+        const currentAmountPaid = amountPaid === '' ? 0 : Number(amountPaid);
+        const currentPendingAmount = Math.max(0, currentTotalAmount - currentAmountPaid);
+        const currentPaymentStatus = currentTotalAmount <= 0 ? 'Not Paid' : currentPendingAmount <= 0 ? 'Paid' : currentAmountPaid > 0 ? 'Partially Paid' : 'Not Paid';
+        if (amountPaid !== '' && (!Number.isFinite(currentAmountPaid) || currentAmountPaid < 0 || currentAmountPaid > currentTotalAmount)) {
+            return triggerError('Amount Paid cannot be greater than Total Amount.');
         }
         if (ownerType === 'dealer') {
             const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
             if (dealer?.installation_status === 'Not Willing') {
                 if (totalAmount === '' || amountPaid === '' || !paymentMode) {
-                    return setError('Payment details are mandatory for Not Willing dealers.');
+                    return triggerError('Payment details are mandatory for Not Willing dealers.');
                 }
 
                 const totalValue = Number(totalAmount);
                 const paidValue = Number(amountPaid);
                 if (!Number.isFinite(totalValue) || !Number.isFinite(paidValue) || paidValue < 0 || paidValue > totalValue) {
-                    return setError('Payment details are invalid for Not Willing dealers.');
+                    return triggerError('Payment details are invalid for Not Willing dealers.');
                 }
             }
         }
@@ -193,10 +209,10 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 owner_type: ownerType,
                 owner_id: selectedOwner,
                 allocation_date: (activeDevices[0] || activeSims[0]).date,
-                total_amount: activeDevices.concat(activeSims).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0),
+                total_amount: currentTotalAmount,
                 amount_paid: parseFloat(amountPaid) || 0,
-                pending_amount: pendingAmount,
-                payment_status: paymentStatus || 'Not Paid',
+                pending_amount: currentPendingAmount,
+                payment_status: currentPaymentStatus,
                 payment_mode: paymentMode,
                 software,
                 devices: activeDevices.map(i => ({ id: i.item_id, allocation_date: i.date, amount: parseFloat(i.amount) || 0, notes: i.notes })),
@@ -207,10 +223,10 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Failed to allocate stock');
+                triggerError(response.data.message || 'Failed to allocate stock');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Network error occurred');
+            triggerError(err.response?.data?.message || 'Network error occurred');
         } finally {
             setLoading(false);
         }
@@ -329,7 +345,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Amount Paid{dealerRequiresPayment ? ' *' : ''}</label>
-                                <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} required={dealerRequiresPayment} />
+                                <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={e => { const value = e.target.value; setAmountPaid(value); const paid = Number(value); if (value === '' || (Number.isFinite(paid) && paid <= Number(totalAmount || 0))) setError(currentError => currentError === 'Amount Paid cannot be greater than Total Amount.' ? '' : currentError); }} required={dealerRequiresPayment} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Pending Amount{dealerRequiresPayment ? ' *' : ''}</label>

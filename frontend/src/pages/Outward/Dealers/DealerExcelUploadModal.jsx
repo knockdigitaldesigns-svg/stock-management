@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Download, AlertCircle, CheckCircle } from 'lucide-react';
+import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
 import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 export const DEALER_COLUMNS = [
     { key: 'dealer_name', header: 'Dealer Name', required: true },
@@ -76,15 +77,19 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!selectedFile) return;
 
         if (!selectedFile.name.toLowerCase().endsWith('.xlsx')) {
+            const msg = 'Only .xlsx files are allowed.';
             setFile(null);
-            setErrors(['Only .xlsx files are allowed.']);
+            setErrors([msg]);
+            showGlobalError(msg);
             setSuccessMsg('');
             return;
         }
 
         if (selectedFile.size === 0) {
+            const msg = 'Excel file is empty.';
             setFile(null);
-            setErrors(['Excel file is empty.']);
+            setErrors([msg]);
+            showGlobalError(msg);
             setSuccessMsg('');
             return;
         }
@@ -96,17 +101,23 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
 
     const processExcel = async () => {
         if (!file) {
-            setErrors(['Please select an Excel file.']);
+            const msg = 'Please select an Excel file.';
+            setErrors([msg]);
+            showGlobalError(msg);
             return;
         }
 
         if (!file.name.toLowerCase().endsWith('.xlsx')) {
-            setErrors(['Only .xlsx files are allowed.']);
+            const msg = 'Only .xlsx files are allowed.';
+            setErrors([msg]);
+            showGlobalError(msg);
             return;
         }
 
         if (file.size === 0) {
-            setErrors(['Excel file is empty.']);
+            const msg = 'Excel file is empty.';
+            setErrors([msg]);
+            showGlobalError(msg);
             return;
         }
 
@@ -122,13 +133,17 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 cellDates: true
             });
         } catch (err) {
-            setErrors(['Invalid or corrupted Excel file.']);
+            const msg = 'Invalid or corrupted Excel file.';
+            setErrors([msg]);
+            showGlobalError(msg);
             setLoading(false);
             return;
         }
 
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-            setErrors(['Excel workbook contains no worksheets.']);
+            const msg = 'Excel workbook contains no worksheets.';
+            setErrors([msg]);
+            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -137,7 +152,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         const worksheet = workbook.Sheets[firstSheetName];
 
         if (!worksheet) {
-            setErrors(['Unable to read the first Excel worksheet.']);
+            const msg = 'Unable to read the first Excel worksheet.';
+            setErrors([msg]);
+            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -148,7 +165,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         });
 
         if (!rawRows || rawRows.length === 0) {
-            setErrors(['Excel file is empty.']);
+            const msg = 'Excel file is empty.';
+            setErrors([msg]);
+            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -163,7 +182,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             (c) => c.required && !headerMap[normalizeHeader(c.header)]
         );
         if (missingRequired.length > 0) {
-            setErrors([`Required column '${missingRequired[0].header}' is missing.`]);
+            const msg = `Required column '${missingRequired[0].header}' is missing.`;
+            setErrors([msg]);
+            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -234,7 +255,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         });
 
         if (clientErrors.length > 0) {
-            setErrors(Array.from(new Set(clientErrors)));
+            const uniqueErrors = Array.from(new Set(clientErrors));
+            setErrors(uniqueErrors);
+            showGlobalError(uniqueErrors, 'Import Validation Errors');
             setLoading(false);
             return;
         }
@@ -256,14 +279,18 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                     response.data?.data?.errors ||
                     response.data?.errors ||
                     [response.data.message || 'Failed to upload dealers'];
-                setErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+                const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
+                setErrors(errList);
+                showGlobalError(errList, 'Upload Failed');
             }
         } catch (error) {
             const backendErrors =
                 error.response?.data?.data?.errors ||
                 error.response?.data?.errors ||
                 [error.response?.data?.message || error.message || 'Error uploading dealers'];
-            setErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+            const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
+            setErrors(errList);
+            showGlobalError(errList, 'Upload Error');
         } finally {
             setLoading(false);
         }
@@ -329,29 +356,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading}
                         />
                     </div>
-
-                    {errors.length > 0 && (
-                        <div
-                            className="alert alert-danger"
-                            style={{ maxHeight: '240px', overflowY: 'auto' }}
-                        >
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    marginBottom: '0.5rem'
-                                }}
-                            >
-                                <AlertCircle size={16} /> <strong>Validation Errors:</strong>
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem' }}>
-                                {errors.map((err, i) => (
-                                    <li key={i}>{err}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
 
                     {successMsg && (
                         <div

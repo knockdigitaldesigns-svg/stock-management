@@ -8,6 +8,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const getStatusClass = (status) => {
     if (status === 'ALERT') return 'badge-danger';
@@ -25,6 +26,11 @@ const DeviceAlertPage = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
     const [success, setSuccess] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [editingConfigId, setEditingConfigId] = useState(null);
@@ -82,10 +88,10 @@ const DeviceAlertPage = () => {
                 setOwners(response.data.data?.owners || []);
                 setError('');
             } else {
-                setError(response.data.message || 'Unable to load device alert list');
+                triggerError(response.data.message || 'Unable to load device alert list');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to load device alert list');
+            triggerError(err.response?.data?.message || 'Unable to load device alert list');
         } finally {
             setLoading(false);
         }
@@ -156,10 +162,10 @@ const DeviceAlertPage = () => {
                 setError('');
                 await fetchAlerts();
             } else {
-                setError(response.data.message || 'Unable to delete alert configuration');
+                triggerError(response.data.message || 'Unable to delete alert configuration');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to delete alert configuration');
+            triggerError(err.response?.data?.message || 'Unable to delete alert configuration');
         }
     };
 
@@ -168,19 +174,19 @@ const DeviceAlertPage = () => {
         const simCountValue = String(form.minimum_sim_count).trim();
 
         if (!form.owner_type || !form.owner_id) {
-            setError('Please select an owner.');
+            triggerError('Please select an owner.');
             setSuccess('');
             return;
         }
 
         if (!isWholeNumberString(deviceCountValue)) {
-            setError('Minimum device count must be a valid number.');
+            triggerError('Minimum device count must be a valid number.');
             setSuccess('');
             return;
         }
 
         if (!isWholeNumberString(simCountValue)) {
-            setError('Minimum SIM count must be a valid number.');
+            triggerError('Minimum SIM count must be a valid number.');
             setSuccess('');
             return;
         }
@@ -189,7 +195,7 @@ const DeviceAlertPage = () => {
         const minimumSimCount = Number(simCountValue);
 
         if (minimumDeviceCount < 0 || minimumSimCount < 0) {
-            setError('Minimum counts cannot be negative.');
+            triggerError('Minimum counts cannot be negative.');
             setSuccess('');
             return;
         }
@@ -221,10 +227,10 @@ const DeviceAlertPage = () => {
                 resetForm();
                 await fetchAlerts();
             } else {
-                setError(response.data.message || (isEditing ? 'Unable to update alert configuration' : 'Unable to save alert configuration'));
+                triggerError(response.data.message || (isEditing ? 'Unable to update alert configuration' : 'Unable to save alert configuration'));
             }
         } catch (err) {
-            setError(err.response?.data?.message || (isEditing ? 'Unable to update alert configuration' : 'Unable to save alert configuration'));
+            triggerError(err.response?.data?.message || (isEditing ? 'Unable to update alert configuration' : 'Unable to save alert configuration'));
         } finally {
             setSaving(false);
         }
@@ -240,7 +246,9 @@ const DeviceAlertPage = () => {
         return totals;
     }, [owners]);
 
-    const filteredOwners = filterTableRows(owners, filters, { ownerKey: 'owner_type', searchKeys: ['owner_name', 'owner_type', 'notes'] });
+    const filteredOwners = filterTableRows(owners, filters, {
+        searchKeys: ['owner_name', 'notes']
+    });
 
     const {
         page,
@@ -278,43 +286,54 @@ const DeviceAlertPage = () => {
                         <SearchableDropdown
                             options={filteredOwnerOptions}
                             value={form.owner_id}
-                            onChange={(val) => setForm({ ...form, owner_id: val })}
-                            placeholder="Choose owner..."
+                            onChange={(value) => setForm({ ...form, owner_id: value })}
+                            placeholder="Select owner..."
                             disabled={isEditing}
                         />
                         {isDealerCurrentlyNotWilling && (
-                            <span style={{ color: 'var(--warning-color)', fontSize: '0.8rem', marginTop: '0.25rem', display: 'block' }}>
-                                Note: This dealer's installation status is currently "Not Willing".
-                            </span>
+                            <small className="text-warning" style={{ display: 'block', marginTop: '4px' }}>
+                                This dealer is currently marked as Not Willing. Updating will maintain historical settings.
+                            </small>
                         )}
                     </div>
 
                     <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Min Device Count *</label>
+                        <label className="form-label">Minimum Device Count *</label>
                         <input
                             type="text"
                             className="form-control"
                             value={form.minimum_device_count}
-                            onChange={(e) => setForm({ ...form, minimum_device_count: e.target.value.replace(/[^0-9]/g, '') })}
-                            placeholder="10"
+                            onChange={(e) => setForm({ ...form, minimum_device_count: e.target.value })}
+                            placeholder="e.g. 5"
                         />
                     </div>
 
                     <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Min SIM Count *</label>
+                        <label className="form-label">Minimum SIM Count *</label>
                         <input
                             type="text"
                             className="form-control"
                             value={form.minimum_sim_count}
-                            onChange={(e) => setForm({ ...form, minimum_sim_count: e.target.value.replace(/[^0-9]/g, '') })}
-                            placeholder="10"
+                            onChange={(e) => setForm({ ...form, minimum_sim_count: e.target.value })}
+                            placeholder="e.g. 5"
                         />
                     </div>
                 </div>
 
-                <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="form-group" style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+                    <label className="form-label">Notes</label>
+                    <textarea
+                        className="form-control"
+                        rows="2"
+                        value={form.notes}
+                        onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                        placeholder="Optional notes regarding alert settings..."
+                    />
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     <button className="btn btn-primary" type="button" onClick={saveConfiguration} disabled={saving}>
-                        {saving ? (isEditing ? 'Updating...' : 'Saving...') : (isEditing ? 'Update' : 'Save')}
+                        {saving ? 'Saving...' : isEditing ? 'Update Configuration' : 'Save Configuration'}
                     </button>
                     {isEditing && (
                         <button className="btn btn-outline" type="button" onClick={resetForm}>
@@ -330,7 +349,16 @@ const DeviceAlertPage = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
                     <h3 style={{ margin: 0 }}>Configured Owners</h3>
                 </div>
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={owners} ownerKey="owner_type" searchPlaceholder="Search configured owner..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={owners}
+                    showOwnerType
+                    showDeviceAlert
+                    deviceAlertOptions={['ALERT', 'WARNING', 'SAFE']}
+                    searchPlaceholder="Search configured owner or notes..."
+                />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
                     <div className="badge badge-danger" style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>

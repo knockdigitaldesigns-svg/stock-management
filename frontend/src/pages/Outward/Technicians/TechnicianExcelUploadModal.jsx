@@ -4,6 +4,7 @@ import { Download, AlertCircle, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
 import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 export const TECHNICIAN_COLUMNS = [
     { key: 'technician_name', header: 'Technician Name', required: true },
@@ -26,6 +27,12 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
     const [errors, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
+
+    const triggerErrors = (errs) => {
+        const errList = Array.isArray(errs) ? errs : [errs];
+        setErrors(errList);
+        showGlobalError(errList, 'Excel Upload Validation Error');
+    };
 
     const downloadTemplate = () => {
         const headers = TECHNICIAN_COLUMNS.map((c) => c.header);
@@ -65,14 +72,14 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
 
         if (!selectedFile.name.toLowerCase().endsWith('.xlsx')) {
             setFile(null);
-            setErrors(['Only .xlsx files are allowed.']);
+            triggerErrors(['Only .xlsx files are allowed.']);
             setSuccessMsg('');
             return;
         }
 
         if (selectedFile.size === 0) {
             setFile(null);
-            setErrors(['Excel file is empty.']);
+            triggerErrors(['Excel file is empty.']);
             setSuccessMsg('');
             return;
         }
@@ -84,17 +91,17 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
 
     const processExcel = async () => {
         if (!file) {
-            setErrors(['Please select an Excel file.']);
+            triggerErrors(['Please select an Excel file.']);
             return;
         }
 
         if (!file.name.toLowerCase().endsWith('.xlsx')) {
-            setErrors(['Only .xlsx files are allowed.']);
+            triggerErrors(['Only .xlsx files are allowed.']);
             return;
         }
 
         if (file.size === 0) {
-            setErrors(['Excel file is empty.']);
+            triggerErrors(['Excel file is empty.']);
             return;
         }
 
@@ -110,13 +117,13 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
                 cellDates: true
             });
         } catch (err) {
-            setErrors(['Invalid or corrupted Excel file.']);
+            triggerErrors(['Invalid or corrupted Excel file.']);
             setLoading(false);
             return;
         }
 
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-            setErrors(['Excel workbook contains no worksheets.']);
+            triggerErrors(['Excel workbook contains no worksheets.']);
             setLoading(false);
             return;
         }
@@ -125,7 +132,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
         const worksheet = workbook.Sheets[firstSheetName];
 
         if (!worksheet) {
-            setErrors(['Unable to read the first Excel worksheet.']);
+            triggerErrors(['Unable to read the first Excel worksheet.']);
             setLoading(false);
             return;
         }
@@ -136,7 +143,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
         });
 
         if (!rawRows || rawRows.length === 0) {
-            setErrors(['Excel file is empty.']);
+            triggerErrors(['Excel file is empty.']);
             setLoading(false);
             return;
         }
@@ -151,7 +158,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
             (c) => c.required && !headerMap[normalizeHeader(c.header)]
         );
         if (missingRequired.length > 0) {
-            setErrors([`Required column '${missingRequired[0].header}' is missing.`]);
+            triggerErrors([`Required column '${missingRequired[0].header}' is missing.`]);
             setLoading(false);
             return;
         }
@@ -219,7 +226,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
         });
 
         if (clientErrors.length > 0) {
-            setErrors(Array.from(new Set(clientErrors)));
+            triggerErrors(Array.from(new Set(clientErrors)));
             setLoading(false);
             return;
         }
@@ -241,14 +248,14 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
                     response.data?.data?.errors ||
                     response.data?.errors ||
                     [response.data.message || 'Failed to upload technicians'];
-                setErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+                triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
             }
         } catch (error) {
             const backendErrors =
                 error.response?.data?.data?.errors ||
                 error.response?.data?.errors ||
                 [error.response?.data?.message || error.message || 'Error uploading technicians'];
-            setErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+            triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
         } finally {
             setLoading(false);
         }

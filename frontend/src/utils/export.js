@@ -6,29 +6,33 @@ import { formatDate, isDateKey } from './date';
 const formatExportValue = (value, key) => isDateKey(key) ? formatDate(value) : (value ?? '-');
 
 export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}) => {
-    if (!data || data.length === 0) return;
-
-    const exportData = data.map((item) => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, formatExportValue(value, key)])));
+    const rawData = data || [];
+    const exportData = rawData.map((item) => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, formatExportValue(value, key)])));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
 
     if (options.combinedSheet) {
         const rows = [[options.combinedSheet.title || filename], []];
         if (options.summary) {
-            rows.push(['Summary'], ['Metric', 'Value']);
+            rows.push([options.summaryTitle || 'Summary'], ['Metric', 'Value']);
             options.summary.forEach((item) => rows.push([item.label, item.value ?? '-']));
             rows.push([]);
         }
         (options.sections || []).forEach((section) => {
             rows.push([section.title || section.name || 'Breakdown']);
-            const sectionColumns = section.columns || Object.keys(section.rows[0] || {}).map((key) => ({ header: key, key }));
-            rows.push(sectionColumns.map((column) => column.header));
-            section.rows.forEach((row) => rows.push(sectionColumns.map((column) => row[column.key] ?? '-')));
+            const sectionColumns = section.columns || (section.rows && section.rows[0] ? Object.keys(section.rows[0]).map((key) => ({ header: key, key })) : []);
+            if (sectionColumns.length > 0) {
+                rows.push(sectionColumns.map((column) => column.header));
+                section.rows.forEach((row) => rows.push(sectionColumns.map((column) => row[column.key] ?? '-')));
+            }
             rows.push([]);
         });
-        rows.push([sheetName]);
-        rows.push(Object.keys(data[0] || {}));
-        exportData.forEach((item) => rows.push(Object.keys(exportData[0] || {}).map((key) => item[key] ?? '-')));
+        rows.push([options.tableTitle || sheetName]);
+        const keys = rawData.length > 0 ? Object.keys(rawData[0]) : (options.columns ? options.columns.map(c => typeof c === 'string' ? c : c.header) : []);
+        if (keys.length > 0) {
+            rows.push(keys);
+            exportData.forEach((item) => rows.push(keys.map((key) => item[key] ?? '-')));
+        }
         const combinedWorksheet = XLSX.utils.aoa_to_sheet(rows);
         combinedWorksheet['!cols'] = [{ wch: 24 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
         XLSX.utils.book_append_sheet(wb, combinedWorksheet, sheetName);
@@ -45,7 +49,9 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
     }
 
     (options.sections || []).forEach((section) => {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(section.rows), section.name || 'Breakdown');
+        if (section.rows && section.rows.length > 0) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(section.rows), section.name || 'Breakdown');
+        }
     });
 
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -53,8 +59,7 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
 };
 
 export const exportToPDF = (data, filename, title, columns, options = {}) => {
-    if (!data || data.length === 0) return;
-
+    const rawData = data || [];
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text(title, 14, 20);
@@ -64,6 +69,13 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
     let nextY = 35;
 
     if (options.summary) {
+        if (options.summaryTitle) {
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            doc.text(options.summaryTitle, 14, nextY);
+            doc.setFont(undefined, 'normal');
+            nextY += 4;
+        }
         autoTable(doc, {
             head: [options.summary.map((item) => item.label)],
             body: [options.summary.map((item) => item.value ?? '-')],
@@ -78,23 +90,35 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
     (options.sections || []).forEach((section) => {
         doc.setFontSize(11);
         doc.setFont(undefined, 'bold');
-        doc.text(section.title, 14, nextY);
+        doc.text(section.title || section.name || 'Breakdown', 14, nextY);
         doc.setFont(undefined, 'normal');
         nextY += 4;
 
-        autoTable(doc, {
-            head: [section.columns.map((col) => col.header)],
-            body: section.rows.map((row) => section.columns.map((col) => formatExportValue(row[col.key], col.key))),
-            startY: nextY,
-            styles: { fontSize: 9 },
-            headStyles: { fillColor: [71, 85, 105] },
-            margin: { top: 12, bottom: 12 }
-        });
-        nextY = doc.lastAutoTable.finalY + 10;
+        const secCols = section.columns || (section.rows && section.rows[0] ? Object.keys(section.rows[0]).map(k => ({ header: k, key: k })) : []);
+
+        if (secCols.length > 0) {
+            autoTable(doc, {
+                head: [secCols.map((col) => col.header)],
+                body: (section.rows || []).map((row) => secCols.map((col) => formatExportValue(row[col.key], col.key))),
+                startY: nextY,
+                styles: { fontSize: 9 },
+                headStyles: { fillColor: [71, 85, 105] },
+                margin: { top: 12, bottom: 12 }
+            });
+            nextY = doc.lastAutoTable.finalY + 10;
+        }
     });
 
+    if (options.tableTitle) {
+        doc.setFontSize(11);
+        doc.setFont(undefined, 'bold');
+        doc.text(options.tableTitle, 14, nextY);
+        doc.setFont(undefined, 'normal');
+        nextY += 4;
+    }
+
     const tableColumn = columns.map((col) => col.header);
-    const tableRows = data.map((item) => columns.map((col) => formatExportValue(item[col.key], col.key)));
+    const tableRows = rawData.map((item) => columns.map((col) => formatExportValue(item[col.key], col.key)));
 
     autoTable(doc, {
         head: [tableColumn],

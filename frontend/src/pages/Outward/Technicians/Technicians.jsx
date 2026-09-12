@@ -23,6 +23,12 @@ const Technicians = () => {
     const [editingTechnician, setEditingTechnician] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [viewingTechnician, setViewingTechnician] = useState(null);
+    const [masterData, setMasterData] = useState({
+        platforms: [],
+        deviceModels: [],
+        simTypes: [],
+        simValidities: []
+    });
 
     const fetchTechnicians = async () => {
         setLoading(true);
@@ -35,6 +41,42 @@ const Technicians = () => {
             console.error('Failed to fetch technicians', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchFilterMasters = async () => {
+        try {
+            const [platformsRes, deviceTypesRes, validitiesRes, simsRes] = await Promise.all([
+                api.get('/platforms/list.php').catch(() => ({ data: { success: true, data: { platforms: [] } } })),
+                api.get('/device_types/list.php').catch(() => ({ data: { success: true, data: { device_types: [] } } })),
+                api.get('/sim_validities/list.php').catch(() => ({ data: { success: true, data: { validities: [] } } })),
+                api.get('/sims/list.php').catch(() => ({ data: { success: true, data: { sims: [] } } }))
+            ]);
+
+            const rawPlatforms = platformsRes.data?.data?.platforms || [];
+            const activePlatforms = rawPlatforms
+                .filter((p) => !p.status || String(p.status).toLowerCase() === 'active')
+                .map((p) => p.platform_name);
+
+            const rawDeviceTypes = deviceTypesRes.data?.data?.device_types || [];
+            const deviceModels = rawDeviceTypes.map((dt) => dt.device_type);
+
+            const rawValidities = validitiesRes.data?.data?.validities || [];
+            const simValidities = rawValidities
+                .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
+                .map((v) => `${v.months} Months`);
+
+            const rawSims = simsRes.data?.data?.sims || [];
+            const simTypes = [...new Set(rawSims.map((s) => s.sim_type).filter(Boolean))];
+
+            setMasterData({
+                platforms: activePlatforms,
+                deviceModels,
+                simValidities,
+                simTypes
+            });
+        } catch (err) {
+            console.error('Failed to load filter masters', err);
         }
     };
 
@@ -56,9 +98,13 @@ const Technicians = () => {
 
     useEffect(() => {
         fetchTechnicians();
+        fetchFilterMasters();
     }, []);
 
-    const filteredTechnicians = filterTableRows(technicians, filters, { dateKeys: ['enrolled_date'], searchKeys: ['technician_name', 'mobile_no', 'location', 'notes'] });
+    const filteredTechnicians = filterTableRows(technicians, filters, {
+        dateKeys: ['enrolled_date'],
+        searchKeys: ['technician_name', 'mobile_no', 'location', 'notes']
+    });
 
     const {
         page,
@@ -89,7 +135,23 @@ const Technicians = () => {
             </div>
 
             <div className="card">
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={technicians} dateKeys={['enrolled_date']} searchPlaceholder="Search by name, mobile, or location..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={technicians}
+                    dateKeys={['enrolled_date']}
+                    searchPlaceholder="Search by name, mobile, location, or notes..."
+                    platformOptions={masterData.platforms}
+                    deviceModelOptions={masterData.deviceModels}
+                    simTypeOptions={masterData.simTypes}
+                    simValidityOptions={masterData.simValidities}
+                    showPlatform
+                    showDeviceModel
+                    showSimType
+                    showSimValidity
+                    showPaymentStatus
+                />
 
                 <div className="table-container">
                     <table>
@@ -123,8 +185,8 @@ const Technicians = () => {
                                         <td>{tech.mobile_no}</td>
                                         <td className="truncate-cell" title={tech.location}>{tech.location}</td>
                                         <td>{formatDate(tech.enrolled_date)}</td>
-                                        <td>{tech.device_count || 0}</td>
-                                        <td>{tech.sim_count || 0}</td>
+                                        <td>{tech.available_device_count ?? tech.device_count ?? 0}</td>
+                                        <td>{tech.available_sim_count ?? tech.sim_count ?? 0}</td>
                                         <td>
                                             <span className={`badge ${tech.payment_status === 'Paid' ? 'badge-success' : tech.payment_status === 'Partially Paid' ? 'badge-warning' : 'badge-danger'}`}>
                                                 {tech.payment_status || 'No Payment Required'}
@@ -213,7 +275,7 @@ const Technicians = () => {
                     <p>Are you sure you want to delete this technician?</p>
                 </Modal>
             )}
-            {viewingTechnician && <RecordViewModal isOpen onClose={() => setViewingTechnician(null)} title="Technician Details" record={viewingTechnician} fetchRecord={async (technician) => { const details = (await api.get(`/stock/owner_details.php?owner_type=technician&owner_id=${technician.id}`)).data.data; return { ...technician, ...details }; }} fields={[{ label: 'Technician Name', key: 'technician_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Device Count', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'SIM Count', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Validity</th><th>Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{sim.status}</td></tr>)}</tbody></table></div></>} />}
+            {viewingTechnician && <RecordViewModal isOpen onClose={() => setViewingTechnician(null)} title="Technician Details" record={viewingTechnician} fetchRecord={async (technician) => { const details = (await api.get(`/stock/owner_details.php?owner_type=technician&owner_id=${technician.id}`)).data.data; return { ...technician, ...details }; }} fields={[{ label: 'Technician Name', key: 'technician_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Validity</th><th>Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{sim.status}</td></tr>)}</tbody></table></div></>} />}
         </div>
     );
 };

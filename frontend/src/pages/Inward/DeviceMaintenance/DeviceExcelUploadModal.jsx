@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, Download, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
 import useDeviceModels from '../../../hooks/useDeviceModels';
 import { isFutureDate, parseDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -32,6 +33,7 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
             setSuccessMsg('');
         }
     };
+
     const processExcel = () => {
         if (!file) return;
 
@@ -49,7 +51,9 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false });
 
                 if (jsonData.length === 0) {
-                    setErrors(["Excel file is empty."]);
+                    const msg = "Excel file is empty.";
+                    setErrors([msg]);
+                    showGlobalError(msg);
                     setLoading(false);
                     return;
                 }
@@ -59,14 +63,13 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                 const seenImeis = new Set();
                 const imeiRegex = /^[0-9]{15}$/;
 
-                // Create a map for model name to ID for quick lookup
                 const modelMap = {};
                 models.forEach(m => {
                     modelMap[m.label.toLowerCase()] = m.value;
                 });
 
                 jsonData.forEach((row, index) => {
-                    const rowNum = index + 2; // +2 because 1 is header and 0-indexed array
+                    const rowNum = index + 2;
                     const purchaseDate = row["Purchase Date"];
                     const deviceModelName = row["Device Model"]?.toString().trim();
                     const imeiNo = row["IMEI No"]?.toString().replace(/\D/g, '');
@@ -83,7 +86,6 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                     if (imeiNo) seenImeis.add(imeiNo);
 
                     if (purchaseDate && deviceModelName && modelMap[deviceModelName.toLowerCase()] && imeiNo && imeiRegex.test(imeiNo)) {
-                        // Attempt to parse date (assuming YYYY-MM-DD or MM/DD/YYYY from Excel)
                         let normalizedDate = parsedDate;
                         if (purchaseDate.includes('/')) {
                             const [m, d, y] = purchaseDate.split('/');
@@ -93,19 +95,19 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                         validDevices.push({
                             purchase_date: normalizedDate,
                             device_model_id: modelMap[deviceModelName.toLowerCase()],
-                            imei_no: imeiNo
-                            , notes
+                            imei_no: imeiNo,
+                            notes
                         });
                     }
                 });
 
                 if (validationErrors.length > 0) {
                     setErrors(validationErrors);
+                    showGlobalError(validationErrors, 'Import Validation Errors');
                     setLoading(false);
                     return;
                 }
 
-                // Call backend API
                 const response = await api.post('/devices/create.php', { devices: validDevices });
                 if (response.data.success) {
                     setSuccessMsg("Devices uploaded successfully!");
@@ -113,12 +115,16 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                         onSuccess();
                     }, 1500);
                 } else {
-                    setErrors([response.data.message || 'Failed to upload devices']);
+                    const errMsg = response.data.message || 'Failed to upload devices';
+                    setErrors([errMsg]);
+                    showGlobalError(errMsg);
                 }
 
             } catch (error) {
                 console.error(error);
-                setErrors([error.response?.data?.message || 'Error parsing Excel file or network error']);
+                const errMsg = error.response?.data?.message || 'Error parsing Excel file or network error';
+                setErrors([errMsg]);
+                showGlobalError(errMsg);
             } finally {
                 setLoading(false);
             }
@@ -161,17 +167,6 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading || modelsLoading}
                         />
                     </div>
-
-                    {errors.length > 0 && (
-                        <div className="alert alert-danger" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <AlertCircle size={16} /> <strong>Validation Errors:</strong>
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem' }}>
-                                {errors.map((err, i) => <li key={i}>{err}</li>)}
-                            </ul>
-                        </div>
-                    )}
 
                     {successMsg && (
                         <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

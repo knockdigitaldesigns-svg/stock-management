@@ -4,6 +4,7 @@ import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const AddSimModal = ({ onClose, onSuccess }) => {
     const [simCount, setSimCount] = useState(1);
@@ -13,7 +14,13 @@ const AddSimModal = ({ onClose, onSuccess }) => {
     const [error, setError] = useState('');
 
     useEffect(() => {
-        api.get('/sim_validities/list.php').then((response) => setValidities(response.data.data?.validities || [])).catch(() => setError('Unable to load SIM validities.'));
+        api.get('/sim_validities/list.php')
+            .then((response) => setValidities(response.data.data?.validities || []))
+            .catch(() => {
+                const msg = 'Unable to load SIM validities.';
+                setError(msg);
+                showGlobalError(msg);
+            });
     }, []);
 
     useEffect(() => {
@@ -25,9 +32,10 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                 newSims.push({
                     id: Date.now() + i,
                     purchase_date: firstRow.purchase_date || '',
-                    sim_no: ''
-                    , sim_type: '', sim_validity_id: ''
-                    , notes: ''
+                    sim_no: '',
+                    sim_type: '',
+                    sim_validity_id: '',
+                    notes: ''
                 });
             }
             setSims(newSims);
@@ -75,6 +83,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
         const validationError = validateForm();
         if (validationError) {
             setError(validationError);
+            showGlobalError(validationError);
             return;
         }
 
@@ -83,9 +92,10 @@ const AddSimModal = ({ onClose, onSuccess }) => {
             const payload = {
                 sims: sims.map(s => ({
                     purchase_date: s.purchase_date,
-                    sim_no: s.sim_no
-                    , sim_type: s.sim_type, sim_validity_id: Number(s.sim_validity_id)
-                    , notes: s.notes
+                    sim_no: s.sim_no,
+                    sim_type: s.sim_type,
+                    sim_validity_id: Number(s.sim_validity_id),
+                    notes: s.notes
                 }))
             };
             
@@ -93,10 +103,14 @@ const AddSimModal = ({ onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Failed to save SIMs');
+                const errMsg = response.data.message || 'Failed to save SIMs';
+                setError(errMsg);
+                showGlobalError(errMsg);
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Network error occurred');
+            const errMsg = err.response?.data?.message || 'Network error occurred';
+            setError(errMsg);
+            showGlobalError(errMsg);
         } finally {
             setLoading(false);
         }
@@ -118,8 +132,6 @@ const AddSimModal = ({ onClose, onSuccess }) => {
             }
         >
             <form id="add-sim-form" onSubmit={handleSubmit}>
-                {error && <div className="alert alert-danger">{error}</div>}
-
                 <div className="form-group" style={{ maxWidth: '200px' }}>
                     <label className="form-label">SIM Count</label>
                     <input 

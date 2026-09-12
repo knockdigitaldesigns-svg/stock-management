@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { showGlobalError } from '../context/ErrorContext';
 
 const api = axios.create({
     baseURL: 'http://localhost:8000/api',
@@ -22,6 +23,10 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
     (response) => {
+        // If HTTP 200 response contains success: false and a message, trigger global error modal unless suppressed
+        if (response.data && response.data.success === false && response.data.message && !response.config?.skipGlobalError) {
+            showGlobalError(response.data.message);
+        }
         return response;
     },
     (error) => {
@@ -36,6 +41,7 @@ api.interceptors.response.use(
             localStorage.removeItem('user');
             localStorage.removeItem('permissions');
             window.location.href = '/login';
+            return Promise.reject(error);
         }
 
         if (isForbidden && !isAlreadyOnLoginPage) {
@@ -43,6 +49,12 @@ api.interceptors.response.use(
             if (!current.includes('/settings/') && !current.includes('/stock') && !current.includes('/outward') && !current.includes('/inward') && !current.includes('/dashboard')) {
                 window.location.href = '/dashboard';
             }
+        }
+
+        // Show global error modal for API error responses if not explicitly suppressed
+        const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message;
+        if (errorMessage && !error.config?.skipGlobalError && !isUnauthorized && !isForbidden) {
+            showGlobalError(errorMessage);
         }
 
         return Promise.reject(error);

@@ -4,28 +4,42 @@ import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import { formatDate } from '../../../utils/date';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
+    const getStatusLabel = (item) => item?.status_label || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
     const [formData, setFormData] = useState({
         dealer_name: dealer?.dealer_name || '',
         mobile_no: dealer?.mobile_no || '',
         location: dealer?.location || '',
         enrolled_date: dealer?.enrolled_date || '',
         installation_status: dealer?.installation_status || 'Onsite',
-        notes: dealer?.notes || '', software: dealer?.software || ''
+        notes: dealer?.notes || '',
+        software: dealer?.software || ''
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
+    const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     useEffect(() => {
         let active = true;
         api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer?.id}`)
             .then((response) => {
-                if (active && response.data.success) setAllocatedStock(response.data.data || { devices: [], sims: [] });
+                if (active && response.data.success) {
+                    setAllocatedStock(response.data.data || { devices: [], sims: [] });
+                    if (response.data.data?.summary) {
+                        setStockSummary(response.data.data.summary);
+                    }
+                }
             })
-            .catch(() => { if (active) setError('Unable to load allocated stock.'); })
+            .catch(() => { if (active) triggerError('Unable to load allocated stock.'); })
             .finally(() => { if (active) setStockLoading(false); });
         return () => { active = false; };
     }, [dealer?.id]);
@@ -35,11 +49,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
         setError('');
 
         if (!formData.dealer_name || !formData.mobile_no || !formData.location || !formData.enrolled_date) {
-            return setError('All required fields must be filled.');
+            return triggerError('All required fields must be filled.');
         }
 
         if (!/^[0-9+\s-]{10,15}$/.test(formData.mobile_no)) {
-            return setError('Mobile number is invalid.');
+            return triggerError('Mobile number is invalid.');
         }
 
         setLoading(true);
@@ -52,10 +66,10 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Unable to update dealer.');
+                triggerError(response.data.message || 'Unable to update dealer.');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to update dealer. Please try again.');
+            triggerError(err.response?.data?.message || 'Unable to update dealer. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -77,15 +91,13 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
             }
         >
             <form id="edit-dealer-form" onSubmit={handleSubmit}>
-                {error && <div className="alert alert-danger">{error}</div>}
-
                 <div className="form-group">
                     <label className="form-label">Dealer Name *</label>
                     <input type="text" className="form-control" value={formData.dealer_name} onChange={(e) => setFormData((prev) => ({ ...prev, dealer_name: e.target.value }))} required />
                 </div>
                 <div className="form-group">
                     <label className="form-label">Notes</label>
-                    <textarea className="form-control" rows="3" placeholder="Enter notes..." value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} />
+                    <textarea className="form-control" rows="3" placeholder="Enter notes..." value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: event.target.value }))} />
                 </div>
 
                 <div className="form-group">
@@ -104,8 +116,13 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
                 </div>
 
                 <div className="form-group">
-                    <label className="form-label">Software</label><select className="form-control" value={formData.software} onChange={(e) => setFormData((prev) => ({ ...prev, software: e.target.value }))}><option value="">Select software</option>{SOFTWARE_OPTIONS.map((option) => <option key={option}>{option}</option>)}</select>
-                </div><div className="form-group">
+                    <label className="form-label">Software</label>
+                    <select className="form-control" value={formData.software} onChange={(e) => setFormData((prev) => ({ ...prev, software: e.target.value }))}>
+                        <option value="">Select software</option>
+                        {SOFTWARE_OPTIONS.map((option) => <option key={option}>{option}</option>)}
+                    </select>
+                </div>
+                <div className="form-group">
                     <label className="form-label">Installation Status *</label>
                     <select className="form-control" value={formData.installation_status} onChange={(e) => setFormData((prev) => ({ ...prev, installation_status: e.target.value }))} required>
                         <option value="Onsite">Onsite</option>
@@ -118,10 +135,10 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
                 <h4>Dealer Information</h4>
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={dealer?.total_amount > 0 ? dealer?.payment_status : 'No Payment Required'} readOnly /></div>
                 <hr />
-                <h4>Allocated Devices ({allocatedStock.devices.length})</h4>
-                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.allocation_id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{item.payment_status}</td></tr>)}</tbody></table></div>}
-                <h4>Allocated SIMs ({allocatedStock.sims.length})</h4>
-                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>Type</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{item.payment_status}</td></tr>)}</tbody></table></div>}
+                <h4>Allocated Devices (Total: {stockSummary.total_device || 0}, Used: {stockSummary.used_device || 0}, Available: {stockSummary.available_device || 0})</h4>
+                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.allocation_id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
+                <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
+                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>Type</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
             </form>
         </Modal>
     );

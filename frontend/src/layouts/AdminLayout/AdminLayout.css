@@ -141,3 +141,132 @@
 .content-area {
     /* Area below topbar */
 }
+
+.customer-step-card {
+    margin-bottom: 20px;
+}
+
+.customer-stepper {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 12px;
+}
+
+.customer-step {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    white-space: nowrap;
+    font-size: 15px;
+}
+
+.customer-step.active {
+    color: #111827;
+    font-weight: 600;
+}
+
+.customer-step.completed {
+    color: #6b7280;
+}
+
+.customer-step.disabled {
+    color: #9ca3af;
+}
+
+.step-circle {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 50%;
+    border: 1px solid #d1d5db;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+}
+
+.customer-step.active .step-circle,
+.customer-step.completed .step-circle {
+    background: #111827;
+    border-color: #111827;
+    color: #ffffff;
+}
+
+.step-line {
+    flex: 1;
+    height: 1px;
+    background: #e5e7eb;
+    min-width: 25px;
+}
+
+.step-line.active-line {
+    background: #111827;
+}
+
+.customer-section-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+}
+
+.customer-section-title h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.customer-vehicle-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px 24px;
+}
+
+.form-help {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.customer-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.customer-form-actions .btn {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .customer-stepper {
+        overflow-x: auto;
+        padding-bottom: 5px;
+    }
+}
+
+@media (max-width: 600px) {
+    .customer-vehicle-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .customer-form-actions {
+        flex-wrap: wrap;
+        justify-content: stretch;
+    }
+
+    .customer-form-actions .btn {
+        flex: 1;
+        min-width: 110px;
+    }
+}

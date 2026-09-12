@@ -181,6 +181,27 @@ CREATE TABLE IF NOT EXISTS stock_transactions (
     FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS stock_transfers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    allocation_id INT DEFAULT NULL,
+    device_id INT DEFAULT NULL,
+    sim_id INT DEFAULT NULL,
+    from_owner_type ENUM('dealer', 'technician') NOT NULL,
+    from_owner_id INT NOT NULL,
+    from_owner_name VARCHAR(150) NOT NULL,
+    to_owner_type ENUM('dealer', 'technician') NOT NULL,
+    to_owner_id INT NOT NULL,
+    to_owner_name VARCHAR(150) NOT NULL,
+    transfer_date DATE NOT NULL,
+    transferred_by_user_id INT DEFAULT NULL,
+    previous_status VARCHAR(50) DEFAULT 'Allocated',
+    new_status VARCHAR(50) DEFAULT 'Allocated',
+    notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
+    FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
+);
+
 -- =====================================================
 -- PERMISSIONS SEED
 -- =====================================================
@@ -214,6 +235,13 @@ VALUES
     ('stock.view', 'Stock Management View', 'stock', 'VIEW'),
     ('stock.update', 'Stock Management Update', 'stock', 'UPDATE'),
     ('stock.export', 'Stock Management Export', 'stock', 'EXPORT'),
+    ('stock_transfer.view', 'Stock Transfer View', 'stock_transfer', 'VIEW'),
+    ('stock_transfer.add', 'Stock Transfer Add', 'stock_transfer', 'ADD'),
+    ('customer_reports.view', 'Customer Reports View', 'customer_reports', 'VIEW'),
+    ('customer_renewals.view', 'Customer Renewals View', 'customer_renewals', 'VIEW'),
+    ('customer_renewals.edit', 'Customer Renewals Edit', 'customer_renewals', 'EDIT'),
+    ('customer_renewals.renew', 'Customer Renewals Renew', 'customer_renewals', 'RENEW'),
+    ('customer_renewals.history', 'Customer Renewals History', 'customer_renewals', 'HISTORY'),
     ('roles.view', 'Roles View', 'roles', 'VIEW'),
     ('roles.add', 'Roles Add', 'roles', 'ADD'),
     ('roles.edit', 'Roles Edit', 'roles', 'EDIT'),
@@ -301,3 +329,432 @@ VALUES
     ('24V Relay')
 ON DUPLICATE KEY UPDATE
     device_type = VALUES(device_type);
+
+-- platform add
+
+CREATE TABLE IF NOT EXISTS platforms (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    platform_name VARCHAR(100) NOT NULL,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_platform_name (platform_name)
+);
+
+INSERT INTO platforms (platform_name, status)
+VALUES
+('Tracoo', 'Active'),
+('Eagle India', 'Active'),
+('Navilap', 'Active'),
+('Oneqlick', 'Active'),
+('Trackzee', 'Active'),
+('Gps Monitor', 'Active');
+
+-- vehicle types 
+
+CREATE TABLE IF NOT EXISTS vehicle_types (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    vehicle_type VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_vehicle_type (vehicle_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO vehicle_types (vehicle_type)
+VALUES
+('Car'),
+('Bike'),
+('Truck'),
+('Bus'),
+('Van'),
+('Auto'),
+('Lorry');
+ALTER TABLE vehicle_types
+ADD COLUMN status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active'
+AFTER vehicle_type;
+
+-- lead closure 
+
+CREATE TABLE IF NOT EXISTS lead_closures (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lead_closure_name VARCHAR(100) NOT NULL,
+    mobile_no VARCHAR(15) NOT NULL,
+    location VARCHAR(150) NOT NULL,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_lead_closure_mobile (mobile_no),
+    UNIQUE KEY uq_lead_closure_name (lead_closure_name)
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO permissions
+(permission_key, permission_name, module, action)
+VALUES
+('lead_closures.view', 'View Lead Closures', 'Lead Closures', 'view'),
+('lead_closures.add', 'Add Lead Closure', 'Lead Closures', 'add'),
+('lead_closures.edit', 'Edit Lead Closure', 'Lead Closures', 'edit'),
+('lead_closures.delete', 'Delete Lead Closure', 'Lead Closures', 'delete');
+
+-- sale amount
+
+CREATE TABLE IF NOT EXISTS sale_amounts (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    sale_amount DECIMAL(12,2) NOT NULL,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_sale_amount (sale_amount)
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO permissions
+(permission_key, permission_name, module, action)
+VALUES
+('sale_amounts.view', 'View Sale Amounts', 'Sale Amounts', 'view'),
+('sale_amounts.add', 'Add Sale Amount', 'Sale Amounts', 'add'),
+('sale_amounts.edit', 'Edit Sale Amount', 'Sale Amounts', 'edit'),
+('sale_amounts.delete', 'Delete Sale Amount', 'Sale Amounts', 'delete');
+
+-- =========================================================
+-- CUSTOMER MANAGEMENT
+-- FINAL DATABASE STRUCTURE
+-- =========================================================
+
+
+-- =========================================================
+-- 1. CUSTOMERS
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customers (
+    id INT NOT NULL AUTO_INCREMENT,
+
+    platform_id INT NOT NULL,
+
+    username VARCHAR(100) NOT NULL,
+    primary_mobile_no VARCHAR(15) NOT NULL,
+    secondary_mobile_no VARCHAR(15) DEFAULT NULL,
+    email VARCHAR(150) DEFAULT NULL,
+
+    location VARCHAR(150) NOT NULL,
+    pincode VARCHAR(10) NOT NULL,
+
+    status ENUM('Active', 'Inactive')
+        NOT NULL DEFAULT 'Active',
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    UNIQUE KEY uq_customer_platform_username (platform_id, username),
+    UNIQUE KEY uq_customer_primary_mobile (primary_mobile_no),
+
+    INDEX idx_customer_platform (platform_id),
+
+    CONSTRAINT fk_customer_platform
+        FOREIGN KEY (platform_id)
+        REFERENCES platforms(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+
+-- =========================================================
+-- 2. CUSTOMER VEHICLE / DEVICE / SIM
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customer_vehicle_details (
+    id INT NOT NULL AUTO_INCREMENT,
+
+    customer_id INT NOT NULL,
+
+    vehicle_no VARCHAR(30) NOT NULL,
+    vehicle_type_id INT NOT NULL,
+
+    device_id INT DEFAULT NULL,
+    device_model_id INT DEFAULT NULL,
+
+    imei_no VARCHAR(15) NOT NULL,
+
+    sim_id_1 INT DEFAULT NULL,
+    sim_no_1 VARCHAR(13) NOT NULL,
+
+    sim_id_2 INT DEFAULT NULL,
+    sim_no_2 VARCHAR(13) DEFAULT NULL,
+
+    validity_months INT NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    UNIQUE KEY uq_customer_vehicle_no (vehicle_no),
+    UNIQUE KEY uq_customer_imei (imei_no),
+
+    UNIQUE KEY uq_customer_device_id (device_id),
+
+    UNIQUE KEY uq_customer_sim_id_1 (sim_id_1),
+    UNIQUE KEY uq_customer_sim_id_2 (sim_id_2),
+
+    UNIQUE KEY uq_customer_sim_no_1 (sim_no_1),
+    UNIQUE KEY uq_customer_sim_no_2 (sim_no_2),
+
+    INDEX idx_customer_vehicle_customer (customer_id),
+    INDEX idx_customer_vehicle_type (vehicle_type_id),
+    INDEX idx_customer_vehicle_device (device_id),
+    INDEX idx_customer_vehicle_model (device_model_id),
+    INDEX idx_customer_vehicle_sim1 (sim_id_1),
+    INDEX idx_customer_vehicle_sim2 (sim_id_2),
+
+    CONSTRAINT fk_customer_vehicle_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+
+-- =========================================================
+-- 3. CUSTOMER INSTALLATION
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customer_installations (
+    id INT NOT NULL AUTO_INCREMENT,
+
+    customer_id INT NOT NULL,
+
+    installation_person_type
+        ENUM('Technician', 'Dealer')
+        NOT NULL,
+
+    installation_person_id INT NOT NULL,
+
+    lead_closure_id INT UNSIGNED NOT NULL,
+
+    installation_date DATE NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    UNIQUE KEY uq_customer_installation_customer
+        (customer_id),
+
+    INDEX idx_installation_person_type
+        (installation_person_type),
+
+    INDEX idx_installation_person_id
+        (installation_person_id),
+
+    INDEX idx_installation_lead_closure
+        (lead_closure_id),
+
+    CONSTRAINT fk_installation_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_installation_lead_closure
+        FOREIGN KEY (lead_closure_id)
+        REFERENCES lead_closures(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+
+-- =========================================================
+-- 4. CUSTOMER PAYMENT
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customer_payments (
+    id INT NOT NULL AUTO_INCREMENT,
+
+    customer_id INT NOT NULL,
+
+    total_sale_amount DECIMAL(12,2) NOT NULL,
+
+    transaction_id VARCHAR(6) DEFAULT NULL,
+
+    payment_mode VARCHAR(50) DEFAULT NULL,
+
+    device_charge DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    software_charge DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    technician_charge DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    sim_charge DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    courier_charge DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    total_amount DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    amount_paid DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    amount_pending DECIMAL(12,2)
+        NOT NULL DEFAULT 0.00,
+
+    payment_status ENUM(
+        'Paid',
+        'Not Paid',
+        'Partially Paid',
+        'Pending'
+    ) NOT NULL DEFAULT 'Pending',
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    UNIQUE KEY uq_customer_payment_customer
+        (customer_id),
+
+    INDEX idx_customer_payment_status
+        (payment_status),
+
+    CONSTRAINT fk_customer_payment_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+
+-- =========================================================
+-- 5. CUSTOMER RENEWAL
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customer_renewals (
+    id INT NOT NULL AUTO_INCREMENT,
+
+    customer_id INT NOT NULL,
+
+    installation_date DATE NOT NULL,
+
+    next_renewal_date DATE DEFAULT NULL,
+
+    validity_months INT NOT NULL,
+
+    sim_status ENUM(
+        'Active',
+        'Deactive',
+        'Expired',
+        'Safe Custody'
+    ) NOT NULL DEFAULT 'Active',
+
+    expired_to_safe_days INT DEFAULT NULL,
+
+    safe_to_deactive_days INT DEFAULT NULL,
+
+    last_renewed_date DATE DEFAULT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    UNIQUE KEY uq_customer_renewal_customer
+        (customer_id),
+
+    INDEX idx_customer_next_renewal
+        (next_renewal_date),
+
+    INDEX idx_customer_sim_status
+        (sim_status),
+
+    CONSTRAINT fk_customer_renewal_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+
+-- =========================================================
+-- 6. CUSTOMER HISTORY
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS customer_history (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+
+    customer_id INT DEFAULT NULL,
+
+    module VARCHAR(100) NOT NULL,
+
+    action ENUM(
+        'Create',
+        'Edit',
+        'Delete',
+        'Renew',
+        'Deactivate',
+        'Safe Custody',
+        'Reactivate'
+    ) NOT NULL,
+
+    field_changed VARCHAR(150) DEFAULT NULL,
+
+    old_value TEXT DEFAULT NULL,
+    new_value TEXT DEFAULT NULL,
+
+    changed_by_user_id INT DEFAULT NULL,
+
+    changed_by_name VARCHAR(150) DEFAULT NULL,
+
+    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+
+    INDEX idx_history_customer
+        (customer_id),
+
+    INDEX idx_history_action
+        (action),
+
+    INDEX idx_history_changed_at
+        (changed_at)
+
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;

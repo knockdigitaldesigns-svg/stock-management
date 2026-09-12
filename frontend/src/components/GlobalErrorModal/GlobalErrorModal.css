@@ -1,0 +1,131 @@
+.global-error-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(15, 23, 42, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999999;
+    backdrop-filter: blur(2px);
+    padding: 1rem;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.global-error-modal {
+    background-color: #ffffff;
+    border-radius: 0.75rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    width: 480px;
+    max-width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #fee2e2;
+    z-index: 1000000;
+    animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.global-error-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background-color: #fef2f2;
+    border-bottom: 1px solid #fee2e2;
+}
+
+.global-error-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.global-error-title h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #991b1b;
+}
+
+.error-icon {
+    color: #ef4444;
+    flex-shrink: 0;
+}
+
+.global-error-close-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #991b1b;
+    padding: 0.25rem;
+    border-radius: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.global-error-close-btn:hover {
+    background-color: #fee2e2;
+}
+
+.global-error-body {
+    padding: 1.25rem 1.5rem;
+    overflow-y: auto;
+    max-height: 60vh;
+    color: #1e293b;
+}
+
+.global-error-text {
+    margin: 0;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: #334155;
+    word-break: break-word;
+    white-space: pre-line;
+}
+
+.global-error-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.9375rem;
+    color: #334155;
+}
+
+.global-error-list li {
+    margin-bottom: 0.5rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.global-error-list li:last-child {
+    margin-bottom: 0;
+}
+
+.global-error-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.875rem 1.25rem;
+    border-top: 1px solid #e2e8f0;
+    background-color: #f8fafc;
+}
+
+.global-error-ok-btn {
+    min-width: 90px;
+    padding: 0.5rem 1.25rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes popIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}

@@ -4,17 +4,23 @@ import useDeviceModels from '../../../hooks/useDeviceModels';
 import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditDeviceModal = ({ device, onClose, onSuccess }) => {
     const { models, loading: modelsLoading } = useDeviceModels();
     const [formData, setFormData] = useState({
         purchase_date: device?.purchase_date || '',
         device_model_id: device?.device_model_id || '',
-        imei_no: device?.imei_no || ''
-        , notes: device?.notes || ''
+        imei_no: device?.imei_no || '',
+        notes: device?.notes || ''
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     const modelOptions = useMemo(() =>
         models.map((model) => ({ value: model.value, label: model.label })),
@@ -25,9 +31,9 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
         event.preventDefault();
         setError('');
 
-        if (!formData.purchase_date) return setError('Purchase date is required.');
-        if (!formData.device_model_id) return setError('Device model is required.');
-        if (!/^[0-9]{15}$/.test(formData.imei_no)) return setError('IMEI must contain exactly 15 digits.');
+        if (!formData.purchase_date) return triggerError('Purchase date is required.');
+        if (!formData.device_model_id) return triggerError('Device model is required.');
+        if (!/^[0-9]{15}$/.test(formData.imei_no)) return triggerError('IMEI must contain exactly 15 digits.');
 
         setLoading(true);
         try {
@@ -35,17 +41,17 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
                 id: device.id,
                 purchase_date: formData.purchase_date,
                 device_model_id: Number(formData.device_model_id),
-                imei_no: formData.imei_no
-                , notes: formData.notes
+                imei_no: formData.imei_no,
+                notes: formData.notes
             });
 
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Unable to update device.');
+                triggerError(response.data.message || 'Unable to update device.');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to update device. Please try again.');
+            triggerError(err.response?.data?.message || 'Unable to update device. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -67,8 +73,6 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
             }
         >
             <form id="edit-device-form" onSubmit={handleSubmit}>
-                {error && <div className="alert alert-danger">{error}</div>}
-
                 <div className="form-group">
                     <label className="form-label">Purchase Date *</label>
                     <DateInput

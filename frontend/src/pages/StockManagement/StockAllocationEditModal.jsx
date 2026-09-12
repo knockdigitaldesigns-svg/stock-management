@@ -4,6 +4,7 @@ import Modal from '../../components/Modal/Modal';
 import SearchableDropdown from '../../components/SearchableDropdown/SearchableDropdown';
 import { softwareDropdownOptions } from '../../constants/software';
 import { formatDate } from '../../utils/date';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
     const [allocation, setAllocation] = useState(null);
@@ -12,6 +13,11 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     useEffect(() => {
         Promise.all([
@@ -26,7 +32,7 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
             const dealers = (dealersResponse.data.data?.dealers || []).map((dealer) => ({ value: `dealer:${dealer.id}`, label: `Dealer — ${dealer.dealer_name}` }));
             const technicians = (techniciansResponse.data.data?.technicians || []).map((technician) => ({ value: `technician:${technician.id}`, label: `Technician — ${technician.technician_name}` }));
             setOwnerOptions([...dealers, ...technicians]);
-        }).catch((loadError) => setError(loadError.response?.data?.message || loadError.message || 'Unable to load allocation.')).finally(() => setLoading(false));
+        }).catch((loadError) => triggerError(loadError.response?.data?.message || loadError.message || 'Unable to load allocation.')).finally(() => setLoading(false));
     }, [allocationId]);
 
     const update = (key, value) => setForm((previous) => ({ ...previous, [key]: value }));
@@ -34,14 +40,14 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
     const status = Number(form.total_amount || 0) <= 0 ? 'No Payment Required' : Number(form.amount_paid || 0) <= 0 ? 'Not Paid' : pending <= 0 ? 'Paid' : 'Partially Paid';
 
     const save = async () => {
-        if (Number(form.amount_paid || 0) > Number(form.total_amount || 0)) return setError('Amount paid cannot exceed total amount.');
+        if (Number(form.amount_paid || 0) > Number(form.total_amount || 0)) return triggerError('Amount paid cannot exceed total amount.');
         setSaving(true); setError('');
         try {
             const [ownerType, ownerId] = String(form.owner_id).includes(':') ? String(form.owner_id).split(':') : [form.owner_type, form.owner_id];
             const response = await api.post('/stock/allocation_update.php', { allocation_id: allocationId, owner_type: form.owner_type || ownerType, owner_id: Number(ownerId), allocation_type: form.allocation_type, allocation_date: form.allocation_date, software: form.software, total_amount: Number(form.total_amount || 0), amount_paid: Number(form.amount_paid || 0), payment_mode: form.payment_mode, notes: form.notes });
             if (!response.data.success) throw new Error(response.data.message);
             onSuccess();
-        } catch (saveError) { setError(saveError.response?.data?.message || saveError.message || 'Unable to update allocation.'); } finally { setSaving(false); }
+        } catch (saveError) { triggerError(saveError.response?.data?.message || saveError.message || 'Unable to update allocation.'); } finally { setSaving(false); }
     };
 
     const ownerValue = form.owner_type && form.owner_id ? `${form.owner_type}:${form.owner_id}` : '';

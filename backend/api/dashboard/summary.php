@@ -68,10 +68,47 @@ if ($techCount && $techCount->num_rows > 0) {
     $metrics['total_technicians'] = (int) $techCount->fetch_assoc()['count'];
 }
 
-$pendingPayments = $conn->query("SELECT COUNT(*) as count FROM stock_allocations WHERE payment_status != 'Paid'");
-if ($pendingPayments && $pendingPayments->num_rows > 0) {
-    $metrics['pending_payments'] = (int) $pendingPayments->fetch_assoc()['count'];
+$pendingPayments = 0;
+
+/*
+|--------------------------------------------------------------------------
+| Customer Pending Payments
+|--------------------------------------------------------------------------
+*/
+
+$customerPendingResult = $conn->query("
+    SELECT COUNT(*) AS count
+    FROM customer_payments
+    WHERE payment_status IN (
+        'Pending',
+        'Not Paid',
+        'Partially Paid'
+    )
+");
+
+if ($customerPendingResult && $customerPendingResult->num_rows > 0) {
+    $pendingPayments += (int) $customerPendingResult
+        ->fetch_assoc()['count'];
 }
+
+/*
+|--------------------------------------------------------------------------
+| Dealer + Technician Pending Payments
+|--------------------------------------------------------------------------
+*/
+
+$allocationPendingResult = $conn->query("
+    SELECT COUNT(*) AS count
+    FROM stock_allocations
+    WHERE payment_status <> 'Paid'
+");
+
+if ($allocationPendingResult && $allocationPendingResult->num_rows > 0) {
+    $pendingPayments += (int) $allocationPendingResult
+        ->fetch_assoc()['count'];
+}
+
+$metrics['pending_payments'] = $pendingPayments;
 
 $recentAllocations = [];
 $recentSql = "

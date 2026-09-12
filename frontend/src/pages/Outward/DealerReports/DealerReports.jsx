@@ -177,7 +177,17 @@ const DealerReports = () => {
                         />
                     </div>
                 </div>
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={reportData} dateKeys={['allocation_date']} {...(currentTab.type === 'SIM' ? { simKey: 'sim_type' } : { deviceKey: 'model_name' })} searchPlaceholder="Search report results..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={reportData}
+                    dateKeys={['allocation_date']}
+                    showSimType={currentTab.type === 'SIM'}
+                    showSimValidity={currentTab.type === 'SIM'}
+                    showDeviceModel={currentTab.type !== 'SIM'}
+                    searchPlaceholder="Search report results..."
+                />
             </div>
 
             <div className="card">

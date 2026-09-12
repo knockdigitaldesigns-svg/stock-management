@@ -2,6 +2,7 @@ import { useState } from 'react';
 import api from '../../../services/api';
 import DateInput from '../../../components/DateInput';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const AddTechnicianModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -16,6 +17,11 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
@@ -26,7 +32,7 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
         setError('');
 
         if (!formData.technician_name || !formData.mobile_no || !formData.location || !formData.enrolled_date) {
-            setError('All fields are required');
+            triggerError('All fields are required');
             return;
         }
 
@@ -36,10 +42,10 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Failed to save technician');
+                triggerError(response.data.message || 'Failed to save technician');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Network error occurred');
+            triggerError(err.response?.data?.message || 'Network error occurred');
         } finally {
             setLoading(false);
         }
@@ -55,8 +61,6 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
                 
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
-                        {error && <div className="alert alert-danger">{error}</div>}
-
                         <div className="form-group">
                             <label className="form-label">Technician Name *</label>
                             <input 

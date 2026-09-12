@@ -3,6 +3,7 @@ import api from '../../../services/api';
 import DateInput from '../../../components/DateInput';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const AddDealerModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -13,10 +14,16 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         location: '',
         enrolled_date: '',
         installation_status: 'Onsite',
-        notes: '', software: ''
+        notes: '',
+        software: ''
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -28,7 +35,7 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         setError('');
 
         if (!formData.dealer_name || !formData.mobile_no || !formData.location || !formData.enrolled_date) {
-            setError('All fields are required');
+            triggerError('All fields are required');
             return;
         }
 
@@ -38,10 +45,10 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Failed to save dealer');
+                triggerError(response.data.message || 'Failed to save dealer');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Network error occurred');
+            triggerError(err.response?.data?.message || 'Network error occurred');
         } finally {
             setLoading(false);
         }
@@ -57,8 +64,6 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                 
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
-                        {error && <div className="alert alert-danger">{error}</div>}
-
                         <div className="form-group">
                             <label className="form-label">Dealer Name *</label>
                             <input 
@@ -112,8 +117,13 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                         </div>
 
                         <div className="form-group">
-                            <label className="form-label">Software</label><select name="software" className="form-control" value={formData.software} onChange={handleChange}><option value="">Select software</option>{SOFTWARE_OPTIONS.map((option) => <option key={option}>{option}</option>)}</select>
-                        </div><div className="form-group">
+                            <label className="form-label">Software</label>
+                            <select name="software" className="form-control" value={formData.software} onChange={handleChange}>
+                                <option value="">Select software</option>
+                                {SOFTWARE_OPTIONS.map((option) => <option key={option}>{option}</option>)}
+                            </select>
+                        </div>
+                        <div className="form-group">
                             <label className="form-label">Installation Status *</label>
                             <select 
                                 name="installation_status"
