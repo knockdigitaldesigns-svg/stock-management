@@ -8,6 +8,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const DeviceTypesPage = () => {
     const { hasPermission } = useAuth();
@@ -23,13 +24,18 @@ const DeviceTypesPage = () => {
     const [saving, setSaving] = useState(false);
     const [viewingType, setViewingType] = useState(null);
 
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
+
     const fetchDeviceTypes = async () => {
         setLoading(true);
         try {
             const response = await api.get('/device_types/list.php');
             if (response.data.success) setDeviceTypes(response.data.data?.device_types || []);
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to load device types.');
+            triggerError(err.response?.data?.message || 'Unable to load device types.');
         } finally {
             setLoading(false);
         }
@@ -49,7 +55,7 @@ const DeviceTypesPage = () => {
     const save = async () => {
         const deviceType = value.trim();
         if (!deviceType) {
-            setError('Device type is required.');
+            triggerError('Device type is required.');
             return;
         }
         setSaving(true);
@@ -59,7 +65,7 @@ const DeviceTypesPage = () => {
                 ? await api.post('/device_types/update.php', { id: modal.id, device_type: deviceType })
                 : await api.post('/device_types/create.php', { device_type: deviceType });
             if (!response.data.success) {
-                setError(response.data.message || 'Unable to save device type.');
+                triggerError(response.data.message || 'Unable to save device type.');
                 return;
             }
             setShowModal(false);
@@ -68,7 +74,7 @@ const DeviceTypesPage = () => {
             setMessage(response.data.message);
             await fetchDeviceTypes();
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to save device type.');
+            triggerError(err.response?.data?.message || 'Unable to save device type.');
         } finally {
             setSaving(false);
         }
@@ -78,14 +84,14 @@ const DeviceTypesPage = () => {
         try {
             const response = await api.post('/device_types/delete.php', { id: deleteTarget.id });
             if (!response.data.success) {
-                setError(response.data.message || 'Unable to delete device type.');
+                triggerError(response.data.message || 'Unable to delete device type.');
                 return;
             }
             setDeleteTarget(null);
             setMessage(response.data.message);
             await fetchDeviceTypes();
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to delete device type.');
+            triggerError(err.response?.data?.message || 'Unable to delete device type.');
         }
     };
 

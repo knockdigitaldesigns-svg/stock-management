@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -11,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('sims.add');
 
 $data = json_decode(file_get_contents("php://input"));
@@ -75,6 +76,13 @@ try {
             if ($stmt->errno === 1062) throw new Exception("Row $rowNum: SIM number already exists.");
             throw new Exception("Row $rowNum: Database error - " . $stmt->error);
         }
+        writeCreatedFields($conn, $conn->insert_id, 'SIM', [
+            'purchase_date' => $sim->purchase_date,
+            'sim_no' => $sim->sim_no,
+            'sim_type' => $simType,
+            'sim_validity_id' => $simValidityId,
+            'notes' => $notes
+        ], $currentUser);
     }
     
     $conn->commit();

@@ -23,6 +23,7 @@ const SimMaintenance = () => {
     const [editingSim, setEditingSim] = useState(null);
     const [viewingSim, setViewingSim] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
+    const [validities, setValidities] = useState([]);
 
     const fetchSims = async () => {
         setLoading(true);
@@ -35,6 +36,19 @@ const SimMaintenance = () => {
             console.error('Failed to fetch sims', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchValidities = async () => {
+        try {
+            const res = await api.get('/sim_validities/list.php').catch(() => ({ data: { success: true, data: { validities: [] } } }));
+            const rawValidities = res.data?.data?.validities || [];
+            const list = rawValidities
+                .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
+                .map((v) => `${v.months} Months`);
+            setValidities(list);
+        } catch (err) {
+            console.error('Failed to load SIM validities', err);
         }
     };
 
@@ -56,9 +70,10 @@ const SimMaintenance = () => {
 
     useEffect(() => {
         fetchSims();
+        fetchValidities();
     }, []);
 
-    const filteredSims = filterTableRows(sims, filters, { dateKeys: ['purchase_date'], simKey: 'sim_type', searchKeys: ['sim_no', 'sim_type', 'notes'] });
+    const filteredSims = filterTableRows(sims, filters, { dateKeys: ['purchase_date'], searchKeys: ['sim_no', 'sim_type', 'notes'] });
 
     const {
         page,
@@ -93,7 +108,19 @@ const SimMaintenance = () => {
             </div>
 
             <div className="card">
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={sims} dateKeys={['purchase_date']} simKey="sim_type" searchPlaceholder="Search by SIM number or type..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={sims}
+                    dateKeys={['purchase_date']}
+                    showSimType
+                    showSimValidity
+                    simValidityOptions={validities}
+                    showStatus
+                    statusOptions={['Available', 'Allocated', 'Used']}
+                    searchPlaceholder="Search by SIM number, type, or notes..."
+                />
 
                 <div className="table-container">
                     <table>

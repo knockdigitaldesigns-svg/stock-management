@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import useModalScrollLock from '../../hooks/useModalScrollLock';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const UsersPage = () => {
     const [users, setUsers] = useState([]);
@@ -22,6 +23,11 @@ const UsersPage = () => {
     const [editingUser, setEditingUser] = useState(null);
     const [error, setError] = useState('');
     const [employeeNameError, setEmployeeNameError] = useState('');
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     const normalizeEmployeeName = (value) => value.trim().replace(/\s+/g, '').toLowerCase();
     const validateEmployeeName = (value) => {
@@ -74,15 +80,15 @@ const UsersPage = () => {
         setError('');
         if (!validateEmployeeName(form.employee_name)) return;
         if (!form.employee_name || !form.mobile_no || !form.role_id || (!editingUser && !form.password)) {
-            setError('Employee name, mobile number, role and password are required');
+            triggerError('Employee name, mobile number, role and password are required');
             return;
         }
         if (form.password.length < 8) {
-            setError('Password must be at least 8 characters');
+            triggerError('Password must be at least 8 characters');
             return;
         }
         if (form.password !== form.confirm_password) {
-            setError('Passwords do not match');
+            triggerError('Passwords do not match');
             return;
         }
 
@@ -102,12 +108,16 @@ const UsersPage = () => {
                 setForm({ employee_name: '', mobile_no: '', role_id: '', password: '', confirm_password: '', status: 'active' });
                 fetchUsers();
             } else {
-                setError(response.data.message || 'Unable to create user');
+                triggerError(response.data.message || 'Unable to create user');
             }
         } catch (err) {
             const message = err.response?.data?.message || (editingUser ? 'Unable to update user' : 'Unable to create user');
-            if (err.response?.status === 409 || message.toLowerCase().includes('username') || message.toLowerCase().includes('employee')) setEmployeeNameError(message);
-            else setError(message);
+            if (err.response?.status === 409 || message.toLowerCase().includes('username') || message.toLowerCase().includes('employee')) {
+                setEmployeeNameError(message);
+                showGlobalError(message);
+            } else {
+                triggerError(message);
+            }
         }
     };
 

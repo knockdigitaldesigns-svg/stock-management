@@ -5,6 +5,7 @@ import useDeviceModels from '../../../hooks/useDeviceModels';
 import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const AddDeviceModal = ({ onClose, onSuccess }) => {
     const { models, loading: modelsLoading } = useDeviceModels();
@@ -14,19 +15,17 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
     const [error, setError] = useState('');
 
     useEffect(() => {
-        // Automatically generate rows based on count
         const count = parseInt(deviceCount) || 1;
         if (count > devices.length) {
             const newDevices = [...devices];
             for (let i = devices.length; i < count; i++) {
-                // Pre-fill date and model from the first row if available
                 const firstRow = devices[0] || {};
                 newDevices.push({
                     id: Date.now() + i,
                     purchase_date: firstRow.purchase_date || '',
                     device_model_id: firstRow.device_model_id || '',
-                    imei_no: ''
-                    , notes: ''
+                    imei_no: '',
+                    notes: ''
                 });
             }
             setDevices(newDevices);
@@ -73,18 +72,18 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
         const validationError = validateForm();
         if (validationError) {
             setError(validationError);
+            showGlobalError(validationError);
             return;
         }
 
         setLoading(true);
         try {
-            // Placeholder API call
             const payload = {
                 devices: devices.map(d => ({
                     purchase_date: d.purchase_date,
                     device_model_id: d.device_model_id,
-                    imei_no: d.imei_no
-                    , notes: d.notes
+                    imei_no: d.imei_no,
+                    notes: d.notes
                 }))
             };
             
@@ -92,10 +91,14 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Failed to save devices');
+                const errMsg = response.data.message || 'Failed to save devices';
+                setError(errMsg);
+                showGlobalError(errMsg);
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Network error occurred');
+            const errMsg = err.response?.data?.message || 'Network error occurred';
+            setError(errMsg);
+            showGlobalError(errMsg);
         } finally {
             setLoading(false);
         }
@@ -117,8 +120,6 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
             }
         >
             <form id="add-device-form" onSubmit={handleSubmit}>
-                {error && <div className="alert alert-danger">{error}</div>}
-
                 <div className="form-group" style={{ maxWidth: '200px' }}>
                     <label className="form-label">Device Count</label>
                     <input 

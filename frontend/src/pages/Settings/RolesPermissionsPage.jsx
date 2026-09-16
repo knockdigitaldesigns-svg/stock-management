@@ -10,30 +10,49 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../compon
 import useModalScrollLock from '../../hooks/useModalScrollLock';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 
-const defaultPermissionMatrix = [
-    { module: 'Dashboard', key: 'dashboard.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Device Maintenance', key: 'devices.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'SIM Maintenance', key: 'sims.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Inward Reports', key: 'inward_reports.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Dealer', key: 'dealers.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Technician', key: 'technicians.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Outward Reports', key: 'outward_reports.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Stock Management', key: 'stock.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Users', key: 'users.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Roles', key: 'roles.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Permissions', key: 'permissions.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Device Alert', key: 'device_alert.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Device Types', key: 'device_types.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'SIM Validity', key: 'sim_validity.view', view: false, add: false, edit: false, delete: false, export: false, update: false },
-    { module: 'Change Password', key: 'password.change', view: false, add: false, edit: false, delete: false, export: false, update: false }
-];
+const MODULE_LABELS = {
+    dashboard: 'Dashboard', devices: 'Device Maintenance', sims: 'SIM Maintenance', inward_reports: 'Inward Reports',
+    dealers: 'Dealer', technicians: 'Technician', outward_reports: 'Outward Reports', stock: 'Stock Management',
+    stock_transfer: 'Stock Transfer', device_alert: 'Device Alert', customers: 'Customer Details',
+    customer_reports: 'Customer Reports', customer_renewals: 'Renewals', roles: 'Roles', permissions: 'Permissions',
+    users: 'Users', history: 'History', password: 'Change Password', device_types: 'Device Types', sim_validity: 'SIM Validity',
+    platforms: 'Platform', vehicle_types: 'Vehicle Types', lead_closures: 'Lead Closure', sale_amounts: 'Sale Amount', support: 'Support'
+};
+const MODULE_ORDER = ['dashboard', 'history', 'support', 'devices', 'sims', 'inward_reports', 'dealers', 'technicians', 'outward_reports', 'stock', 'stock_transfer', 'device_alert', 'customers', 'customer_reports', 'customer_renewals', 'roles', 'permissions', 'users', 'password', 'device_types', 'sim_validity', 'platforms', 'vehicle_types', 'lead_closures', 'sale_amounts'];
+const ACTION_COLUMNS = ['view', 'add', 'edit', 'delete', 'export', 'update'];
+const buildPermissionMatrix = (permissions, assigned = []) => {
+    const groups = permissions.reduce((result, permission) => {
+        const module = permission.module || permission.permission_key.split('.')[0];
+        if (!result[module]) result[module] = [];
+        result[module].push(permission);
+        return result;
+    }, {});
+    return Object.keys(groups).sort((left, right) => {
+        const leftIndex = MODULE_ORDER.indexOf(left); const rightIndex = MODULE_ORDER.indexOf(right);
+        return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
+    }).map((module) => {
+        const permissionKeys = Object.fromEntries(groups[module].map((permission) => {
+            const action = String(permission.action || '').toLowerCase();
+            const column = action === 'change' ? 'update' : action;
+            return [column, permission.permission_key];
+        }));
+        return {
+            module: MODULE_LABELS[module] || groups[module][0].module || module,
+            key: permissionKeys.view || groups[module][0].permission_key,
+            permissionKeys,
+            extraKeys: groups[module].filter((permission) => !Object.values(permissionKeys).includes(permission.permission_key)).map((permission) => permission.permission_key),
+            ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, Boolean(permissionKeys[column] && assigned.includes(permissionKeys[column]))]))
+        };
+    });
+};
 
 const RolesPermissionsPage = () => {
     const [tab, setTab] = useState('roles');
     const [roles, setRoles] = useState([]);
     const [filters, setFilters] = useState(emptyTableFilters);
     const [selectedRoleId, setSelectedRoleId] = useState('');
-    const [matrix, setMatrix] = useState(defaultPermissionMatrix);
+    const [matrix, setMatrix] = useState([]);
+    const [assignedPermissions, setAssignedPermissions] = useState([]);
     const [showRoleModal, setShowRoleModal] = useState(false);
     useModalScrollLock(showRoleModal);
     const [newRole, setNewRole] = useState({ role_name: '', description: '', status: 'active' });
@@ -55,21 +74,17 @@ const RolesPermissionsPage = () => {
     };
 
     const fetchPermissions = async (roleId = selectedRoleId) => {
-        if (!roleId) return;
         try {
-            const response = await api.get(`/permissions/role_permissions.php?role_id=${roleId}`);
-            if (response.data.success) {
-                const assigned = response.data.data?.permissions || [];
-                setMatrix(defaultPermissionMatrix.map((item) => ({
-                    ...item,
-                    view: assigned.includes(item.key),
-                    add: assigned.includes(item.key.replace('.view', '.add')),
-                    edit: assigned.includes(item.key.replace('.view', '.edit')),
-                    delete: assigned.includes(item.key.replace('.view', '.delete')),
-                    export: assigned.includes(item.key.replace('.view', '.export')),
-                    update: assigned.includes(item.key.replace('.view', '.update'))
-                })));
+            const definitionsResponse = await api.get('/permissions/list.php');
+            const definitions = definitionsResponse.data.data?.permissions || [];
+            if (!roleId) {
+                setMatrix(buildPermissionMatrix(definitions));
+                return;
             }
+            const response = await api.get(`/permissions/role_permissions.php?role_id=${roleId}`);
+            const assigned = response.data.data?.permissions || [];
+            setAssignedPermissions(assigned);
+            setMatrix(buildPermissionMatrix(definitions, assigned));
         } catch (error) {
             console.error('Failed to fetch permissions', error);
         }
@@ -79,12 +94,12 @@ const RolesPermissionsPage = () => {
         if (!selectedRoleId) return;
         const selectedPermissions = [];
         matrix.forEach((row) => {
-            if (row.view) selectedPermissions.push(row.key);
-            if (row.add) selectedPermissions.push(row.key.replace('.view', '.add'));
-            if (row.edit) selectedPermissions.push(row.key.replace('.view', '.edit'));
-            if (row.delete) selectedPermissions.push(row.key.replace('.view', '.delete'));
-            if (row.export) selectedPermissions.push(row.key.replace('.view', '.export'));
-            if (row.update) selectedPermissions.push(row.key.replace('.view', '.update'));
+            ACTION_COLUMNS.forEach((column) => {
+                if (row[column] && row.permissionKeys[column]) selectedPermissions.push(row.permissionKeys[column]);
+            });
+            row.extraKeys.forEach((permissionKey) => {
+                if (assignedPermissions.includes(permissionKey)) selectedPermissions.push(permissionKey);
+            });
         });
 
         try {
@@ -128,6 +143,8 @@ const RolesPermissionsPage = () => {
     const togglePermission = (rowIndex, field) => {
         setMatrix((prev) => prev.map((row, index) => index === rowIndex ? { ...row, [field]: !row[field] } : row));
     };
+    const selectAllPermissions = () => setMatrix((prev) => prev.map((row) => ({ ...row, ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, Boolean(row.permissionKeys[column])])) })));
+    const clearAllPermissions = () => setMatrix((prev) => prev.map((row) => ({ ...row, ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, false])) })));
 
     const filteredRoles = filterTableRows(roles, filters, { dateKeys: ['created_at'], searchKeys: ['role_name', 'description', 'status'] });
 
@@ -255,8 +272,8 @@ const RolesPermissionsPage = () => {
                         </div>
 
                         <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                            <button className="btn btn-outline" type="button">Select All</button>
-                            <button className="btn btn-outline" type="button">Clear All</button>
+                            <button className="btn btn-outline" type="button" onClick={selectAllPermissions}>Select All</button>
+                            <button className="btn btn-outline" type="button" onClick={clearAllPermissions}>Clear All</button>
                             <Can permission="permissions.assign">
                                 <button className="btn btn-primary" type="button" onClick={saveRolePermissions}>
                                     <Save size={16} /> Save Permissions

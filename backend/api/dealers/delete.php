@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -9,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('dealers.delete');
 
 $data = json_decode(file_get_contents("php://input"));
@@ -38,15 +39,34 @@ if ($result['allocations'] > 0) {
 }
 $checkStmt->close();
 
+$oldStmt = $conn->prepare('SELECT * FROM dealers WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id);
+$oldStmt->execute();
+$oldDealer = $oldStmt->get_result()->fetch_assoc();
+$oldStmt->close();
+if (!$oldDealer) {
+    $conn->close();
+    sendResponse(false, 'Dealer not found', [], [], 404);
+}
+
+$conn->begin_transaction();
+try {
+writeDeleteSnapshot($conn, (int) $id, 'Dealer', $oldDealer, $currentUser);
 $stmt = $conn->prepare("DELETE FROM dealers WHERE id = ?");
 $stmt->bind_param("i", $id);
 
 if ($stmt->execute()) {
+    $stmt->close();
+    $conn->commit();
+    $conn->close();
     sendResponse(true, "Dealer deleted successfully");
 } else {
-    sendResponse(false, "Failed to delete dealer", [], [], 500);
+    throw new RuntimeException("Failed to delete dealer");
 }
-
-$stmt->close();
-$conn->close();
+} catch (Throwable $e) {
+    $conn->rollback();
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}
 ?>

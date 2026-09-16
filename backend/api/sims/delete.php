@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -9,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('sims.delete');
 
 $data = json_decode(file_get_contents("php://input"));
@@ -28,7 +29,7 @@ if (!$conn) {
 }
 
 // Check status first
-$checkStmt = $conn->prepare("SELECT status FROM sims WHERE id = ?");
+$checkStmt = $conn->prepare("SELECT * FROM sims WHERE id = ?");
 $checkStmt->bind_param("i", $id);
 $checkStmt->execute();
 $result = $checkStmt->get_result();
@@ -45,16 +46,24 @@ if ($sim['status'] === 'allocated' || $sim['status'] === 'used') {
 
 $checkStmt->close();
 
-// Delete sim
+$conn->begin_transaction();
+try {
+writeDeleteSnapshot($conn, (int) $id, 'SIM', $sim, $currentUser);
 $stmt = $conn->prepare("DELETE FROM sims WHERE id = ?");
 $stmt->bind_param("i", $id);
 
 if ($stmt->execute()) {
+    $stmt->close();
+    $conn->commit();
+    $conn->close();
     sendResponse(true, "SIM deleted successfully");
 } else {
-    sendResponse(false, "Failed to delete SIM", [], [], 500);
+    throw new RuntimeException("Failed to delete SIM");
 }
-
-$stmt->close();
-$conn->close();
+} catch (Throwable $e) {
+    $conn->rollback();
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}
 ?>

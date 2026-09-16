@@ -55,46 +55,152 @@ const InwardReports = () => {
 
     const handleExportExcel = () => {
         if (activeTab === 'sim') {
-            const data = simList.map(s => ({ "Purchase Date": s.purchase_date, "SIM No": s.sim_no, "SIM Type": s.sim_type || '-', "SIM Validity": s.sim_validity_months ? `${s.sim_validity_months} Months` : '-', "Notes": s.notes || '-', "Status": "Available" }));
-            exportToExcel(data, 'Available_SIM_Report');
+            const summaryData = [
+                { label: 'Total SIMs', value: simSummary?.total ?? 0 },
+                { label: 'Available', value: simSummary?.available ?? 0 },
+                { label: 'Allocated', value: simSummary?.allocated ?? 0 },
+                { label: 'Used', value: simSummary?.used ?? 0 }
+            ];
+
+            const simData = filteredSims.map(s => ({
+                "Purchase Date": formatDate(s.purchase_date),
+                "SIM No": s.sim_no,
+                "SIM Type": s.sim_type || '-',
+                "SIM Validity": s.sim_validity_months ? `${s.sim_validity_months} Months` : '-',
+                "Notes": s.notes || '-',
+                "Status": "Available"
+            }));
+
+            const columns = [
+                { header: "Purchase Date", key: "Purchase Date" },
+                { header: "SIM No", key: "SIM No" },
+                { header: "SIM Type", key: "SIM Type" },
+                { header: "SIM Validity", key: "SIM Validity" },
+                { header: "Notes", key: "Notes" },
+                { header: "Status", key: "Status" }
+            ];
+
+            exportToExcel(simData, 'Available_SIM_Report', 'Available SIMs', {
+                summary: summaryData,
+                summaryTitle: 'SIM Report Summary',
+                tableTitle: 'Current SIM Report',
+                columns: columns,
+                combinedSheet: { title: 'SIM REPORT' }
+            });
         } else {
-            const data = deviceList.map(d => ({ "Purchase Date": d.purchase_date, "Model": d.model_name, "IMEI No": d.imei_no, "Notes": d.notes || '-', "Status": "Available" }));
             const summary = deviceSummary?.summary || {};
-            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model, count]) => ({ Model: model, Count: count }));
-            exportToExcel(data, 'Available_Device_Report', 'Available Devices', {
-                summary: [
-                    { label: 'Total Devices', value: summary.total },
-                    { label: 'Available', value: summary.available || 0 },
-                    { label: 'Allocated', value: summary.allocated || 0 },
-                    { label: 'Used', value: summary.used || 0 }
-                ],
-                sections: [{ name: 'Model Breakdown', rows: modelBreakdown }]
-                , combinedSheet: { title: 'DEVICE REPORT' }
+            const deviceSummaryData = [
+                { label: 'Total Devices', value: summary.total ?? 0 },
+                { label: 'Available', value: summary.available ?? 0 },
+                { label: 'Allocated', value: summary.allocated ?? 0 },
+                { label: 'Used', value: summary.used ?? 0 }
+            ];
+
+            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model, count]) => ({
+                "Model": model,
+                "Count": count
+            }));
+
+            const deviceData = filteredDevices.map(d => ({
+                "Purchase Date": formatDate(d.purchase_date),
+                "Model": d.model_name,
+                "IMEI No": d.imei_no,
+                "Notes": d.notes || '-',
+                "Status": "Available"
+            }));
+
+            const columns = [
+                { header: "Purchase Date", key: "Purchase Date" },
+                { header: "Model", key: "Model" },
+                { header: "IMEI No", key: "IMEI No" },
+                { header: "Notes", key: "Notes" },
+                { header: "Status", key: "Status" }
+            ];
+
+            exportToExcel(deviceData, 'Available_Device_Report', 'Available Devices', {
+                summary: deviceSummaryData,
+                summaryTitle: 'Device Report Summary',
+                sections: [{
+                    name: 'Model Breakdown',
+                    title: 'Model Breakdown',
+                    columns: [{ header: 'Model', key: 'Model' }, { header: 'Count', key: 'Count' }],
+                    rows: modelBreakdown.length > 0 ? modelBreakdown : [{ Model: 'No models', Count: 0 }]
+                }],
+                tableTitle: 'Current Device Report',
+                columns: columns,
+                combinedSheet: { title: 'DEVICE REPORT' }
             });
         }
     };
 
     const handleExportPDF = () => {
         if (activeTab === 'sim') {
-            const cols = [{header: "Purchase Date", key: "purchase_date"}, {header: "SIM No", key: "sim_no"}, {header: "SIM Type", key: "sim_type"}, {header: "SIM Validity", key: "sim_validity_months"}, {header: "Notes", key: "notes"}, {header: "Status", key: "status"}];
-            const data = simList.map(s => ({ ...s, status: 'Available' }));
-            exportToPDF(data, 'Available_SIM_Report', 'Available SIM Inventory Report', cols);
+            const cols = [
+                { header: "Purchase Date", key: "purchase_date" },
+                { header: "SIM No", key: "sim_no" },
+                { header: "SIM Type", key: "sim_type" },
+                { header: "SIM Validity", key: "sim_validity_months" },
+                { header: "Notes", key: "notes" },
+                { header: "Status", key: "status" }
+            ];
+
+            const simData = filteredSims.map(s => ({
+                purchase_date: formatDate(s.purchase_date),
+                sim_no: s.sim_no,
+                sim_type: s.sim_type || '-',
+                sim_validity_months: s.sim_validity_months ? `${s.sim_validity_months} Months` : '-',
+                notes: s.notes || '-',
+                status: 'Available'
+            }));
+
+            const summaryData = [
+                { label: 'Total SIMs', value: simSummary?.total ?? 0 },
+                { label: 'Available', value: simSummary?.available ?? 0 },
+                { label: 'Allocated', value: simSummary?.allocated ?? 0 },
+                { label: 'Used', value: simSummary?.used ?? 0 }
+            ];
+
+            exportToPDF(simData, 'Available_SIM_Report', 'SIM REPORT', cols, {
+                summary: summaryData,
+                summaryTitle: 'SIM Report Summary'
+            });
         } else {
-            const cols = [{header: "Purchase Date", key: "purchase_date"}, {header: "Model", key: "model_name"}, {header: "IMEI No", key: "imei_no"}, {header: "Notes", key: "notes"}, {header: "Status", key: "status"}];
-            const data = deviceList.map(d => ({ ...d, status: 'Available' }));
+            const cols = [
+                { header: "Purchase Date", key: "purchase_date" },
+                { header: "Model", key: "model_name" },
+                { header: "IMEI No", key: "imei_no" },
+                { header: "Notes", key: "notes" },
+                { header: "Status", key: "status" }
+            ];
+
+            const deviceData = filteredDevices.map(d => ({
+                purchase_date: formatDate(d.purchase_date),
+                model_name: d.model_name,
+                imei_no: d.imei_no,
+                notes: d.notes || '-',
+                status: 'Available'
+            }));
+
             const summary = deviceSummary?.summary || {};
-            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model_name, count]) => ({ model_name, count }));
-            exportToPDF(data, 'Available_Device_Report', 'DEVICE REPORT', cols, {
-                summary: [
-                    { label: 'Total Devices', value: summary.total },
-                    { label: 'Available', value: summary.available || 0 },
-                    { label: 'Allocated', value: summary.allocated || 0 },
-                    { label: 'Used', value: summary.used || 0 }
-                ],
+            const deviceSummaryData = [
+                { label: 'Total Devices', value: summary.total ?? 0 },
+                { label: 'Available', value: summary.available ?? 0 },
+                { label: 'Allocated', value: summary.allocated ?? 0 },
+                { label: 'Used', value: summary.used ?? 0 }
+            ];
+
+            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model_name, count]) => ({
+                model_name,
+                count
+            }));
+
+            exportToPDF(deviceData, 'Available_Device_Report', 'DEVICE REPORT', cols, {
+                summary: deviceSummaryData,
+                summaryTitle: 'Device Report Summary',
                 sections: [{
                     title: 'MODEL BREAKDOWN',
                     columns: [{ header: 'Model', key: 'model_name' }, { header: 'Count', key: 'count' }],
-                    rows: modelBreakdown
+                    rows: modelBreakdown.length > 0 ? modelBreakdown : [{ model_name: 'No models', count: 0 }]
                 }]
             });
         }
@@ -194,7 +300,17 @@ const InwardReports = () => {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
                             <h3 style={{ margin: 0 }}>Available {activeTab === 'sim' ? 'SIMs' : 'Devices'}</h3>
                         </div>
-                        <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={activeTab === 'sim' ? simList : deviceList} dateKeys={['purchase_date']} {...(activeTab === 'sim' ? { simKey: 'sim_type' } : { deviceKey: 'model_name' })} searchPlaceholder={activeTab === 'sim' ? 'Search SIM number or type...' : 'Search IMEI or model...'} />
+                        <TableFilterBar
+                            filters={filters}
+                            onChange={setFilters}
+                            onReset={() => setFilters(emptyTableFilters())}
+                            items={activeTab === 'sim' ? simList : deviceList}
+                            dateKeys={['purchase_date']}
+                            showSimType={activeTab === 'sim'}
+                            showSimValidity={activeTab === 'sim'}
+                            showDeviceModel={activeTab === 'device'}
+                            searchPlaceholder={activeTab === 'sim' ? 'Search SIM number, type, or notes...' : 'Search IMEI, model, or notes...'}
+                        />
                         <div className="table-container">
                             <table>
                                 <thead>

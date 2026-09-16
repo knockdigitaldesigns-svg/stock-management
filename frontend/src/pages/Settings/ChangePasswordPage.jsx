@@ -1,25 +1,31 @@
 import { useState } from 'react';
 import api from '../../services/api';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const ChangePasswordPage = () => {
     const [form, setForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
+
     const handleChange = async () => {
         setError('');
         setSuccess('');
 
         if (!form.current_password || !form.new_password || !form.confirm_password) {
-            setError('All fields are required');
+            triggerError('All fields are required');
             return;
         }
         if (form.new_password.length < 8) {
-            setError('New password must be at least 8 characters long');
+            triggerError('New password must be at least 8 characters long');
             return;
         }
         if (form.new_password !== form.confirm_password) {
-            setError('New password and confirm password do not match');
+            triggerError('New password and confirm password do not match');
             return;
         }
 
@@ -29,10 +35,10 @@ const ChangePasswordPage = () => {
                 setSuccess('Password changed successfully');
                 setForm({ current_password: '', new_password: '', confirm_password: '' });
             } else {
-                setError(response.data.message || 'Failed to change password');
+                triggerError(response.data.message || 'Failed to change password');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Failed to change password');
+            triggerError(err.response?.data?.message || 'Failed to change password');
         }
     };
 

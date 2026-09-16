@@ -23,6 +23,7 @@ const DealerReports = () => {
     const [reportData, setReportData] = useState([]);
     const [loading, setLoading] = useState(false);
     const currentTab = tabs.find((tab) => tab.key === activeTab) || tabs[0];
+    const isDealerSim = activeTab === 'dealer-sim';
     const ownerKey = currentTab.owner === 'Dealer' ? 'dealers' : 'technicians';
     const nameKey = currentTab.owner === 'Dealer' ? 'dealer_name' : 'technician_name';
 
@@ -77,7 +78,13 @@ const DealerReports = () => {
                       'SIM No': row.sim_no,
                       'SIM Type': row.sim_type || '-',
                       'SIM Validity': row.sim_validity_months ? `${row.sim_validity_months} Months` : '-',
+                      'SIM Status': row.sim_status || '-',
                       'SIM Purchase Date': row.sim_purchase_date,
+                      ...(isDealerSim ? {
+                          'SIM Given Date': row.sim_given_date,
+                          'SIM Activation Date': row.sim_activation_date,
+                          'SIM Expiry Date': row.sim_expiry_date
+                      } : {}),
                       'Allocation Date': row.allocation_date,
                       Notes: row.notes || '-'
                   }
@@ -100,7 +107,13 @@ const DealerReports = () => {
                       { header: 'SIM No', key: 'sim_no' },
                       { header: 'SIM Type', key: 'sim_type' },
                       { header: 'SIM Validity', key: 'sim_validity_months' },
+                      { header: 'SIM Status', key: 'sim_status' },
                       { header: 'Purchase Date', key: 'sim_purchase_date' },
+                      ...(isDealerSim ? [
+                          { header: 'Given Date', key: 'sim_given_date' },
+                          { header: 'Activation Date', key: 'sim_activation_date' },
+                          { header: 'Expiry Date', key: 'sim_expiry_date' }
+                      ] : []),
                       { header: 'Allocation Date', key: 'allocation_date' },
                       { header: 'Notes', key: 'notes' }
                   ]
@@ -114,6 +127,8 @@ const DealerReports = () => {
                   ];
         exportToPDF(filteredReportData, `${currentTab.owner}_${currentTab.type}_Report`, currentTab.label, columns);
     };
+
+    const tableColSpan = currentTab.type === 'SIM' ? (isDealerSim ? 11 : 8) : 6;
 
     return (
         <div className="page-container">
@@ -177,7 +192,17 @@ const DealerReports = () => {
                         />
                     </div>
                 </div>
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={reportData} dateKeys={['allocation_date']} {...(currentTab.type === 'SIM' ? { simKey: 'sim_type' } : { deviceKey: 'model_name' })} searchPlaceholder="Search report results..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={reportData}
+                    dateKeys={['allocation_date']}
+                    showSimType={currentTab.type === 'SIM'}
+                    showSimValidity={currentTab.type === 'SIM'}
+                    showDeviceModel={currentTab.type !== 'SIM'}
+                    searchPlaceholder="Search report results..."
+                />
             </div>
 
             <div className="card">
@@ -191,7 +216,13 @@ const DealerReports = () => {
                                         <th>SIM No</th>
                                         <th>SIM Type</th>
                                         <th>SIM Validity</th>
+                                        <th>SIM Status</th>
                                         <th>SIM Purchase Date</th>
+                                        {isDealerSim && <>
+                                            <th>SIM Given Date</th>
+                                            <th>SIM Activation Date</th>
+                                            <th>SIM Expiry Date</th>
+                                        </>}
                                     </>
                                 ) : (
                                     <>
@@ -207,13 +238,13 @@ const DealerReports = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="8" className="text-center">
+                                    <td colSpan={tableColSpan} className="text-center">
                                         Loading report...
                                     </td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" className="text-center empty-state">
+                                    <td colSpan={tableColSpan} className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
@@ -230,7 +261,13 @@ const DealerReports = () => {
                                                         ? `${row.sim_validity_months} Months`
                                                         : '-'}
                                                 </td>
+                                                <td>{row.sim_status || '-'}</td>
                                                 <td>{formatDate(row.sim_purchase_date)}</td>
+                                                {isDealerSim && <>
+                                                    <td>{formatDate(row.sim_given_date)}</td>
+                                                    <td>{formatDate(row.sim_activation_date)}</td>
+                                                    <td>{formatDate(row.sim_expiry_date)}</td>
+                                                </>}
                                             </>
                                         ) : (
                                             <>

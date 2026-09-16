@@ -40,6 +40,9 @@ if ($configResult) {
             $ownerStmt->close();
             $ownerName = $ownerData['dealer_name'] ?? '';
             $installationStatus = $ownerData['installation_status'] ?? '';
+            if (!in_array(strtolower(trim((string) $installationStatus)), ['onsite', 'offsite'], true)) {
+                continue;
+            }
         } elseif ($ownerType === 'technician') {
             $ownerStmt = $conn->prepare('SELECT technician_name FROM technicians WHERE id = ? LIMIT 1');
             $ownerStmt->bind_param('i', $ownerId);
@@ -50,29 +53,69 @@ if ($configResult) {
             $installationStatus = '';
         }
 
-        $deviceAvailableSql = "
-            SELECT COUNT(*) AS available_count
+        $deviceCountSql = "
+            SELECT
+                COUNT(DISTINCT sa.device_id) AS total_count,
+                COUNT(DISTINCT CASE WHEN
+                    EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id)
+                    OR EXISTS (
+                        SELECT 1 FROM stock_transactions st
+                        WHERE st.device_id = sa.device_id
+                          AND st.from_owner_type = sa.owner_type
+                          AND st.from_owner_id = sa.owner_id
+                                                    AND st.id = (
+                                                            SELECT MAX(st_latest.id)
+                                                            FROM stock_transactions st_latest
+                                                            WHERE st_latest.device_id = sa.device_id
+                                                                AND st_latest.from_owner_type = sa.owner_type
+                                                                AND st_latest.from_owner_id = sa.owner_id
+                                                    )
+                                                    AND st.transaction_type = 'USE'
+                    )
+                THEN sa.device_id END) AS used_count
             FROM stock_allocations sa
-            INNER JOIN devices d ON d.id = sa.device_id
-            WHERE sa.owner_type = ? AND sa.owner_id = ? AND d.status IN ('available', 'allocated', 'active')
+            WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.device_id IS NOT NULL
         ";
-        $deviceStmt = $conn->prepare($deviceAvailableSql);
+        $deviceStmt = $conn->prepare($deviceCountSql);
         $deviceStmt->bind_param('si', $ownerType, $ownerId);
         $deviceStmt->execute();
-        $deviceCount = (int) $deviceStmt->get_result()->fetch_assoc()['available_count'];
+        $deviceData = $deviceStmt->get_result()->fetch_assoc() ?: [];
         $deviceStmt->close();
+        $totalDeviceCount = (int) ($deviceData['total_count'] ?? 0);
+        $usedDeviceCount = (int) ($deviceData['used_count'] ?? 0);
+        $deviceCount = max(0, $totalDeviceCount - $usedDeviceCount);
 
-        $simAvailableSql = "
-            SELECT COUNT(*) AS available_count
+        $simCountSql = "
+            SELECT
+                COUNT(DISTINCT sa.sim_id) AS total_count,
+                COUNT(DISTINCT CASE WHEN
+                    EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = sa.sim_id OR cvd.sim_id_2 = sa.sim_id)
+                    OR EXISTS (
+                        SELECT 1 FROM stock_transactions st
+                        WHERE st.sim_id = sa.sim_id
+                          AND st.from_owner_type = sa.owner_type
+                          AND st.from_owner_id = sa.owner_id
+                                                    AND st.id = (
+                                                            SELECT MAX(st_latest.id)
+                                                            FROM stock_transactions st_latest
+                                                            WHERE st_latest.sim_id = sa.sim_id
+                                                                AND st_latest.from_owner_type = sa.owner_type
+                                                                AND st_latest.from_owner_id = sa.owner_id
+                                                    )
+                                                    AND st.transaction_type = 'USE'
+                    )
+                THEN sa.sim_id END) AS used_count
             FROM stock_allocations sa
-            INNER JOIN sims s ON s.id = sa.sim_id
-            WHERE sa.owner_type = ? AND sa.owner_id = ? AND s.status IN ('available', 'allocated', 'active')
+            WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.sim_id IS NOT NULL
         ";
-        $simStmt = $conn->prepare($simAvailableSql);
+        $simStmt = $conn->prepare($simCountSql);
         $simStmt->bind_param('si', $ownerType, $ownerId);
         $simStmt->execute();
-        $simCount = (int) $simStmt->get_result()->fetch_assoc()['available_count'];
+        $simData = $simStmt->get_result()->fetch_assoc() ?: [];
         $simStmt->close();
+        $totalSimCount = (int) ($simData['total_count'] ?? 0);
+        $usedSimCount = (int) ($simData['used_count'] ?? 0);
+        $simCount = max(0, $totalSimCount - $usedSimCount);
 
         $minimumDevice = (int) ($row['minimum_device_count'] ?? 0);
         $minimumSim = (int) ($row['minimum_sim_count'] ?? 0);
@@ -107,7 +150,11 @@ if ($configResult) {
             'minimum_device_count' => $minimumDevice,
             'minimum_sim_count' => $minimumSim,
             'notes' => $row['notes'] ?? '',
+            'total_device_count' => $totalDeviceCount,
+            'used_device_count' => $usedDeviceCount,
             'available_device_count' => $deviceCount,
+            'total_sim_count' => $totalSimCount,
+            'used_sim_count' => $usedSimCount,
             'available_sim_count' => $simCount,
             'device_status' => $deviceStatus,
             'sim_status' => $simStatus,

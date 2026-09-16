@@ -8,6 +8,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const SimValidityPage = () => {
     const { hasPermission } = useAuth();
@@ -23,13 +24,18 @@ const SimValidityPage = () => {
     const [saving, setSaving] = useState(false);
     const [viewingValidity, setViewingValidity] = useState(null);
 
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
+
     const fetchValidities = async () => {
         setLoading(true);
         try {
             const response = await api.get('/sim_validities/list.php');
             if (response.data.success) setValidities(response.data.data?.validities || []);
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to load SIM validities.');
+            triggerError(err.response?.data?.message || 'Unable to load SIM validities.');
         } finally {
             setLoading(false);
         }
@@ -48,7 +54,7 @@ const SimValidityPage = () => {
 
     const save = async () => {
         if (!/^[1-9][0-9]*$/.test(months.trim())) {
-            setError('Number of months must be a positive integer.');
+            triggerError('Number of months must be a positive integer.');
             return;
         }
         setSaving(true);
@@ -58,14 +64,14 @@ const SimValidityPage = () => {
                 ? await api.post('/sim_validities/update.php', { id: editing.id, months: months.trim() })
                 : await api.post('/sim_validities/create.php', { months: months.trim() });
             if (!response.data.success) {
-                setError(response.data.message || 'Unable to save SIM validity.');
+                triggerError(response.data.message || 'Unable to save SIM validity.');
                 return;
             }
             setShowModal(false);
             setMessage(response.data.message);
             await fetchValidities();
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to save SIM validity.');
+            triggerError(err.response?.data?.message || 'Unable to save SIM validity.');
         } finally {
             setSaving(false);
         }
@@ -75,14 +81,14 @@ const SimValidityPage = () => {
         try {
             const response = await api.post('/sim_validities/delete.php', { id: deleteTarget.id });
             if (!response.data.success) {
-                setError(response.data.message);
+                triggerError(response.data.message);
                 return;
             }
             setDeleteTarget(null);
             setMessage(response.data.message);
             await fetchValidities();
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to delete SIM validity.');
+            triggerError(err.response?.data?.message || 'Unable to delete SIM validity.');
         }
     };
 

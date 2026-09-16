@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Download, AlertCircle, CheckCircle } from 'lucide-react';
+import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
 import { isFutureDate, parseDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const SimExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -14,7 +15,15 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
     const [successMsg, setSuccessMsg] = useState('');
     const [validities, setValidities] = useState([]);
 
-    useEffect(() => { api.get('/sim_validities/list.php').then((response) => setValidities(response.data.data?.validities || [])).catch(() => setErrors(['Unable to load SIM validities.'])); }, []);
+    useEffect(() => {
+        api.get('/sim_validities/list.php')
+            .then((response) => setValidities(response.data.data?.validities || []))
+            .catch(() => {
+                const msg = 'Unable to load SIM validities.';
+                setErrors([msg]);
+                showGlobalError(msg);
+            });
+    }, []);
 
     const downloadTemplate = () => {
         const ws = XLSX.utils.json_to_sheet([
@@ -52,15 +61,18 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false });
 
                 if (jsonData.length === 0) {
-                    setErrors(["Excel file is empty."]);
+                    const msg = "Excel file is empty.";
+                    setErrors([msg]);
+                    showGlobalError(msg);
                     setLoading(false);
                     return;
                 }
 
                 const validationErrors = [];
-                    const validSims = [];
+                const validSims = [];
                 const simRegex = /^(?:[0-9]{10}|[0-9]{13})$/;
-                    const seenSims = new Set();
+                const seenSims = new Set();
+
                 jsonData.forEach((row, index) => {
                     const rowNum = index + 2; 
                     const purchaseDate = row["Purchase Date"];
@@ -91,20 +103,21 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
 
                         validSims.push({
                             purchase_date: normalizedDate,
-                            sim_no: simNo
-                            , sim_type: simType, sim_validity_id: validity.id
-                            , notes
+                            sim_no: simNo,
+                            sim_type: simType,
+                            sim_validity_id: validity.id,
+                            notes
                         });
                     }
                 });
 
                 if (validationErrors.length > 0) {
                     setErrors(validationErrors);
+                    showGlobalError(validationErrors, 'Import Validation Errors');
                     setLoading(false);
                     return;
                 }
 
-                // Call backend API
                 const response = await api.post('/sims/create.php', { sims: validSims });
                 if (response.data.success) {
                     setSuccessMsg("SIMs uploaded successfully!");
@@ -112,12 +125,16 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                         onSuccess();
                     }, 1500);
                 } else {
-                    setErrors([response.data.message || 'Failed to upload SIMs']);
+                    const errMsg = response.data.message || 'Failed to upload SIMs';
+                    setErrors([errMsg]);
+                    showGlobalError(errMsg);
                 }
 
             } catch (error) {
                 console.error(error);
-                setErrors([error.response?.data?.message || 'Error parsing Excel file or network error']);
+                const errMsg = error.response?.data?.message || 'Error parsing Excel file or network error';
+                setErrors([errMsg]);
+                showGlobalError(errMsg);
             } finally {
                 setLoading(false);
             }
@@ -159,17 +176,6 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading}
                         />
                     </div>
-
-                    {errors.length > 0 && (
-                        <div className="alert alert-danger" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <AlertCircle size={16} /> <strong>Validation Errors:</strong>
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem' }}>
-                                {errors.map((err, i) => <li key={i}>{err}</li>)}
-                            </ul>
-                        </div>
-                    )}
 
                     {successMsg && (
                         <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

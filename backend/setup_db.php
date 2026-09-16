@@ -11,6 +11,27 @@ if ($conn->connect_error) {
 $conn->query("CREATE DATABASE IF NOT EXISTS stock_management");
 $conn->select_db("stock_management");
 
+$historyExists = $conn->query("SHOW TABLES LIKE 'history'");
+$legacyHistoryExists = $conn->query("SHOW TABLES LIKE 'customer_history'");
+if ($historyExists && $historyExists->num_rows === 0 && $legacyHistoryExists && $legacyHistoryExists->num_rows > 0) {
+    $conn->query('RENAME TABLE customer_history TO history');
+}
+$conn->query("CREATE TABLE IF NOT EXISTS history (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT DEFAULT NULL,
+    module VARCHAR(100) NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    field_changed VARCHAR(150) DEFAULT NULL,
+    old_value TEXT DEFAULT NULL,
+    new_value TEXT DEFAULT NULL,
+    changed_by_user_id INT DEFAULT NULL,
+    changed_by_name VARCHAR(150) DEFAULT NULL,
+    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_history_customer (customer_id),
+    INDEX idx_history_action (action),
+    INDEX idx_history_changed_at (changed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 $tables = [
     "CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -143,9 +164,30 @@ $tables = [
         software VARCHAR(50) DEFAULT NULL,
         payment_status ENUM('Paid', 'Partially Paid', 'Not Paid') DEFAULT 'Not Paid',
         payment_mode ENUM('Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL,
+        transaction_id VARCHAR(100) DEFAULT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
+        FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS stock_transfers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        allocation_id INT DEFAULT NULL,
+        device_id INT DEFAULT NULL,
+        sim_id INT DEFAULT NULL,
+        from_owner_type ENUM('dealer', 'technician') NOT NULL,
+        from_owner_id INT NOT NULL,
+        from_owner_name VARCHAR(150) NOT NULL,
+        to_owner_type ENUM('dealer', 'technician') NOT NULL,
+        to_owner_id INT NOT NULL,
+        to_owner_name VARCHAR(150) NOT NULL,
+        transfer_date DATE NOT NULL,
+        transferred_by_user_id INT DEFAULT NULL,
+        previous_status VARCHAR(50) DEFAULT 'Allocated',
+        new_status VARCHAR(50) DEFAULT 'Allocated',
+        notes TEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
         FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
     )",
@@ -164,8 +206,111 @@ $tables = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
         FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS renewal_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        expired_to_safe_days INT NOT NULL DEFAULT 10,
+        safe_to_deactive_days INT NOT NULL DEFAULT 10,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )",
+    "CREATE TABLE IF NOT EXISTS customer_renewals (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        customer_id INT NOT NULL,
+        installation_date DATE NOT NULL,
+        next_renewal_date DATE DEFAULT NULL,
+        validity_months INT NOT NULL,
+        sim_status ENUM('Active','Deactive','Expired','Safe Custody') NOT NULL DEFAULT 'Active',
+        expired_to_safe_days INT DEFAULT NULL,
+        safe_to_deactive_days INT DEFAULT NULL,
+        last_renewed_date DATE DEFAULT NULL,
+        safe_custody_date DATE DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_customer_renewal_customer (customer_id),
+        INDEX idx_customer_next_renewal (next_renewal_date),
+        INDEX idx_customer_sim_status (sim_status),
+        CONSTRAINT fk_customer_renewal_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON UPDATE CASCADE ON DELETE CASCADE
+    )",
+    "CREATE TABLE IF NOT EXISTS customer_cash_collections (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        customer_id INT NOT NULL,
+        payment_id INT NOT NULL,
+        installation_id INT NOT NULL,
+        recipient_type ENUM('Technician', 'Dealer') NOT NULL,
+        recipient_id INT NOT NULL,
+        amount_collected DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        amount_remitted DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        pending_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        settlement_status ENUM('Pending', 'Partially Paid', 'Paid') NOT NULL DEFAULT 'Pending',
+        settlement_date DATE DEFAULT NULL,
+        payment_mode VARCHAR(50) DEFAULT NULL,
+        transaction_id VARCHAR(100) DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_customer_cash_collection_payment (customer_id, payment_id),
+        INDEX idx_cash_collection_recipient (recipient_type, recipient_id),
+        INDEX idx_cash_collection_customer (customer_id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (payment_id) REFERENCES customer_payments(id) ON DELETE CASCADE,
+        FOREIGN KEY (installation_id) REFERENCES customer_installations(id) ON DELETE CASCADE
+    )",
+        "CREATE TABLE IF NOT EXISTS support_questions (
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            display_order INT NOT NULL DEFAULT 0,
+            created_by INT DEFAULT NULL,
+            updated_by INT DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_support_questions_active (is_active, display_order)
+        )",
+        "CREATE TABLE IF NOT EXISTS support_tickets (
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            ticket_id VARCHAR(30) DEFAULT NULL UNIQUE,
+            customer_id INT NOT NULL,
+            vehicle_id INT DEFAULT NULL,
+            issue TEXT NOT NULL,
+            priority ENUM('Low', 'Medium', 'High', 'Urgent') NOT NULL DEFAULT 'Medium',
+            assigned_to_user_id INT DEFAULT NULL,
+            status ENUM('Open', 'Assigned', 'In Progress', 'Resolved', 'Closed') NOT NULL DEFAULT 'Open',
+            resolution_notes TEXT DEFAULT NULL,
+            created_by_user_id INT NOT NULL,
+            closed_by_user_id INT DEFAULT NULL,
+            closed_at DATETIME DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_support_ticket_customer (customer_id),
+            INDEX idx_support_ticket_assigned (assigned_to_user_id),
+            INDEX idx_support_ticket_status (status)
+        )",
+    "CREATE TABLE IF NOT EXISTS renewal_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        renewal_id INT NOT NULL,
+        customer_id INT NOT NULL,
+        action_type VARCHAR(50) NOT NULL,
+        action_date DATE NOT NULL,
+        old_status VARCHAR(50) DEFAULT NULL,
+        new_status VARCHAR(50) DEFAULT NULL,
+        old_validity_months INT DEFAULT NULL,
+        new_validity_months INT DEFAULT NULL,
+        old_renewal_date DATE DEFAULT NULL,
+        new_renewal_date DATE DEFAULT NULL,
+        payment_amount DECIMAL(10,2) DEFAULT 0.00,
+        amount_paid DECIMAL(10,2) DEFAULT 0.00,
+        amount_pending DECIMAL(10,2) DEFAULT 0.00,
+        payment_mode VARCHAR(50) DEFAULT NULL,
+        transaction_id VARCHAR(100) DEFAULT NULL,
+        changed_by INT DEFAULT NULL,
+        notes TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )"
 ];
+
+$conn->query("INSERT IGNORE INTO renewal_settings (id, expired_to_safe_days, safe_to_deactive_days) VALUES (1, 10, 10)");
 
 foreach ($tables as $sql) {
     if ($conn->query($sql) === TRUE) {
@@ -193,11 +338,19 @@ $columnChecks = [
     ['dealers', 'notes', "ALTER TABLE dealers ADD COLUMN notes TEXT NULL AFTER installation_status"],
     ['dealers', 'software', "ALTER TABLE dealers ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER installation_status"],
     ['stock_allocations', 'amount_paid', "ALTER TABLE stock_allocations ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 AFTER total_amount"],
+    ['stock_allocations', 'transaction_id', "ALTER TABLE stock_allocations ADD COLUMN transaction_id VARCHAR(100) DEFAULT NULL AFTER payment_mode"],
     ['stock_allocations', 'software', "ALTER TABLE stock_allocations ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER pending_amount"],
+    ['stock_allocations', 'sim_given_date', "ALTER TABLE stock_allocations ADD COLUMN sim_given_date DATE DEFAULT NULL AFTER allocation_date"],
+    ['stock_allocations', 'sim_activation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_activation_date DATE DEFAULT NULL AFTER sim_given_date"],
+    ['stock_allocations', 'sim_validity_id', "ALTER TABLE stock_allocations ADD COLUMN sim_validity_id INT DEFAULT NULL AFTER sim_activation_date"],
+    ['stock_allocations', 'sim_expiry_date', "ALTER TABLE stock_allocations ADD COLUMN sim_expiry_date DATE DEFAULT NULL AFTER sim_validity_id"],
+    ['stock_allocations', 'sim_deactivation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_deactivation_date DATE DEFAULT NULL AFTER sim_expiry_date"],
+    ['stock_allocations', 'sim_status', "ALTER TABLE stock_allocations ADD COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available' AFTER sim_deactivation_date"],
     ['technicians', 'notes', "ALTER TABLE technicians ADD COLUMN notes TEXT NULL AFTER enrolled_date"],
     ['stock_allocations', 'notes', "ALTER TABLE stock_allocations ADD COLUMN notes TEXT NULL AFTER payment_mode"],
     ['stock_transactions', 'notes', "ALTER TABLE stock_transactions ADD COLUMN notes TEXT NULL AFTER transaction_date"],
     ['stock_alert_settings', 'notes', "ALTER TABLE stock_alert_settings ADD COLUMN notes TEXT NULL AFTER minimum_sim_count"],
+    ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
 ];
 
 foreach ($columnChecks as [$table, $column, $alterSql]) {
@@ -210,6 +363,9 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
         }
     }
 }
+
+$conn->query("ALTER TABLE stock_allocations MODIFY COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available'");
+$conn->query("UPDATE stock_allocations sa JOIN sims s ON s.id = sa.sim_id SET sa.sim_given_date = COALESCE(sa.sim_given_date, sa.allocation_date), sa.sim_validity_id = COALESCE(sa.sim_validity_id, s.sim_validity_id), sa.sim_status = COALESCE(sa.sim_status, 'Available') WHERE sa.sim_id IS NOT NULL");
 
 $stockAlertIndex = $conn->query("SHOW INDEX FROM stock_alert_settings WHERE Key_name = 'unique_stock_alert_owner'");
 if (!$stockAlertIndex || $stockAlertIndex->num_rows === 0) {
@@ -344,6 +500,22 @@ $permissionDefinitions = [
     ['stock.view', 'Stock Management View', 'stock', 'VIEW'],
     ['stock.update', 'Stock Management Update', 'stock', 'UPDATE'],
     ['stock.export', 'Stock Management Export', 'stock', 'EXPORT'],
+    ['stock_transfer.view', 'Stock Transfer View', 'stock_transfer', 'VIEW'],
+    ['stock_transfer.add', 'Stock Transfer Add', 'stock_transfer', 'ADD'],
+    ['customers.view', 'Customer Details View', 'customers', 'VIEW'],
+    ['customers.add', 'Customer Details Add', 'customers', 'ADD'],
+    ['customers.edit', 'Customer Details Edit', 'customers', 'EDIT'],
+    ['customers.delete', 'Customer Details Delete', 'customers', 'DELETE'],
+    ['customers.export', 'Customer Details Export', 'customers', 'EXPORT'],
+    ['customers.update', 'Customer Details Update', 'customers', 'UPDATE'],
+    ['customer_reports.view', 'Customer Reports View', 'customer_reports', 'VIEW'],
+    ['customer_renewals.view', 'Customer Renewals View', 'customer_renewals', 'VIEW'],
+    ['customer_renewals.edit', 'Customer Renewals Edit', 'customer_renewals', 'EDIT'],
+    ['customer_renewals.renew', 'Customer Renewals Renew', 'customer_renewals', 'RENEW'],
+    ['customer_renewals.history', 'Customer Renewals History', 'customer_renewals', 'HISTORY'],
+    ['sim_lifecycle.view', 'SIM Lifecycle View', 'sim_lifecycle', 'VIEW'],
+    ['sim_lifecycle.edit', 'SIM Lifecycle Edit', 'sim_lifecycle', 'EDIT'],
+    ['history.view', 'History View', 'history', 'VIEW'],
     ['roles.view', 'Roles View', 'roles', 'VIEW'],
     ['roles.add', 'Roles Add', 'roles', 'ADD'],
     ['roles.edit', 'Roles Edit', 'roles', 'EDIT'],
@@ -368,6 +540,30 @@ $permissionDefinitions = [
     ['sim_validity.edit', 'SIM Validity Edit', 'sim_validity', 'EDIT'],
     ['sim_validity.delete', 'SIM Validity Delete', 'sim_validity', 'DELETE'],
     ['password.change', 'Change Password', 'password', 'CHANGE']
+    ,['platforms.view', 'Platform View', 'platforms', 'VIEW']
+    ,['platforms.add', 'Platform Add', 'platforms', 'ADD']
+    ,['platforms.edit', 'Platform Edit', 'platforms', 'EDIT']
+    ,['platforms.delete', 'Platform Delete', 'platforms', 'DELETE']
+    ,['vehicle_types.view', 'Vehicle Types View', 'vehicle_types', 'VIEW']
+    ,['vehicle_types.add', 'Vehicle Types Add', 'vehicle_types', 'ADD']
+    ,['vehicle_types.edit', 'Vehicle Types Edit', 'vehicle_types', 'EDIT']
+    ,['vehicle_types.delete', 'Vehicle Types Delete', 'vehicle_types', 'DELETE']
+    ,['lead_closures.view', 'Lead Closure View', 'lead_closures', 'VIEW']
+    ,['lead_closures.add', 'Lead Closure Add', 'lead_closures', 'ADD']
+    ,['lead_closures.edit', 'Lead Closure Edit', 'lead_closures', 'EDIT']
+    ,['lead_closures.delete', 'Lead Closure Delete', 'lead_closures', 'DELETE']
+    ,['sale_amounts.view', 'Sale Amount View', 'sale_amounts', 'VIEW']
+    ,['sale_amounts.add', 'Sale Amount Add', 'sale_amounts', 'ADD']
+    ,['sale_amounts.edit', 'Sale Amount Edit', 'sale_amounts', 'EDIT']
+    ,['sale_amounts.delete', 'Sale Amount Delete', 'sale_amounts', 'DELETE']
+    ,['support.view', 'Support View', 'support', 'VIEW']
+    ,['support.add', 'Support Add', 'support', 'ADD']
+    ,['support.edit', 'Support Edit', 'support', 'EDIT']
+    ,['support.delete', 'Support Delete', 'support', 'DELETE']
+    ,['support.assign', 'Support Assign', 'support', 'ASSIGN']
+    ,['support.close', 'Support Close', 'support', 'CLOSE']
+    ,['support.qa.view', 'Support Questions View', 'support', 'QA_VIEW']
+    ,['support.qa.manage', 'Support Questions Manage', 'support', 'QA_MANAGE']
 ];
 
 foreach ($permissionDefinitions as $permission) {

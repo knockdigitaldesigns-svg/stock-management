@@ -30,7 +30,7 @@ if (!isset($file['size']) || $file['size'] === 0) {
     sendResponse(false, 'Excel file is empty.', [], [], 400);
 }
 
-$parsed = parseXlsxRows($file['tmp_name'], ['Dealer Name', 'Mobile No', 'Location', 'Enrolled Date', 'Installation Status'], ['Notes']);
+$parsed = parseXlsxRows($file['tmp_name'], ['Dealer Name', 'Mobile No', 'Location', 'Enrolled Date', 'Installation Status'], ['Notes', 'Software']);
 if (isset($parsed['error'])) {
     sendResponse(false, $parsed['error'], [], [], 400);
 }
@@ -73,10 +73,29 @@ foreach ($rows as $index => $row) {
         $seenMobiles[$normMobile] = true;
     }
 
-    // Database duplicate checks
-    if ($normName !== '' || $normMobile !== '') {
-        $dbErrors = checkDealerDuplicatesInDb($conn, $data['dealer_name'], $normMobile, null, $rowNumber);
-        $rowErrors = array_merge($rowErrors, $dbErrors);
+    // Existing dealers are updated below; reject only when name and mobile identify different records.
+    $nameMatchId = null;
+    $mobileMatchId = null;
+    if ($normName !== '') {
+        $matchStmt = $conn->prepare('SELECT id FROM dealers WHERE LOWER(TRIM(dealer_name)) = LOWER(TRIM(?)) LIMIT 1');
+        $matchStmt->bind_param('s', $data['dealer_name']);
+        $matchStmt->execute();
+        $nameMatch = $matchStmt->get_result()->fetch_assoc();
+        $nameMatchId = $nameMatch ? (int) $nameMatch['id'] : null;
+        $matchStmt->close();
+    }
+    if ($normMobile !== '') {
+        $matchStmt = $conn->prepare("SELECT id FROM dealers WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile_no, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') = ? LIMIT 1");
+        $matchStmt->bind_param('s', $normMobile);
+        $matchStmt->execute();
+        $mobileMatch = $matchStmt->get_result()->fetch_assoc();
+        $mobileMatchId = $mobileMatch ? (int) $mobileMatch['id'] : null;
+        $matchStmt->close();
+    }
+    if ($nameMatchId !== null && $mobileMatchId !== null && $nameMatchId !== $mobileMatchId) {
+        $rowErrors[] = "Row {$rowNumber}: Dealer Name and Mobile No belong to different existing dealers.";
+    } elseif ($nameMatchId !== null || $mobileMatchId !== null) {
+        $data['_existing_id'] = $nameMatchId ?? $mobileMatchId;
     }
 
     if (!empty($rowErrors)) {
@@ -93,16 +112,32 @@ if (!empty($errors)) {
 
 $conn->begin_transaction();
 try {
-    $insertStmt = $conn->prepare('INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, notes) VALUES (?, ?, ?, ?, ?, ?)');
+    $insertStmt = $conn->prepare('INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    $updateWithSoftwareStmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, software = ?, notes = ? WHERE id = ?');
+    $updateWithoutSoftwareStmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, notes = ? WHERE id = ?');
+    $importedCount = 0;
+    $updatedCount = 0;
     foreach ($validRows as $dealer) {
-        $insertStmt->bind_param('ssssss', $dealer['dealer_name'], $dealer['mobile_no'], $dealer['location'], $dealer['enrolled_date'], $dealer['installation_status'], $dealer['notes']);
-        if (!$insertStmt->execute()) {
-            throw new Exception($insertStmt->error);
+        if (!empty($dealer['_existing_id'])) {
+            if ($dealer['software'] !== null) {
+                $updateWithSoftwareStmt->bind_param('sssssssi', $dealer['dealer_name'], $dealer['mobile_no'], $dealer['location'], $dealer['enrolled_date'], $dealer['installation_status'], $dealer['software'], $dealer['notes'], $dealer['_existing_id']);
+                if (!$updateWithSoftwareStmt->execute()) throw new Exception($updateWithSoftwareStmt->error);
+            } else {
+                $updateWithoutSoftwareStmt->bind_param('ssssssi', $dealer['dealer_name'], $dealer['mobile_no'], $dealer['location'], $dealer['enrolled_date'], $dealer['installation_status'], $dealer['notes'], $dealer['_existing_id']);
+                if (!$updateWithoutSoftwareStmt->execute()) throw new Exception($updateWithoutSoftwareStmt->error);
+            }
+            $updatedCount++;
+        } else {
+            $insertStmt->bind_param('sssssss', $dealer['dealer_name'], $dealer['mobile_no'], $dealer['location'], $dealer['enrolled_date'], $dealer['installation_status'], $dealer['software'], $dealer['notes']);
+            if (!$insertStmt->execute()) throw new Exception($insertStmt->error);
+            $importedCount++;
         }
     }
     $insertStmt->close();
+    $updateWithSoftwareStmt->close();
+    $updateWithoutSoftwareStmt->close();
     $conn->commit();
-    sendResponse(true, count($validRows) . ' dealers imported successfully.', ['count' => count($validRows)]);
+    sendResponse(true, "{$importedCount} dealers imported and {$updatedCount} dealers updated successfully.", ['count' => count($validRows), 'imported' => $importedCount, 'updated' => $updatedCount]);
 } catch (Exception $ex) {
     $conn->rollback();
     if (strpos($ex->getMessage(), 'Duplicate entry') !== false) {

@@ -20,6 +20,10 @@ $sql = "
         s.sim_type,
         v.months AS sim_validity_months,
         s.purchase_date as sim_purchase_date,
+        sa.sim_given_date,
+        sa.sim_activation_date,
+        sa.sim_expiry_date,
+        COALESCE(sa.sim_status, 'Available') AS sim_status,
         sa.notes,
         sa.allocation_date
     FROM stock_allocations sa

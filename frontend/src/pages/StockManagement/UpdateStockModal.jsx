@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Search } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import SearchableDropdown from '../../components/SearchableDropdown/SearchableDropdown';
 import { formatDate } from '../../utils/date';
 import { softwareDropdownOptions } from '../../constants/software';
 import PaymentModal from '../../components/PaymentModal/PaymentModal';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     const [ownerOptions, setOwnerOptions] = useState([]);
@@ -28,11 +28,21 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     const [usedFor, setUsedFor] = useState('');
     const [software, setSoftware] = useState('');
     const [totalAmount, setTotalAmount] = useState('');
-    const [amountPaid, setAmountPaid] = useState('');
+    const [amountPaid, setAmountPaid] = useState('0');
     const [paymentStatus, setPaymentStatus] = useState('Not Paid');
     const [paymentDealer, setPaymentDealer] = useState(null);
     const [updateLoading, setUpdateLoading] = useState(false);
     const [updateError, setUpdateError] = useState('');
+
+    const triggerSearchError = (msg) => {
+        setSearchError(msg);
+        showGlobalError(msg);
+    };
+
+    const triggerUpdateError = (msg) => {
+        setUpdateError(msg);
+        showGlobalError(msg);
+    };
 
     useEffect(() => {
         const fetchOwners = async () => {
@@ -91,11 +101,20 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
             const response = await api.get(`/stock/owner_details.php?owner_type=${encodeURIComponent(ownerType)}&owner_id=${encodeURIComponent(ownerId)}`);
             if (response.data.success) {
                 const details = response.data.data || {};
+                const devices = (details.devices || []).map((device) => ({
+                    ...device,
+                    statusLabel: device.status_label || (device.usage_type ? `Used for ${device.usage_type === 'ET' ? 'ET' : device.usage_type.charAt(0) + device.usage_type.slice(1).toLowerCase()}` : 'Available')
+                }));
+                const sims = (details.sims || []).map((sim) => ({
+                    ...sim,
+                    statusLabel: sim.status_label || (sim.usage_type ? `Used for ${sim.usage_type === 'ET' ? 'ET' : sim.usage_type.charAt(0) + sim.usage_type.slice(1).toLowerCase()}` : 'Available')
+                }));
+
                 setOwnerSummary(details.summary || null);
-                setOwnerDevices(details.devices || []);
-                setOwnerSims(details.sims || []);
-                setSelectedOwnerDeviceIds([]);
-                setSelectedOwnerSimIds([]);
+                setOwnerDevices(devices);
+                setOwnerSims(sims);
+                setSelectedOwnerDeviceIds(devices.filter((device) => device.is_read_only).map((device) => device.id));
+                setSelectedOwnerSimIds(sims.filter((sim) => sim.is_read_only).map((sim) => sim.id));
             }
         } catch (error) {
             console.error('Failed to fetch owner inventory', error);
@@ -149,12 +168,14 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
         );
     };
 
+    const isReadOnlyInventoryItem = (item) => Boolean(item.is_used_for_et || item.is_used_for_customer || item.is_read_only);
+
     const handleSearch = async (event) => {
         event.preventDefault();
         const value = searchQuery.trim();
 
         if (!value) {
-            setSearchError('Please enter an IMEI or SIM number.');
+            triggerSearchError('Please enter an IMEI or SIM number.');
             return;
         }
 
@@ -165,7 +186,7 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
             setSearchResult(null);
             setSearchSummary(null);
             setSelectedSearchItem(false);
-            setSearchError('No device/SIM found for this number.');
+            triggerSearchError('No device/SIM found for this number.');
             return;
         }
 
@@ -177,39 +198,57 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
         setSelectedSearchItem(false);
 
         try {
-            const response = await api.post('/stock/search.php', { search: value });
+            const selectedOwnerParts = selectedOwner ? String(selectedOwner).split(':') : [];
+            const response = await api.post('/stock/search.php', {
+                search: value,
+                owner_type: selectedOwnerParts[0] || '',
+                owner_id: selectedOwnerParts[1] ? Number(selectedOwnerParts[1]) : 0
+            });
             const payload = response.data?.data || {};
             const result = payload?.data || payload?.item || null;
 
             if (response.data.success && result) {
                 setSearchResult(result);
+                if (!result.owner_matches_selected) {
+                    triggerSearchError('This asset belongs to another owner and cannot be added here.');
+                }
+                setSelectedSearchItem(Boolean(result.is_used));
                 if (result.owner_type && result.owner_id) {
                     fetchSearchOwnerSummary(result.owner_type, result.owner_id);
                 }
             } else {
-                setSearchError(response.data.message || 'No device/SIM found for this number.');
+                triggerSearchError(response.data.message || 'No device/SIM found for this number.');
             }
         } catch (error) {
-            setSearchError(error.response?.data?.message || 'No device/SIM found for this number.');
+            triggerSearchError(error.response?.data?.message || 'No device/SIM found for this number.');
         } finally {
             setSearchLoading(false);
         }
     };
 
     const buildUpdatePayload = () => {
-        if (selectedOwner && (selectedOwnerDeviceIds.length > 0 || selectedOwnerSimIds.length > 0)) {
+        if (selectedOwner) {
             const [ownerType, ownerId] = String(selectedOwner).split(':');
+            const selectedDeviceIds = selectedOwnerDeviceIds.filter((id) => !isReadOnlyInventoryItem(ownerDevices.find((device) => device.id === id)));
+            const selectedSimIds = selectedOwnerSimIds.filter((id) => !isReadOnlyInventoryItem(ownerSims.find((sim) => sim.id === id)));
+            if (selectedSearchItem && searchResult?.owner_matches_selected && !searchResult.is_used) {
+                if (searchResult.type === 'device') selectedDeviceIds.push(searchResult.id);
+                if (searchResult.type === 'sim') selectedSimIds.push(searchResult.id);
+            }
             return {
                 owner_type: ownerType,
                 owner_id: Number(ownerId),
-                device_ids: selectedOwnerDeviceIds,
-                sim_ids: selectedOwnerSimIds,
+                device_ids: [...new Set(selectedDeviceIds)],
+                sim_ids: [...new Set(selectedSimIds)],
                 used_for: usedFor
                 , device_notes: deviceNotes, sim_notes: simNotes, software, total_amount: totalAmount, amount_paid: amountPaid, payment_status: paymentStatus
             };
         }
 
         if (searchResult && selectedSearchItem) {
+            if (searchResult.is_used || !searchResult.owner_matches_selected) {
+                return null;
+            }
             return {
                 owner_type: searchResult.owner_type,
                 owner_id: Number(searchResult.owner_id),
@@ -225,29 +264,45 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     };
 
     const handleUpdate = async () => {
+        if (searchResult?.is_used) {
+            triggerUpdateError('Used assets are read-only and cannot be updated.');
+            return;
+        }
+        if (searchResult && searchResult.owner_matches_selected === false) {
+            triggerUpdateError('This asset belongs to another owner and cannot be added here.');
+            return;
+        }
         if (!usedFor) {
-            setUpdateError('Please select a usage type.');
+            triggerUpdateError('Please select a usage type.');
             return;
         }
 
         const payload = buildUpdatePayload();
         if (!payload) {
             if (searchResult) {
-                setUpdateError('Please select the device/SIM.');
+                triggerUpdateError('Please select the device/SIM.');
             } else if (selectedOwner) {
-                setUpdateError('Please select at least one device or SIM for this owner.');
+                triggerUpdateError('Please select at least one device or SIM for this owner.');
             } else {
-                setUpdateError('Please select a dealer/technician or search a device/SIM first.');
+                triggerUpdateError('Please select a dealer/technician or search a device/SIM first.');
             }
             return;
         }
         const selectedCount = (payload.device_ids?.length || 0) + (payload.sim_ids?.length || 0);
         if (usedFor === 'DEALER' && selectedCount !== 1) {
-            setUpdateError('Select one allocation at a time when recording dealer payment.');
+            triggerUpdateError('Select one allocation at a time when recording dealer payment.');
             return;
         }
-        if (Number(amountPaid || 0) > Number(totalAmount || 0)) {
-            setUpdateError('Amount paid cannot be greater than total price.');
+        if (amountPaid === '' || amountPaid === null || amountPaid === undefined) {
+            triggerUpdateError('Please enter Amount Paid.');
+            return;
+        }
+        if (Number(amountPaid) < 0) {
+            triggerUpdateError('Amount Paid cannot be negative.');
+            return;
+        }
+        if (Number(amountPaid) > Number(totalAmount || 0)) {
+            triggerUpdateError('Amount Paid cannot exceed Total Amount.');
             return;
         }
 
@@ -264,10 +319,10 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                     onClose();
                 }
             } else {
-                setUpdateError(response.data.message || 'Failed to update stock');
+                triggerUpdateError(response.data.message || 'Failed to update stock');
             }
         } catch (error) {
-            setUpdateError(error.response?.data?.message || 'Network error occurred');
+            triggerUpdateError(error.response?.data?.message || 'Network error occurred');
         } finally {
             setUpdateLoading(false);
         }
@@ -299,7 +354,7 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                     type="button"
                     className="btn btn-primary"
                     onClick={handleUpdate}
-                    disabled={updateLoading || (!usedFor) || (!selectedOwner && !searchResult) || (!selectedOwner && searchResult && !selectedSearchItem) || (selectedOwner && selectedOwnerDeviceIds.length === 0 && selectedOwnerSimIds.length === 0)}
+                    disabled={updateLoading || (!usedFor) || (!selectedOwner && !searchResult) || (!selectedOwner && searchResult && !selectedSearchItem) || Boolean(searchResult?.is_used) || searchResult?.owner_matches_selected === false}
                 >
                     {updateLoading ? 'Updating...' : 'Update Stock'}
                 </button>
@@ -341,6 +396,7 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                             <input
                                 type="checkbox"
                                 checked={selectedSearchItem}
+                                disabled={Boolean(searchResult.is_used || searchResult.is_read_only || searchResult.owner_matches_selected === false)}
                                 onChange={(e) => setSelectedSearchItem(e.target.checked)}
                             />
                             <span>{searchResult.imei_no || searchResult.sim_no}</span>
@@ -349,7 +405,9 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                         <div style={{ display: 'grid', gap: '0.5rem' }}>
                             <div><strong>Current Owner:</strong> {searchResult.owner_name || 'Warehouse'}</div>
                             <div><strong>Owner Type:</strong> {searchResult.owner_type ? searchResult.owner_type.charAt(0).toUpperCase() + searchResult.owner_type.slice(1) : 'N/A'}</div>
-                            <div><strong>Status:</strong> {searchResult.status || 'N/A'}</div>
+                            <div><strong>Status:</strong> {searchResult.status_label || searchResult.status || 'N/A'}</div>
+                            {searchResult.is_read_only && <div><strong>State:</strong> Read Only</div>}
+                            {searchResult.customer_name && <div><strong>Customer:</strong> {searchResult.customer_name}</div>}
                             <div><strong>Purchase Date:</strong> {formatDate(searchResult.purchase_date)}</div>
                             {searchResult.type === 'device' && <div><strong>Device Model:</strong> {searchResult.device_model || 'N/A'}</div>}
                         </div>
@@ -372,30 +430,98 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
 
                 {selectedOwner && ownerDevices.length > 0 && (
                     <div>
-                        <h4 style={{ margin: '0 0 0.75rem' }}>Available IMEI</h4>
+                        <h4 style={{ margin: '0 0 0.75rem' }}>Device / IMEI</h4>
                         <div style={{ display: 'grid', gap: '0.5rem' }}>
-                            {ownerDevices.map((device) => (
-                                <label key={device.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.5rem' }}>
-                                    <input type="checkbox" checked={selectedOwnerDeviceIds.includes(device.id)} onChange={() => handleOwnerDeviceToggle(device.id)} />
-                                    <span style={{ minWidth: '130px' }}>{device.imei_no}</span><span>Software: {device.software || '-'}</span><span>Total: ₹{Number(device.total_amount || 0).toFixed(2)}</span><span>Paid: ₹{Number(device.amount_paid || 0).toFixed(2)}</span><span>Pending: ₹{Number(device.pending_amount || 0).toFixed(2)}</span><span>{device.payment_status || (Number(device.total_amount || 0) > 0 ? 'Not Paid' : 'No Payment Required')}</span>{selectedOwner.startsWith('dealer:') && <button type="button" className="btn btn-outline" onClick={() => setPaymentDealer({ id: Number(selectedOwner.split(':')[1]), dealer_name: ownerOptions.find((owner) => owner.value === selectedOwner)?.label?.replace('Dealer â€” ', '') || 'Dealer' })}>Payment</button>}
-                                    {selectedOwnerDeviceIds.includes(device.id) && <textarea className="form-control" rows="3" placeholder="Enter notes..." value={deviceNotes[device.id] || ''} onChange={(e) => setDeviceNotes((prev) => ({ ...prev, [device.id]: e.target.value }))} />}
-                                </label>
-                            ))}
+                            {ownerDevices.map((device) => {
+                                const isLocked = isReadOnlyInventoryItem(device);
+                                const isSelected = selectedOwnerDeviceIds.includes(device.id);
+                                const statusLabel = device.statusLabel || (device.usage_type ? `Used for ${device.usage_type === 'ET' ? 'ET' : device.usage_type.charAt(0) + device.usage_type.slice(1).toLowerCase()}` : 'Available');
+
+                                return (
+                                    <div key={device.id} style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                disabled={isLocked}
+                                                onChange={() => handleOwnerDeviceToggle(device.id)}
+                                            />
+                                            <span style={{ minWidth: '130px', fontWeight: 500 }}>{device.imei_no}</span>
+                                            <span style={{ fontSize: '0.8rem', color: isLocked ? '#166534' : '#1f2937' }}>{statusLabel}</span>
+                                            {device.is_used_for_customer && <span style={{ fontSize: '0.8rem', color: '#475569' }}>Customer: {device.customer_name || 'Assigned'}</span>}
+                                            {isLocked && <span style={{ fontSize: '0.75rem', color: '#475569' }}>Read Only</span>}
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: '#475569' }}>
+                                            <span>Software: {device.software || '-'}</span>
+                                            <span>Total: ₹{Number(device.total_amount || 0).toFixed(2)}</span>
+                                            <span>Paid: ₹{Number(device.amount_paid || 0).toFixed(2)}</span>
+                                            <span>Pending: ₹{Number(device.pending_amount || 0).toFixed(2)}</span>
+                                            <span>{device.payment_status || (Number(device.total_amount || 0) > 0 ? 'Not Paid' : 'No Payment Required')}</span>
+                                            {selectedOwner.startsWith('dealer:') && <button type="button" className="btn btn-outline" onClick={() => setPaymentDealer({ id: Number(selectedOwner.split(':')[1]), dealer_name: ownerOptions.find((owner) => owner.value === selectedOwner)?.label?.replace('Dealer — ', '') || 'Dealer' })}>Payment</button>}
+                                        </div>
+
+                                        {!isLocked && isSelected && (
+                                            <textarea
+                                                className="form-control"
+                                                rows="3"
+                                                placeholder="Enter notes..."
+                                                value={deviceNotes[device.id] || ''}
+                                                onChange={(e) => setDeviceNotes((prev) => ({ ...prev, [device.id]: e.target.value }))}
+                                            />
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
 
                 {selectedOwner && ownerSims.length > 0 && (
                     <div>
-                        <h4 style={{ margin: '0 0 0.75rem' }}>Available SIM</h4>
+                        <h4 style={{ margin: '0 0 0.75rem' }}>SIM</h4>
                         <div style={{ display: 'grid', gap: '0.5rem' }}>
-                            {ownerSims.map((sim) => (
-                                <label key={sim.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.5rem' }}>
-                                    <input type="checkbox" checked={selectedOwnerSimIds.includes(sim.id)} onChange={() => handleOwnerSimToggle(sim.id)} />
-                                    <span style={{ minWidth: '130px' }}>{sim.sim_no}</span><span>Software: {sim.software || '-'}</span><span>Total: ₹{Number(sim.total_amount || 0).toFixed(2)}</span><span>Paid: ₹{Number(sim.amount_paid || 0).toFixed(2)}</span><span>Pending: ₹{Number(sim.pending_amount || 0).toFixed(2)}</span><span>{sim.payment_status || (Number(sim.total_amount || 0) > 0 ? 'Not Paid' : 'No Payment Required')}</span>{selectedOwner.startsWith('dealer:') && <button type="button" className="btn btn-outline" onClick={() => setPaymentDealer({ id: Number(selectedOwner.split(':')[1]), dealer_name: ownerOptions.find((owner) => owner.value === selectedOwner)?.label?.replace('Dealer â€” ', '') || 'Dealer' })}>Payment</button>}
-                                    {selectedOwnerSimIds.includes(sim.id) && <textarea className="form-control" rows="3" placeholder="Enter notes..." value={simNotes[sim.id] || ''} onChange={(e) => setSimNotes((prev) => ({ ...prev, [sim.id]: e.target.value }))} />}
-                                </label>
-                            ))}
+                            {ownerSims.map((sim) => {
+                                const isLocked = isReadOnlyInventoryItem(sim);
+                                const isSelected = selectedOwnerSimIds.includes(sim.id);
+                                const statusLabel = sim.statusLabel || (sim.usage_type ? `Used for ${sim.usage_type === 'ET' ? 'ET' : sim.usage_type.charAt(0) + sim.usage_type.slice(1).toLowerCase()}` : 'Available');
+
+                                return (
+                                    <div key={sim.id} style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                disabled={isLocked}
+                                                onChange={() => handleOwnerSimToggle(sim.id)}
+                                            />
+                                            <span style={{ minWidth: '130px', fontWeight: 500 }}>{sim.sim_no}</span>
+                                            <span style={{ fontSize: '0.8rem', color: isLocked ? '#166534' : '#1f2937' }}>{statusLabel}</span>
+                                            {sim.is_used_for_customer && <span style={{ fontSize: '0.8rem', color: '#475569' }}>Customer: {sim.customer_name || 'Assigned'}</span>}
+                                            {isLocked && <span style={{ fontSize: '0.75rem', color: '#475569' }}>Read Only</span>}
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: '#475569' }}>
+                                            <span>Software: {sim.software || '-'}</span>
+                                            <span>Total: ₹{Number(sim.total_amount || 0).toFixed(2)}</span>
+                                            <span>Paid: ₹{Number(sim.amount_paid || 0).toFixed(2)}</span>
+                                            <span>Pending: ₹{Number(sim.pending_amount || 0).toFixed(2)}</span>
+                                            <span>{sim.payment_status || (Number(sim.total_amount || 0) > 0 ? 'Not Paid' : 'No Payment Required')}</span>
+                                            {selectedOwner.startsWith('dealer:') && <button type="button" className="btn btn-outline" onClick={() => setPaymentDealer({ id: Number(selectedOwner.split(':')[1]), dealer_name: ownerOptions.find((owner) => owner.value === selectedOwner)?.label?.replace('Dealer — ', '') || 'Dealer' })}>Payment</button>}
+                                        </div>
+
+                                        {!isLocked && isSelected && (
+                                            <textarea
+                                                className="form-control"
+                                                rows="3"
+                                                placeholder="Enter notes..."
+                                                value={simNotes[sim.id] || ''}
+                                                onChange={(e) => setSimNotes((prev) => ({ ...prev, [sim.id]: e.target.value }))}
+                                            />
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -411,10 +537,22 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                 </div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Software</label><SearchableDropdown options={softwareDropdownOptions} value={software} onChange={setSoftware} placeholder="Select software" /></div>
                 <div className="card" style={{ padding: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Total Price</label><input type="number" min="0" step="0.01" className="form-control" value={totalAmount} onChange={(e) => { setTotalAmount(e.target.value); const paid = Number(amountPaid) || 0; setPaymentStatus(paid === 0 ? 'Not Paid' : paid >= Number(e.target.value) ? 'Paid' : 'Partially Paid'); }} /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Amount Paid</label><input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={(e) => { setAmountPaid(e.target.value); const paid = Number(e.target.value) || 0; setPaymentStatus(paid === 0 ? 'Not Paid' : paid >= Number(totalAmount) ? 'Paid' : 'Partially Paid'); }} /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Pending Payment</label><input className="form-control" value={`₹${Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)).toFixed(2)}`} readOnly /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Payment Status</label><select className="form-control" value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}><option>Paid</option><option>Partially Paid</option><option>Not Paid</option></select></div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Total Price</label>
+                        <input className="form-control" value={`₹${Number(totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} readOnly />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Amount Paid</label>
+                        <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Pending Payment</label>
+                        <input className="form-control" value={`₹${Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} readOnly />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Payment Status</label>
+                        <input className="form-control" value={Number(totalAmount || 0) <= 0 ? 'Not Paid' : (Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)) <= 0 ? 'Paid' : (Number(amountPaid || 0) > 0 ? 'Partially Paid' : 'Not Paid'))} readOnly />
+                    </div>
                 </div>
                 {paymentDealer && <PaymentModal dealer={paymentDealer} onClose={() => setPaymentDealer(null)} onSuccess={() => { setPaymentDealer(null); const [type, id] = selectedOwner.split(':'); fetchOwnerInventory(type, id); }} />}
             </div>

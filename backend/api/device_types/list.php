@@ -7,7 +7,7 @@ handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
-requireAnyPermission(['device_types.view', 'devices.view']);
+requireAnyPermission(['device_types.view', 'devices.view', 'dealers.view', 'technicians.view']);
 
 $conn = (new Database())->getConnection();
 if (!$conn) {

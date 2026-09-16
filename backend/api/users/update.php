@@ -3,10 +3,11 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/user_identity.php';
+require_once '../../utils/audit.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $_SERVER['REQUEST_METHOD'] !== 'PUT') sendResponse(false, 'Method not allowed', [], [], 405);
-authenticate();
+$currentUser = authenticate();
 requirePermission('users.edit');
 $data = json_decode(file_get_contents('php://input'));
 if (!$data) sendResponse(false, 'Invalid payload', [], [], 400);
@@ -32,6 +33,11 @@ $stmt = $conn->prepare("SELECT id FROM users WHERE id <> ? AND (LOWER(username) 
 if ($stmt->get_result()->num_rows > 0) sendResponse(false, 'Username already exists. Please use a different employee name.', [], [], 409); $stmt->close();
 $stmt = $conn->prepare('SELECT role_name FROM roles WHERE id = ? AND status = "active" LIMIT 1'); $stmt->bind_param('i', $roleId); $stmt->execute(); $role = $stmt->get_result()->fetch_assoc(); $stmt->close();
 if (!$role) sendResponse(false, 'Selected role is invalid or inactive', [], [], 400);
+$oldStmt = $conn->prepare('SELECT employee_name, mobile_no, username, role_id, status FROM users WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id); $oldStmt->execute(); $oldUser = $oldStmt->get_result()->fetch_assoc(); $oldStmt->close();
+$newUser = ['employee_name' => $employeeName, 'mobile_no' => $mobileNo, 'username' => $username, 'role_id' => $roleId, 'status' => $status];
+$conn->begin_transaction();
+writeChangedFields($conn, $id, 'User', $oldUser, $newUser, $currentUser);
 if ($password !== '') {
     $hash = password_hash($password, PASSWORD_DEFAULT);
     $stmt = $conn->prepare('UPDATE users SET employee_name = ?, mobile_no = ?, username = ?, password = ?, role = ?, role_id = ?, status = ? WHERE id = ?');
@@ -42,9 +48,10 @@ if ($password !== '') {
 }
 if (!$stmt->execute()) {
     $duplicate = $stmt->errno === 1062 || $conn->errno === 1062;
+    $conn->rollback();
     $stmt->close(); $conn->close();
     if ($duplicate) sendResponse(false, 'Username already exists. Please use a different employee name.', [], [], 409);
     sendResponse(false, 'Failed to update user', [], [], 500);
 }
-$stmt->close(); $conn->close(); sendResponse(true, 'User updated successfully');
+$stmt->close(); $conn->commit(); $conn->close(); sendResponse(true, 'User updated successfully');
 ?>

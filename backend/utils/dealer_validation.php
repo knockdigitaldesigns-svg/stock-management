@@ -22,8 +22,8 @@ function validateDealerFields($input, $rowNumber = null) {
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $installationStatus = trim((string) ($input['installation_status'] ?? $input['Installation Status'] ?? ''));
     $notes = trim((string) ($input['notes'] ?? $input['Notes'] ?? ''));
-    $software = trim((string) ($input['software'] ?? ''));
-    $allowedSoftware = ['Tracoo', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
+    $software = trim((string) ($input['software'] ?? $input['Software'] ?? ''));
+    $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
     if ($software !== '' && !in_array($software, $allowedSoftware, true)) $errors[] = "{$prefix}Invalid Software.";
 
     // 1. Dealer Name
@@ -80,8 +80,8 @@ function validateDealerFields($input, $rowNumber = null) {
             'location' => $location,
             'enrolled_date' => $isoDate,
             'installation_status' => $normalizedStatus,
-            'notes' => $notes
-            , 'software' => $software !== '' ? $software : null
+            'notes' => $notes,
+            'software' => $software !== '' ? $software : null
         ]
     ];
 }

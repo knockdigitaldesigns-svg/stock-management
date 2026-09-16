@@ -3,8 +3,10 @@ import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import { formatDate } from '../../../utils/date';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
+    const getStatusLabel = (item) => item?.status_label || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
     const [formData, setFormData] = useState({
         technician_name: technician?.technician_name || '',
         mobile_no: technician?.mobile_no || '',
@@ -15,15 +17,26 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
+    const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     useEffect(() => {
         let active = true;
         api.get(`/stock/owner_details.php?owner_type=technician&owner_id=${technician?.id}`)
             .then((response) => {
-                if (active && response.data.success) setAllocatedStock(response.data.data || { devices: [], sims: [] });
+                if (active && response.data.success) {
+                    setAllocatedStock(response.data.data || { devices: [], sims: [] });
+                    if (response.data.data?.summary) {
+                        setStockSummary(response.data.data.summary);
+                    }
+                }
             })
-            .catch(() => { if (active) setError('Unable to load allocated stock.'); })
+            .catch(() => { if (active) triggerError('Unable to load allocated stock.'); })
             .finally(() => { if (active) setStockLoading(false); });
         return () => { active = false; };
     }, [technician?.id]);
@@ -33,11 +46,11 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
         setError('');
 
         if (!formData.technician_name || !formData.mobile_no || !formData.location || !formData.enrolled_date) {
-            return setError('All required fields must be filled.');
+            return triggerError('All required fields must be filled.');
         }
 
         if (!/^[0-9+\s-]{10,15}$/.test(formData.mobile_no)) {
-            return setError('Mobile number is invalid.');
+            return triggerError('Mobile number is invalid.');
         }
 
         setLoading(true);
@@ -50,10 +63,10 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
             if (response.data.success) {
                 onSuccess();
             } else {
-                setError(response.data.message || 'Unable to update technician.');
+                triggerError(response.data.message || 'Unable to update technician.');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Unable to update technician. Please try again.');
+            triggerError(err.response?.data?.message || 'Unable to update technician. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -105,10 +118,10 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                 <h4>Technician Information</h4>
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={technician?.payment_status || 'Not Paid'} readOnly /></div>
                 <hr />
-                <h4>Allocated Devices ({allocatedStock.devices.length})</h4>
-                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{formatDate(item.allocation_date)}</td><td>{item.status}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
-                <h4>Allocated SIMs ({allocatedStock.sims.length})</h4>
-                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>SIM Type</th><th>SIM Validity</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.sim_validity_months ? `${item.sim_validity_months} Months` : '-'}</td><td>{formatDate(item.allocation_date)}</td><td>{item.status}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
+                <h4>Allocated Devices (Total: {stockSummary.total_device || 0}, Used: {stockSummary.used_device || 0}, Available: {stockSummary.available_device || 0})</h4>
+                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{formatDate(item.allocation_date)}</td><td>{getStatusLabel(item)}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
+                <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
+                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>SIM Type</th><th>SIM Validity</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.sim_validity_months ? `${item.sim_validity_months} Months` : '-'}</td><td>{formatDate(item.allocation_date)}</td><td>{getStatusLabel(item)}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
             </form>
         </Modal>
     );

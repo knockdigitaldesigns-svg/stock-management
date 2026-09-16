@@ -93,7 +93,18 @@ const DeviceMaintenance = () => {
             </div>
 
             <div className="card">
-                <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={devices} dateKeys={['purchase_date']} deviceKey="model_name" deviceOptions={models.map((model) => model.label)} searchPlaceholder="Search by IMEI or model..." />
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={devices}
+                    dateKeys={['purchase_date']}
+                    showDeviceModel
+                    deviceModelOptions={models.map((model) => model.label)}
+                    showStatus
+                    statusOptions={['Available', 'Allocated', 'Used']}
+                    searchPlaceholder="Search by IMEI, model, or notes..."
+                />
 
                 <div className="table-container">
                     <table>
