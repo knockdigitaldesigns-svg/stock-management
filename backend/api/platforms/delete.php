@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('platforms.delete');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -73,57 +75,40 @@ $platform = $result->fetch_assoc();
 $check->close();
 
 /* Delete */
+$conn->begin_transaction();
+try {
+writeDeleteSnapshot($conn, $id, 'Platform', $platform, $currentUser);
 $stmt = $conn->prepare(
     'DELETE FROM platforms WHERE id = ?'
 );
 
 if (!$stmt) {
     $error = $conn->error;
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Delete prepare failed: ' . $error,
-        [],
-        [],
-        500
-    );
+    throw new RuntimeException('Delete prepare failed: ' . $error);
 }
 
 $stmt->bind_param('i', $id);
 
 if (!$stmt->execute()) {
     $error = $stmt->error;
-
-    $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Delete failed: ' . $error,
-        [],
-        [],
-        500
-    );
+    throw new RuntimeException('Delete failed: ' . $error);
 }
 
 if ($stmt->affected_rows === 0) {
-    $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Platform could not be deleted.',
-        [],
-        [],
-        500
-    );
+    throw new RuntimeException('Platform could not be deleted.');
 }
 
 $stmt->close();
+$conn->commit();
 $conn->close();
 
 sendResponse(
     true,
     'Platform "' . $platform['platform_name'] . '" deleted successfully.'
 );
+} catch (Throwable $e) {
+    $conn->rollback();
+    if (isset($stmt) && $stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

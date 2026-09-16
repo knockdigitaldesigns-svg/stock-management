@@ -2,6 +2,7 @@
 
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
+require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 
 handlePreflight();
@@ -15,6 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         405
     );
 }
+
+$currentUser = authenticate();
 
 $data = json_decode(
     file_get_contents('php://input')
@@ -85,6 +88,9 @@ $amountPending = isset($data->amount_pending)
 $paymentStatus = trim(
     (string) ($data->payment_status ?? '')
 );
+
+$cashToTechnician = !empty($data->cash_to_technician);
+$cashToDealer = !empty($data->cash_to_dealer);
 
 
 /*
@@ -253,6 +259,10 @@ if ($amountPaid < 0) {
 }
 
 if ($paymentStep === 2) {
+    if ($cashToTechnician && $cashToDealer) {
+        sendResponse(false, 'Cash to Technician and Cash to Dealer are mutually exclusive.', [], [], 400);
+    }
+
     $chargeValues = [
         'Device Charge' => $deviceCharge,
         'Software Charge' => $softwareCharge,
@@ -354,7 +364,7 @@ if ($paymentStep === 2) {
     if ($amountPaid > $totalAmount) {
         sendResponse(
             false,
-            'Amount Paid cannot be greater than Total Amount.',
+            'Amount Paid cannot exceed Total Amount.',
             [],
             [],
             400
@@ -418,7 +428,7 @@ try {
      */
 
     $customerStmt = $conn->prepare(
-        'SELECT id
+        'SELECT *
          FROM customers
          WHERE id = ?
          LIMIT 1'
@@ -528,6 +538,73 @@ try {
         $consume($conn, 'sim', (int) ($vehicle['sim_id_2'] ?? 0), $customerId);
     };
 
+    $syncCashCollection = static function ($conn, int $customerId, int $paymentId, float $totalAmount, bool $cashToTechnician, bool $cashToDealer, array $currentUser): void {
+        $selectedType = $cashToTechnician ? 'Technician' : ($cashToDealer ? 'Dealer' : null);
+        $existingStmt = $conn->prepare('SELECT * FROM customer_cash_collections WHERE customer_id = ? AND payment_id = ? LIMIT 1 FOR UPDATE');
+        $existingStmt->bind_param('ii', $customerId, $paymentId);
+        $existingStmt->execute();
+        $existing = $existingStmt->get_result()->fetch_assoc();
+        $existingStmt->close();
+
+        if ($selectedType === null) {
+            if ($existing) {
+                $deleteStmt = $conn->prepare('DELETE FROM customer_cash_collections WHERE id = ?');
+                $collectionId = (int) $existing['id'];
+                $deleteStmt->bind_param('i', $collectionId);
+                if (!$deleteStmt->execute()) throw new Exception('Failed to remove customer cash collection.');
+                $deleteStmt->close();
+                writeDeleteSnapshot($conn, $collectionId, 'Customer Cash Collection', $existing, $currentUser);
+            }
+            return;
+        }
+
+        $installationStmt = $conn->prepare('SELECT id, installation_person_type, installation_person_id FROM customer_installations WHERE customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE');
+        $installationStmt->bind_param('i', $customerId);
+        $installationStmt->execute();
+        $installation = $installationStmt->get_result()->fetch_assoc();
+        $installationStmt->close();
+        if (!$installation) throw new Exception('Installation details are required before assigning customer cash.');
+        if ($installation['installation_person_type'] !== $selectedType) {
+            throw new Exception('Cash recipient must match the installation person type.');
+        }
+
+        $recipientId = (int) $installation['installation_person_id'];
+        $amountCollected = round($totalAmount, 2);
+        $amountRemitted = $existing ? round((float) $existing['amount_remitted'], 2) : 0.0;
+        if ($amountRemitted > $amountCollected) {
+            throw new Exception('Collected amount cannot be less than the amount already remitted.');
+        }
+        $pendingAmount = round($amountCollected - $amountRemitted, 2);
+        $status = $pendingAmount <= 0 ? 'Paid' : ($amountRemitted > 0 ? 'Partially Paid' : 'Pending');
+
+        if ($existing && ($existing['recipient_type'] !== $selectedType || (int) $existing['recipient_id'] !== $recipientId)) {
+            $deleteStmt = $conn->prepare('DELETE FROM customer_cash_collections WHERE id = ?');
+            $collectionId = (int) $existing['id'];
+            $deleteStmt->bind_param('i', $collectionId);
+            if (!$deleteStmt->execute()) throw new Exception('Failed to replace customer cash collection.');
+            $deleteStmt->close();
+            $existing = null;
+        }
+
+        if ($existing) {
+            $updateStmt = $conn->prepare('UPDATE customer_cash_collections SET amount_collected = ?, pending_amount = ?, settlement_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+            $collectionId = (int) $existing['id'];
+            $updateStmt->bind_param('ddsi', $amountCollected, $pendingAmount, $status, $collectionId);
+            if (!$updateStmt->execute()) throw new Exception('Failed to update customer cash collection.');
+            $updateStmt->close();
+            writeChangedFields($conn, $collectionId, 'Customer Cash Collection', $existing, ['amount_collected' => $amountCollected, 'pending_amount' => $pendingAmount, 'settlement_status' => $status], $currentUser);
+            return;
+        }
+
+        $insertStmt = $conn->prepare('INSERT INTO customer_cash_collections (customer_id, payment_id, installation_id, recipient_type, recipient_id, amount_collected, amount_remitted, pending_amount, settlement_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $installationId = (int) $installation['id'];
+        $insertStmt->bind_param('iiisiddds', $customerId, $paymentId, $installationId, $selectedType, $recipientId, $amountCollected, $amountRemitted, $pendingAmount, $status);
+        if (!$insertStmt->execute()) throw new Exception('Failed to create customer cash collection.');
+        $collectionId = $insertStmt->insert_id;
+        $insertStmt->close();
+        writeCreatedFields($conn, $collectionId, 'Customer Cash Collection', ['customer_id' => $customerId, 'payment_id' => $paymentId, 'recipient_type' => $selectedType, 'recipient_id' => $recipientId, 'amount_collected' => $amountCollected, 'amount_remitted' => $amountRemitted, 'pending_amount' => $pendingAmount, 'settlement_status' => $status], $currentUser);
+    };
+
 
     /*
      * ---------------------------------------------------------------
@@ -604,6 +681,25 @@ try {
      */
 
 if ($existingPaymentId !== null) {
+    $paymentChanges = [
+        'total_sale_amount' => $totalSaleAmount,
+        'transaction_id' => $transactionIdValue,
+        'payment_mode' => $paymentModeValue
+    ];
+    if ($paymentStep !== 1) {
+        $paymentChanges += [
+            'device_charge' => $deviceCharge,
+            'software_charge' => $softwareCharge,
+            'technician_charge' => $technicianCharge,
+            'sim_charge' => $simCharge,
+            'courier_charge' => $courierCharge,
+            'total_amount' => $totalAmount,
+            'amount_paid' => $amountPaid,
+            'amount_pending' => $amountPending,
+            'payment_status' => $paymentStatus
+        ];
+    }
+    writeChangedFields($conn, $existingPaymentId, 'Customer Payment', $existingRow, $paymentChanges, $currentUser);
     if ($paymentStep === 1) {
         // Only update header fields for step 1
         $updateStmt = $conn->prepare(
@@ -673,6 +769,7 @@ if ($existingPaymentId !== null) {
     }
     $updateStmt->close();
     if ($paymentStep === 2) {
+        $syncCashCollection($conn, $customerId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
         $completeCustomerStock($conn, $customerId);
     }
     $conn->commit();
@@ -759,7 +856,24 @@ if ($existingPaymentId !== null) {
 
     $insertStmt->close();
 
+    writeCreatedFields($conn, $paymentId, 'Customer Payment', [
+        'customer_id' => $customerId,
+        'total_sale_amount' => $totalSaleAmount,
+        'transaction_id' => $transactionIdValue,
+        'payment_mode' => $paymentModeValue,
+        'device_charge' => $deviceCharge,
+        'software_charge' => $softwareCharge,
+        'technician_charge' => $technicianCharge,
+        'sim_charge' => $simCharge,
+        'courier_charge' => $courierCharge,
+        'total_amount' => $totalAmount,
+        'amount_paid' => $amountPaid,
+        'amount_pending' => $amountPending,
+        'payment_status' => $paymentStatus
+    ], $currentUser);
+
     if ($paymentStep === 2) {
+        $syncCashCollection($conn, $customerId, $paymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
         $completeCustomerStock($conn, $customerId);
     }
 

@@ -28,7 +28,7 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     const [usedFor, setUsedFor] = useState('');
     const [software, setSoftware] = useState('');
     const [totalAmount, setTotalAmount] = useState('');
-    const [amountPaid, setAmountPaid] = useState('');
+    const [amountPaid, setAmountPaid] = useState('0');
     const [paymentStatus, setPaymentStatus] = useState('Not Paid');
     const [paymentDealer, setPaymentDealer] = useState(null);
     const [updateLoading, setUpdateLoading] = useState(false);
@@ -293,8 +293,16 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
             triggerUpdateError('Select one allocation at a time when recording dealer payment.');
             return;
         }
-        if (Number(amountPaid || 0) > Number(totalAmount || 0)) {
-            triggerUpdateError('Amount paid cannot be greater than total price.');
+        if (amountPaid === '' || amountPaid === null || amountPaid === undefined) {
+            triggerUpdateError('Please enter Amount Paid.');
+            return;
+        }
+        if (Number(amountPaid) < 0) {
+            triggerUpdateError('Amount Paid cannot be negative.');
+            return;
+        }
+        if (Number(amountPaid) > Number(totalAmount || 0)) {
+            triggerUpdateError('Amount Paid cannot exceed Total Amount.');
             return;
         }
 
@@ -529,10 +537,22 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                 </div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Software</label><SearchableDropdown options={softwareDropdownOptions} value={software} onChange={setSoftware} placeholder="Select software" /></div>
                 <div className="card" style={{ padding: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Total Price</label><input type="number" min="0" step="0.01" className="form-control" value={totalAmount} onChange={(e) => { setTotalAmount(e.target.value); const paid = Number(amountPaid) || 0; setPaymentStatus(paid === 0 ? 'Not Paid' : paid >= Number(e.target.value) ? 'Paid' : 'Partially Paid'); }} /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Amount Paid</label><input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={(e) => { setAmountPaid(e.target.value); const paid = Number(e.target.value) || 0; setPaymentStatus(paid === 0 ? 'Not Paid' : paid >= Number(totalAmount) ? 'Paid' : 'Partially Paid'); }} /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Pending Payment</label><input className="form-control" value={`₹${Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)).toFixed(2)}`} readOnly /></div>
-                    <div className="form-group" style={{ margin: 0 }}><label className="form-label">Payment Status</label><select className="form-control" value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}><option>Paid</option><option>Partially Paid</option><option>Not Paid</option></select></div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Total Price</label>
+                        <input className="form-control" value={`₹${Number(totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} readOnly />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Amount Paid</label>
+                        <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Pending Payment</label>
+                        <input className="form-control" value={`₹${Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} readOnly />
+                    </div>
+                    <div className="form-group" style={{ margin: 0 }}>
+                        <label className="form-label">Payment Status</label>
+                        <input className="form-control" value={Number(totalAmount || 0) <= 0 ? 'Not Paid' : (Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0)) <= 0 ? 'Paid' : (Number(amountPaid || 0) > 0 ? 'Partially Paid' : 'Not Paid'))} readOnly />
+                    </div>
                 </div>
                 {paymentDealer && <PaymentModal dealer={paymentDealer} onClose={() => setPaymentDealer(null)} onSuccess={() => { setPaymentDealer(null); const [type, id] = selectedOwner.split(':'); fetchOwnerInventory(type, id); }} />}
             </div>

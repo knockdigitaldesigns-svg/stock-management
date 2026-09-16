@@ -35,6 +35,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     const [totalAmount, setTotalAmount] = useState('');
     const [amountPaid, setAmountPaid] = useState('');
     const [paymentMode, setPaymentMode] = useState('');
+    const [transactionId, setTransactionId] = useState('');
     const [software, setSoftware] = useState('');
     const [availableDevices, setAvailableDevices] = useState([]);
     const [availableSims, setAvailableSims] = useState([]);
@@ -49,10 +50,12 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
 
     const selectedDealer = ownerType === 'dealer' ? safeOwnersList.find(d => Number(d.id) === Number(selectedOwner)) : null;
     const dealerRequiresPayment = ownerType === 'dealer' && selectedDealer?.installation_status === 'Not Willing';
+    const amountPaidEntered = String(amountPaid ?? '').trim() !== '';
     const pendingAmount = Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0));
     const paymentStatus = Number(totalAmount || 0) <= 0 ? '' : pendingAmount <= 0 ? 'Paid' : Number(amountPaid || 0) > 0 ? 'Partially Paid' : 'Not Paid';
-    const paymentFieldsComplete = [totalAmount, amountPaid, paymentMode].every((value) => String(value ?? '').trim() !== '');
-    const paymentValuesAreValid = !dealerRequiresPayment || (
+    const paymentFieldsComplete = (!dealerRequiresPayment || String(totalAmount ?? '').trim() !== '') && (!amountPaidEntered || String(paymentMode ?? '').trim() !== '');
+    const transactionRequired = amountPaidEntered && paymentMode && paymentMode !== 'Cash';
+    const paymentValuesAreValid = ownerType !== 'dealer' || (
         Number.isFinite(Number(totalAmount)) &&
         Number.isFinite(Number(pendingAmount)) &&
         Number(totalAmount) >= 0 &&
@@ -63,10 +66,11 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     const activeSims = allocationType === 'device' ? [] : sims;
     const canSubmitAllocation = !loading && (
         selectedOwner &&
+        (!dealerRequiresPayment || (String(totalAmount).trim() !== '' && Number.isFinite(Number(totalAmount)) && Number(totalAmount) > 0)) &&
         activeDevices.every((row) => row.date && row.item_id) &&
         activeSims.every((row) => row.date && row.item_id) &&
         (activeDevices.length > 0 || activeSims.length > 0) &&
-        (!dealerRequiresPayment || (paymentFieldsComplete && paymentValuesAreValid))
+        (ownerType !== 'dealer' || (paymentFieldsComplete && paymentValuesAreValid))
     );
 
     useEffect(() => {
@@ -182,25 +186,37 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         const simError = validateRows(activeSims, 'SIM');
         if (deviceError || simError) return triggerError(deviceError || simError);
         const currentTotalAmount = activeDevices.concat(activeSims).reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+        if (dealerRequiresPayment && (!String(totalAmount).trim() || !Number.isFinite(currentTotalAmount) || currentTotalAmount <= 0)) {
+            return triggerError('Total Amount is required and must be greater than 0.');
+        }
         const currentAmountPaid = amountPaid === '' ? 0 : Number(amountPaid);
         const currentPendingAmount = Math.max(0, currentTotalAmount - currentAmountPaid);
         const currentPaymentStatus = currentTotalAmount <= 0 ? 'Not Paid' : currentPendingAmount <= 0 ? 'Paid' : currentAmountPaid > 0 ? 'Partially Paid' : 'Not Paid';
-        if (amountPaid !== '' && (!Number.isFinite(currentAmountPaid) || currentAmountPaid < 0 || currentAmountPaid > currentTotalAmount)) {
-            return triggerError('Amount Paid cannot be greater than Total Amount.');
+        if (currentAmountPaid < 0) {
+            return triggerError('Amount Paid cannot be negative.');
+        }
+        if (currentAmountPaid > currentTotalAmount) {
+            return triggerError('Amount Paid cannot exceed Total Amount.');
         }
         if (ownerType === 'dealer') {
             const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
+            if (amountPaidEntered && !paymentMode) {
+                return triggerError('Payment Mode is required when Amount Paid is entered.');
+            }
             if (dealer?.installation_status === 'Not Willing') {
-                if (totalAmount === '' || amountPaid === '' || !paymentMode) {
+                if (totalAmount === '' || (amountPaidEntered && !paymentMode)) {
                     return triggerError('Payment details are mandatory for Not Willing dealers.');
                 }
 
                 const totalValue = Number(totalAmount);
                 const paidValue = Number(amountPaid);
-                if (!Number.isFinite(totalValue) || !Number.isFinite(paidValue) || paidValue < 0 || paidValue > totalValue) {
+                if (!Number.isFinite(totalValue) || (amountPaidEntered && (!Number.isFinite(paidValue) || paidValue < 0 || paidValue > totalValue))) {
                     return triggerError('Payment details are invalid for Not Willing dealers.');
                 }
             }
+        }
+        if (transactionRequired && !transactionId.trim()) {
+            return triggerError('Transaction ID is required for the selected Payment Mode.');
         }
 
         setLoading(true);
@@ -210,10 +226,11 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 owner_id: selectedOwner,
                 allocation_date: (activeDevices[0] || activeSims[0]).date,
                 total_amount: currentTotalAmount,
-                amount_paid: parseFloat(amountPaid) || 0,
+                amount_paid: amountPaidEntered ? Number(amountPaid) : null,
                 pending_amount: currentPendingAmount,
                 payment_status: currentPaymentStatus,
                 payment_mode: paymentMode,
+                transaction_id: transactionRequired ? transactionId.trim() : null,
                 software,
                 devices: activeDevices.map(i => ({ id: i.item_id, allocation_date: i.date, amount: parseFloat(i.amount) || 0, notes: i.notes })),
                 sims: activeSims.map(i => ({ id: i.item_id, allocation_date: i.date, amount: parseFloat(i.amount) || 0, notes: i.notes }))
@@ -254,8 +271,9 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 {error && <div className="alert alert-danger">{error}</div>}
 
                 {ownerType === 'dealer' && dealerRequiresPayment && (
-                    <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
-                        Installation status is Not Willing. Payment details are mandatory for this allocation.
+                    <div className="card" style={{ marginBottom: '1rem', padding: '1rem', border: '1px solid #f0b429', backgroundColor: '#fff8e1' }}>
+                        <strong style={{ display: 'block', marginBottom: '0.35rem', color: '#8a5a00' }}>Payment Required</strong>
+                        <span>Installation status is Not Willing. Payment details are mandatory for this allocation.</span>
                     </div>
                 )}
 
@@ -339,30 +357,33 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                                     type="number"
                                     className="form-control"
                                     value={totalAmount}
-                                    onChange={e => setTotalAmount(e.target.value)}
-                                    required={dealerRequiresPayment}
+                                    readOnly
                                 />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Amount Paid{dealerRequiresPayment ? ' *' : ''}</label>
-                                <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={e => { const value = e.target.value; setAmountPaid(value); const paid = Number(value); if (value === '' || (Number.isFinite(paid) && paid <= Number(totalAmount || 0))) setError(currentError => currentError === 'Amount Paid cannot be greater than Total Amount.' ? '' : currentError); }} required={dealerRequiresPayment} />
+                                <label className="form-label">Amount Paid</label>
+                                <input type="number" min="0" step="0.01" className="form-control" value={amountPaid} onChange={e => { const value = e.target.value; setAmountPaid(value); const paid = Number(value); if (value === '' || (Number.isFinite(paid) && paid <= Number(totalAmount || 0))) setError(currentError => currentError === 'Amount Paid cannot be greater than Total Amount.' ? '' : currentError); }} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Pending Amount{dealerRequiresPayment ? ' *' : ''}</label>
-                                <input type="number" className="form-control" value={pendingAmount.toFixed(2)} readOnly required={dealerRequiresPayment} />
+                                <label className="form-label">Pending Amount</label>
+                                <input type="number" className="form-control" value={pendingAmount.toFixed(2)} readOnly />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Payment Status{dealerRequiresPayment ? ' *' : ''}</label>
+                                <label className="form-label">Payment Status</label>
                                 <input className="form-control" value={paymentStatus || 'No Payment Required'} readOnly />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Payment Mode{dealerRequiresPayment ? ' *' : ''}</label>
+                                <label className="form-label">Payment Mode{amountPaidEntered ? ' *' : ''}</label>
                                 <SearchableDropdown
                                     options={paymentModeOptions}
                                     value={paymentMode}
                                     onChange={setPaymentMode}
                                     placeholder="Select payment mode"
                                 />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Transaction ID{transactionRequired ? ' *' : ''}</label>
+                                <input className="form-control" value={transactionId} onChange={e => setTransactionId(e.target.value)} placeholder={transactionRequired ? 'Enter transaction ID' : 'Not required for Cash'} />
                             </div>
                         </div>
                     </>

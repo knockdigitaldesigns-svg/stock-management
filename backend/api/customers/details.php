@@ -271,6 +271,28 @@ $installationStmt = $conn->prepare(
 
     $paymentStmt->close();
 
+    $collectionStmt = $conn->prepare(
+        'SELECT
+            ccc.id,
+            ccc.recipient_type,
+            ccc.recipient_id,
+            ccc.amount_collected,
+            ccc.amount_remitted,
+            ccc.pending_amount,
+            ccc.settlement_status,
+            ccc.settlement_date,
+            ccc.payment_mode AS settlement_payment_mode,
+            ccc.transaction_id AS settlement_transaction_id,
+            ccc.notes AS settlement_notes
+         FROM customer_cash_collections ccc
+         WHERE ccc.customer_id = ?
+         LIMIT 1'
+    );
+    $collectionStmt->bind_param('i', $customerId);
+    $collectionStmt->execute();
+    $cashCollection = $collectionStmt->get_result()->fetch_assoc();
+    $collectionStmt->close();
+
     $validityId = null;
 
     if ($vehicle && isset($vehicle['validity_months']) && $vehicle['validity_months']) {
@@ -344,6 +366,7 @@ $installationStmt = $conn->prepare(
             'payment' => $payment,
             'payment_part1' => $paymentPart1,
             'payment_part2' => $paymentPart2
+            , 'cash_collection' => $cashCollection
         ]
     );
 } catch (Throwable $e) {

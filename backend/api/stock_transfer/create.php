@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -64,6 +65,11 @@ try {
     if ($allocRow['owner_type'] !== $fromOwnerType || (int)$allocRow['owner_id'] !== $fromOwnerId) {
         throw new Exception('Allocation does not match the stated current owner.');
     }
+    writeChangedFields($conn, $allocationId, 'Stock Transfer', $allocRow, [
+        'owner_type' => $toOwnerType,
+        'owner_id' => $toOwnerId,
+        'allocation_type' => $toOwnerType
+    ], $authUser);
 
     // 2. Verify asset status is 'allocated'
     if ($assetType === 'device') {

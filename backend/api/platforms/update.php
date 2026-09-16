@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('platforms.edit');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -75,13 +77,14 @@ $check->close();
  * Check whether platform exists.
  */
 $exists = $conn->prepare(
-    'SELECT id FROM platforms WHERE id = ? LIMIT 1'
+    'SELECT platform_name, status FROM platforms WHERE id = ? LIMIT 1'
 );
 
 $exists->bind_param('i', $id);
 $exists->execute();
+$existsResult = $exists->get_result();
 
-if ($exists->get_result()->num_rows === 0) {
+if ($existsResult->num_rows === 0) {
     $exists->close();
     $conn->close();
 
@@ -94,8 +97,13 @@ if ($exists->get_result()->num_rows === 0) {
     );
 }
 
+$oldPlatform = $existsResult->fetch_assoc();
+
 $exists->close();
 
+$conn->begin_transaction();
+try {
+writeChangedFields($conn, $id, 'Platform', $oldPlatform, ['platform_name' => $platformName, 'status' => $status], $currentUser);
 $stmt = $conn->prepare(
     'UPDATE platforms
      SET platform_name = ?, status = ?
@@ -110,22 +118,20 @@ $stmt->bind_param(
 );
 
 if (!$stmt->execute()) {
-    $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Failed to update platform.',
-        [],
-        [],
-        500
-    );
+    throw new RuntimeException('Failed to update platform.');
 }
 
 $stmt->close();
+$conn->commit();
 $conn->close();
 
 sendResponse(
     true,
     'Platform updated successfully.'
 );
+} catch (Throwable $e) {
+    $conn->rollback();
+    if (isset($stmt) && $stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

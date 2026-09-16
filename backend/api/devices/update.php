@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -11,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('devices.edit');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -65,11 +66,32 @@ if ($checkResult->num_rows > 0) {
 }
 $checkStmt->close();
 
+$oldStmt = $conn->prepare('SELECT purchase_date, device_model_id, imei_no, notes FROM devices WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id);
+$oldStmt->execute();
+$oldDevice = $oldStmt->get_result()->fetch_assoc();
+$oldStmt->close();
+if (!$oldDevice) sendResponse(false, 'Device not found', [], [], 404);
+
+$newDevice = ['purchase_date' => $purchase_date, 'device_model_id' => $device_model_id, 'imei_no' => $imei_no, 'notes' => $notes];
+$conn->begin_transaction();
+try {
+writeChangedFields($conn, $id, 'Device', $oldDevice, $newDevice, $currentUser);
+
 $stmt = $conn->prepare('UPDATE devices SET purchase_date = ?, device_model_id = ?, imei_no = ?, notes = ? WHERE id = ?');
 $stmt->bind_param('sissi', $purchase_date, $device_model_id, $imei_no, $notes, $id);
 
 if ($stmt->execute()) {
+    $stmt->close();
+    $conn->commit();
+    $conn->close();
     sendResponse(true, 'Device updated successfully');
 }
 
-sendResponse(false, 'Failed to update device', [], [], 500);
+throw new RuntimeException('Failed to update device');
+} catch (Throwable $e) {
+    $conn->rollback();
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

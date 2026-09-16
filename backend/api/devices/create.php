@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -11,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('devices.add');
 
 $data = json_decode(file_get_contents("php://input"));
@@ -77,6 +78,12 @@ try {
             if ($stmt->errno === 1062) throw new Exception("Row $rowNum: IMEI number already exists.");
             throw new Exception("Row $rowNum: Database error - " . $stmt->error);
         }
+        writeCreatedFields($conn, $conn->insert_id, 'Device', [
+            'purchase_date' => $device->purchase_date,
+            'device_model_id' => $deviceModelId,
+            'imei_no' => $device->imei_no,
+            'notes' => $notes
+        ], $currentUser);
     }
     
     $conn->commit();

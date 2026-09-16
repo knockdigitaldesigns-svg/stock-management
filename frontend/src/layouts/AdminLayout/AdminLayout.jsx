@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 
 import {
     LayoutDashboard,
@@ -21,7 +21,10 @@ import {
     Car,
     UserCheck,
     IndianRupee,RefreshCw,
-    SlidersHorizontal
+    SlidersHorizontal,
+    Clock,
+    History as HistoryIcon,
+    LifeBuoy
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +32,7 @@ import './AdminLayout.css';
 
 const AdminLayout = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, hasPermission, logout } = useAuth();
 
     const [inwardOpen, setInwardOpen] = useState(false);
@@ -36,6 +40,42 @@ const AdminLayout = () => {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [customerOpen, setCustomerOpen] = useState(false);
     const [masterSettingsOpen, setMasterSettingsOpen] = useState(false);
+
+    useEffect(() => {
+        if (location.pathname.startsWith('/customer-management')) {
+            setCustomerOpen(true);
+        }
+        if (location.pathname.startsWith('/inward')) {
+            setInwardOpen(true);
+        }
+        if (location.pathname.startsWith('/outward')) {
+            setOutwardOpen(true);
+        }
+        if (
+            location.pathname.includes('/settings') ||
+            location.pathname.includes('/platforms') ||
+            location.pathname.includes('/device-types') ||
+            location.pathname.includes('/vehicle-types') ||
+            location.pathname.includes('/lead-closures') ||
+            location.pathname.includes('/sale-amounts') ||
+            location.pathname.includes('/sim-validities') ||
+            location.pathname.includes('/roles') ||
+            location.pathname.includes('/users') ||
+            location.pathname.includes('/change-password')
+        ) {
+            setSettingsOpen(true);
+            if (
+                location.pathname.includes('/platforms') ||
+                location.pathname.includes('/device-types') ||
+                location.pathname.includes('/vehicle-types') ||
+                location.pathname.includes('/lead-closures') ||
+                location.pathname.includes('/sale-amounts') ||
+                location.pathname.includes('/sim-validities')
+            ) {
+                setMasterSettingsOpen(true);
+            }
+        }
+    }, [location.pathname]);
 
     const handleLogout = () => {
         logout();
@@ -48,6 +88,12 @@ const AdminLayout = () => {
 
     const canViewDashboard =
         hasPermission('dashboard.view');
+
+    const canViewHistory =
+        hasPermission('history.view');
+
+    const canViewSupport =
+        hasPermission('support.view');
 
     const canViewDeviceMaintenance =
         hasPermission('devices.view');
@@ -107,10 +153,14 @@ const canViewCustomerReports =
 const canViewCustomerRenewals =
     hasPermission('customer_renewals.view');
 
+const canViewSimLifecycle =
+    hasPermission('sim_lifecycle.view');
+
 const showCustomerManagement =
     canViewCustomerDetails ||
     canViewCustomerReports ||
-    canViewCustomerRenewals;
+    canViewCustomerRenewals ||
+    canViewSimLifecycle;
     // =========================
     // SETTINGS
     // =========================
@@ -472,11 +522,45 @@ const showCustomerManagement =
                     </NavLink>
                 )}
 
+                {canViewSimLifecycle && (
+                    <NavLink
+                        to="/customer-management/sim-lifecycle"
+                        className={({ isActive }) =>
+                            `nav-sub-item ${
+                                isActive ? 'active' : ''
+                            }`
+                        }
+                    >
+                        <Clock size={18} />
+                        <span>SIM Lifecycle</span>
+                    </NavLink>
+                )}
+
             </div>
         )}
 
     </div>
 )}
+
+                    {canViewHistory && (
+                        <NavLink
+                            to="/history"
+                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                        >
+                            <HistoryIcon size={20} />
+                            <span>History</span>
+                        </NavLink>
+                    )}
+
+                    {canViewSupport && (
+                        <NavLink
+                            to="/support"
+                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                        >
+                            <LifeBuoy size={20} />
+                            <span>Support</span>
+                        </NavLink>
+                    )}
 
                     {/* =========================================
                         SETTINGS

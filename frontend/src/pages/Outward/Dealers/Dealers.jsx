@@ -13,10 +13,12 @@ import usePagination from '../../../hooks/usePagination';
 import PaymentModal from '../../../components/PaymentModal/PaymentModal';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
+import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 
 const Dealers = () => {
     const [dealers, setDealers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
     const [isAddDealerModalOpen, setIsAddDealerModalOpen] = useState(false);
     const [isDealerUploadModalOpen, setIsDealerUploadModalOpen] = useState(false);
@@ -25,6 +27,7 @@ const Dealers = () => {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [paymentDealer, setPaymentDealer] = useState(null);
     const [viewingDealer, setViewingDealer] = useState(null);
+    const [cashDealer, setCashDealer] = useState(null);
     const [masterData, setMasterData] = useState({
         platforms: [],
         deviceModels: [],
@@ -34,13 +37,34 @@ const Dealers = () => {
 
     const fetchDealers = async () => {
         setLoading(true);
+        setLoadError('');
         try {
-            const response = await api.get('/dealers/list.php').catch(() => ({ data: { success: true, data: { dealers: [] } } }));
+            const params = {
+                search: filters.search || '',
+                platform: filters.platform || '',
+                device_model: filters.deviceModel || '',
+                sim_type: filters.simType || '',
+                sim_validity: filters.simValidity || '',
+                installation_status: filters.installationStatus || '',
+                payment_status: filters.paymentStatus || '',
+                year: filters.year || '',
+                month: filters.month || '',
+                given_date: filters.given_date || '',
+                given_date_operator: filters.given_date_operator || 'exact',
+                activation_date: filters.activation_date || '',
+                activation_date_operator: filters.activation_date_operator || 'exact'
+            };
+            const response = await api.get('/dealers/list.php', { params });
             if (response.data.success) {
                 setDealers(response.data.data.dealers || []);
+            } else {
+                setDealers([]);
+                setLoadError(response.data.message || 'Failed to load dealers.');
             }
         } catch (error) {
             console.error('Failed to fetch dealers', error);
+            setDealers([]);
+            setLoadError(error.response?.data?.message || 'Failed to load dealers.');
         } finally {
             setLoading(false);
         }
@@ -100,12 +124,20 @@ const Dealers = () => {
 
     useEffect(() => {
         fetchDealers();
+    }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.year, filters.month, filters.given_date, filters.given_date_operator, filters.activation_date, filters.activation_date_operator]);
+
+    useEffect(() => {
         fetchFilterMasters();
     }, []);
 
     const filteredDealers = filterTableRows(dealers, filters, {
         dateKeys: ['enrolled_date'],
-        searchKeys: ['dealer_name', 'mobile_no', 'location', 'software', 'notes']
+        searchKeys: ['dealer_name', 'mobile_no', 'location', 'software', 'notes'],
+        searchNestedKeys: [{ key: 'sims', fields: ['sim_no'] }],
+        customDateFilters: [
+            { key: 'given_date', label: 'SIM Given Date', nestedKey: 'sims', nestedDateKey: 'given_date' },
+            { key: 'activation_date', label: 'SIM Activation Date', nestedKey: 'sims', nestedDateKey: 'activation_date' }
+        ]
     });
 
     const {
@@ -154,6 +186,10 @@ const Dealers = () => {
                     showSimValidity
                     showInstallationStatus
                     showPaymentStatus
+                    customDateFilters={[
+                        { key: 'given_date', label: 'SIM Given Date' },
+                        { key: 'activation_date', label: 'SIM Activation Date' }
+                    ]}
                 />
 
                 <div className="table-container">
@@ -180,6 +216,10 @@ const Dealers = () => {
                             {loading ? (
                                 <tr>
                                     <td colSpan="14" className="text-center">Loading dealers...</td>
+                                </tr>
+                            ) : loadError ? (
+                                <tr>
+                                    <td colSpan="14" className="text-center empty-state">{loadError}</td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
@@ -210,6 +250,7 @@ const Dealers = () => {
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View dealer" title="View" onClick={() => setViewingDealer(dealer)}><Eye size={16} /></button>
+                                                <button className="btn btn-outline" type="button" onClick={() => setCashDealer(dealer)}>Cash</button>
                                                 <button className="icon-btn edit" type="button" aria-label="Edit dealer" onClick={() => setEditingDealer(dealer)}><Edit size={16} /></button>
                                                 <button className="icon-btn delete" type="button" aria-label="Delete dealer" onClick={() => setDeleteTarget(dealer)}><Trash2 size={16} /></button>
                                             </div>
@@ -291,7 +332,8 @@ const Dealers = () => {
                 </Modal>
             )}
             {paymentDealer && <PaymentModal dealer={paymentDealer} onClose={() => setPaymentDealer(null)} onSuccess={() => { setPaymentDealer(null); fetchDealers(); }} />}
-            {viewingDealer && <RecordViewModal isOpen onClose={() => setViewingDealer(null)} title="Dealer Details" record={viewingDealer} fetchRecord={async (dealer) => { const details = (await api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer.id}`)).data.data; return { ...dealer, ...details }; }} fields={[{ label: 'Dealer Name', key: 'dealer_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Installation Status', key: 'installation_status' }, { label: 'Software', key: 'software' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Validity</th><th>Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{sim.status}</td></tr>)}</tbody></table></div></>} />}
+            {viewingDealer && <RecordViewModal isOpen onClose={() => setViewingDealer(null)} title="Dealer Details" record={viewingDealer} fetchRecord={async (dealer) => { const details = (await api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer.id}`)).data.data; return { ...dealer, ...details }; }} fields={[{ label: 'Dealer Name', key: 'dealer_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Installation Status', key: 'installation_status' }, { label: 'Software', key: 'software' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Given Date</th><th>Activation Date</th><th>Validity</th><th>Expiry / Renewal</th><th>Deactivation Date</th><th>SIM Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{formatDate(sim.given_date)}</td><td>{formatDate(sim.activation_date)}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{formatDate(sim.expiry_date)}</td><td>{formatDate(sim.deactivation_date)}</td><td>{sim.sim_status || '-'}</td></tr>)}</tbody></table></div></>} />}
+            {cashDealer && <Modal isOpen onClose={() => setCashDealer(null)} title={`Cash Collections - ${cashDealer.dealer_name}`} maxWidth="1250px" footer={<button type="button" className="btn btn-outline" onClick={() => setCashDealer(null)}>Close</button>}><CustomerCashCollections ownerId={cashDealer.id} recipientType="Dealer" /></Modal>}
         </div>
     );
 };

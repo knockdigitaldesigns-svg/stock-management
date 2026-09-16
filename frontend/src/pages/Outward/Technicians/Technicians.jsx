@@ -12,6 +12,7 @@ import Pagination from '../../../components/Pagination/Pagination';
 import usePagination from '../../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
+import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 
 const Technicians = () => {
     const [technicians, setTechnicians] = useState([]);
@@ -23,6 +24,7 @@ const Technicians = () => {
     const [editingTechnician, setEditingTechnician] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [viewingTechnician, setViewingTechnician] = useState(null);
+    const [cashTechnician, setCashTechnician] = useState(null);
     const [masterData, setMasterData] = useState({
         platforms: [],
         deviceModels: [],
@@ -195,6 +197,7 @@ const Technicians = () => {
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View technician" title="View" onClick={() => setViewingTechnician(tech)}><Eye size={16} /></button>
+                                                <button className="btn btn-outline" type="button" onClick={() => setCashTechnician(tech)}>Cash</button>
                                                 <button className="icon-btn edit" type="button" aria-label="Edit technician" onClick={() => setEditingTechnician(tech)}><Edit size={16} /></button>
                                                 <button className="icon-btn delete" type="button" aria-label="Delete technician" onClick={() => setDeleteTarget(tech)}><Trash2 size={16} /></button>
                                             </div>
@@ -276,6 +279,7 @@ const Technicians = () => {
                 </Modal>
             )}
             {viewingTechnician && <RecordViewModal isOpen onClose={() => setViewingTechnician(null)} title="Technician Details" record={viewingTechnician} fetchRecord={async (technician) => { const details = (await api.get(`/stock/owner_details.php?owner_type=technician&owner_id=${technician.id}`)).data.data; return { ...technician, ...details }; }} fields={[{ label: 'Technician Name', key: 'technician_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Validity</th><th>Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{sim.status}</td></tr>)}</tbody></table></div></>} />}
+            {cashTechnician && <Modal isOpen onClose={() => setCashTechnician(null)} title={`Cash Collections - ${cashTechnician.technician_name}`} maxWidth="1250px" footer={<button type="button" className="btn btn-outline" onClick={() => setCashTechnician(null)}>Close</button>}><CustomerCashCollections ownerId={cashTechnician.id} recipientType="Technician" /></Modal>}
         </div>
     );
 };

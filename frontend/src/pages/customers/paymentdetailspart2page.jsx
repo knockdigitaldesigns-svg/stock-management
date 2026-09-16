@@ -16,9 +16,11 @@ const initialForm = {
     technicianCharge: '',
     simCharge: '',
     courierCharge: '',
-    amountPaid: '',
+    amountPaid: '0',
     paymentMode: '',
-    transactionId: ''
+    transactionId: '',
+    cashToTechnician: false,
+    cashToDealer: false
 };
 
 const normalizeCurrency = (value) => {
@@ -131,6 +133,9 @@ const PaymentDetailsPart2Page = () => {
             const paymentPart2 =
                 response.data?.data?.payment_part2 || {};
 
+            const cashCollection =
+                response.data?.data?.cash_collection || {};
+
             const stored = JSON.parse(
                 sessionStorage.getItem(storageKey) || '{}'
             );
@@ -212,7 +217,13 @@ const PaymentDetailsPart2Page = () => {
                 courierCharge:
                     formatValue(
                         paymentPart2.courier_charge
-                    )
+                    ),
+
+                cashToTechnician:
+                    cashCollection.recipient_type === 'Technician',
+
+                cashToDealer:
+                    cashCollection.recipient_type === 'Dealer'
             });
 
             sessionStorage.setItem(
@@ -304,6 +315,16 @@ const PaymentDetailsPart2Page = () => {
             [name]: updatedValue
         }));
 
+        setError('');
+        setSuccess('');
+    };
+
+    const handleCashRecipientChange = (name) => {
+        setForm((previous) => ({
+            ...previous,
+            cashToTechnician: name === 'cashToTechnician' ? !previous.cashToTechnician : false,
+            cashToDealer: name === 'cashToDealer' ? !previous.cashToDealer : false
+        }));
         setError('');
         setSuccess('');
     };
@@ -401,11 +422,19 @@ const PaymentDetailsPart2Page = () => {
          */
         if (totalMismatchError) return totalMismatchError;
 
+        if (form.paymentMode && (form.amountPaid === '' || form.amountPaid === null || form.amountPaid === undefined)) {
+            return 'Please enter Amount Paid.';
+        }
+
         /*
          * Amount Paid can be 0.
          */
         if (summary.amountPaid < 0) {
             return 'Amount Paid cannot be negative.';
+        }
+
+        if (summary.amountPaid > summary.totalAmount) {
+            return 'Amount Paid cannot exceed Total Amount.';
         }
 
         if (amountPaidError) return amountPaidError;
@@ -422,6 +451,8 @@ const PaymentDetailsPart2Page = () => {
         !normalizeCurrency(form.technicianCharge) &&
         !normalizeCurrency(form.simCharge) &&
         !normalizeCurrency(form.courierCharge) &&
+        !form.cashToTechnician &&
+        !form.cashToDealer &&
         (!form.amountPaid || normalizeCurrency(form.amountPaid) === 0) &&
         (!form.paymentMode || form.paymentMode === '' || form.paymentMode === '—') &&
         (!form.transactionId || form.transactionId === '' || form.transactionId === '—');
@@ -539,6 +570,12 @@ const PaymentDetailsPart2Page = () => {
                         form.courierCharge
                     ),
 
+                cash_to_technician:
+                    form.cashToTechnician,
+
+                cash_to_dealer:
+                    form.cashToDealer,
+
                 total_amount:
                     summary.totalAmount,
 
@@ -607,6 +644,8 @@ const PaymentDetailsPart2Page = () => {
                 technician_charge: 0,
                 sim_charge: 0,
                 courier_charge: 0,
+                    cash_to_technician: false,
+                    cash_to_dealer: false,
                 total_amount: totalSaleAmount,
                 amount_paid: 0,
                 amount_pending: totalSaleAmount,
@@ -649,7 +688,9 @@ const PaymentDetailsPart2Page = () => {
             technicianCharge: '',
             simCharge: '',
             courierCharge: '',
-            amountPaid: ''
+            amountPaid: '',
+            cashToTechnician: false,
+            cashToDealer: false
         }));
 
         setError('');
@@ -963,6 +1004,33 @@ const PaymentDetailsPart2Page = () => {
                                     readOnly
                                 />
                                 {totalMismatchError && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {totalMismatchError}</small>}
+                            </div>
+
+                            <div className="form-group">
+                                <label className="form-label">Cash Collection Recipient</label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={form.cashToTechnician}
+                                        onChange={() => handleCashRecipientChange('cashToTechnician')}
+                                        disabled={saving}
+                                    />
+                                    Cash to Technician
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={form.cashToDealer}
+                                        onChange={() => handleCashRecipientChange('cashToDealer')}
+                                        disabled={saving}
+                                    />
+                                    Cash to Dealer
+                                </label>
+                                {(form.cashToTechnician || form.cashToDealer) && (
+                                    <small style={{ display: 'block', marginTop: '8px', color: '#475569' }}>
+                                        The selected installation person will be responsible for the full Overall Total Amount ({`₹${summary.totalAmount.toLocaleString('en-IN')}`}), not the Technician Charge.
+                                    </small>
+                                )}
                             </div>
 
                             {/* ROW 4: Amount Paid & Amount Pending */}

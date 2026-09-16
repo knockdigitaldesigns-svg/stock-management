@@ -5,7 +5,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') sendResponse(false, 'Method not allowe
 requirePermission('customer_renewals.view');
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
-renewalLifecycle($conn, []);
+$settings = renewalSettings($conn);
+renewalInitialize($conn, $settings);
+renewalLifecycle($conn, $settings);
 $page = max(1, (int)($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int)($_GET['page_size'] ?? 10)));
 $where = [];

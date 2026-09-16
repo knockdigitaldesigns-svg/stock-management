@@ -68,6 +68,8 @@ import SaleAmountsPage
     from './pages/saleamounts/saleamountspage';
 
 import PendingPayments from './pages/Payments/PendingPayments';
+import HistoryPage from './pages/History/HistoryPage';
+import SupportPage from './pages/Support/SupportPage';
 
 
 // ============================================================
@@ -87,6 +89,9 @@ import CustomerReportsPage
 
 import RenewalsPage
     from './pages/renewals/renewalspage';
+
+import SimLifecyclePage
+    from './pages/simlifecycle/simlifecyclepage';
 
 // Customer CREATE / STEP 1 page
 import CustomerCreatePage
@@ -166,6 +171,24 @@ function App() {
                                 permission="dashboard.view"
                             >
                                 <Dashboard />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="history"
+                        element={
+                            <ProtectedRoute permission="history.view">
+                                <HistoryPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="support"
+                        element={
+                            <ProtectedRoute permission="support.view">
+                                <SupportPage />
                             </ProtectedRoute>
                         }
                     />
@@ -445,6 +468,15 @@ function App() {
                         element={
                             <ProtectedRoute permission="customer_renewals.view">
                                 <RenewalsPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/customer-management/sim-lifecycle"
+                        element={
+                            <ProtectedRoute permission="sim_lifecycle.view">
+                                <SimLifecyclePage />
                             </ProtectedRoute>
                         }
                     />

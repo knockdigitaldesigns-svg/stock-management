@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -11,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('sims.edit');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -59,11 +60,32 @@ if ($checkResult->num_rows > 0) {
 }
 $checkStmt->close();
 
+$oldStmt = $conn->prepare('SELECT purchase_date, sim_no, sim_type, sim_validity_id, notes FROM sims WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id);
+$oldStmt->execute();
+$oldSim = $oldStmt->get_result()->fetch_assoc();
+$oldStmt->close();
+if (!$oldSim) sendResponse(false, 'SIM not found', [], [], 404);
+
+$newSim = ['purchase_date' => $purchase_date, 'sim_no' => $sim_no, 'sim_type' => $sim_type, 'sim_validity_id' => $sim_validity_id, 'notes' => $notes];
+$conn->begin_transaction();
+try {
+writeChangedFields($conn, $id, 'SIM', $oldSim, $newSim, $currentUser);
+
 $stmt = $conn->prepare('UPDATE sims SET purchase_date = ?, sim_no = ?, sim_type = ?, sim_validity_id = ?, notes = ? WHERE id = ?');
 $stmt->bind_param('sssisi', $purchase_date, $sim_no, $sim_type, $sim_validity_id, $notes, $id);
 
 if ($stmt->execute()) {
+    $stmt->close();
+    $conn->commit();
+    $conn->close();
     sendResponse(true, 'SIM updated successfully');
 }
 
-sendResponse(false, 'Failed to update SIM', [], [], 500);
+throw new RuntimeException('Failed to update SIM');
+} catch (Throwable $e) {
+    $conn->rollback();
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'PUT' &&
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('customers.edit');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -225,7 +227,7 @@ if (!$conn) {
 */
 
 $stmt = $conn->prepare(
-    "SELECT id
+    "SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no, email, location, pincode, status
      FROM customers
      WHERE id = ?
      LIMIT 1"
@@ -250,6 +252,7 @@ if ($result->num_rows === 0) {
     );
 }
 
+$oldCustomer = $result->fetch_assoc();
 $stmt->close();
 
 
@@ -389,6 +392,21 @@ $emailValue = $email !== ''
     ? $email
     : null;
 
+$newCustomer = [
+    'platform_id' => $platformId,
+    'username' => $username,
+    'primary_mobile_no' => $primaryMobile,
+    'secondary_mobile_no' => $secondaryValue,
+    'email' => $emailValue,
+    'location' => $location,
+    'pincode' => $pincode,
+    'status' => $status
+];
+
+$conn->begin_transaction();
+try {
+    writeChangedFields($conn, $customerId, 'Customer', $oldCustomer, $newCustomer, $currentUser);
+
 $stmt = $conn->prepare(
     "UPDATE customers
      SET
@@ -417,22 +435,13 @@ $stmt->bind_param(
 );
 
 if (!$stmt->execute()) {
-
     $error = $stmt->error;
-
     $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Failed to update customer.',
-        [],
-        ['error' => $error],
-        500
-    );
+    throw new RuntimeException('Failed to update customer: ' . $error);
 }
 
 $stmt->close();
+$conn->commit();
 $conn->close();
 
 
@@ -443,5 +452,11 @@ sendResponse(
         'customer_id' => $customerId
     ]
 );
+
+} catch (Throwable $e) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}
 
 ?>

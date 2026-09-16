@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('customers.add');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -197,6 +199,7 @@ if (!$conn) {
 |--------------------------------------------------------------------------
 */
 
+$conn->begin_transaction();
 $stmt = $conn->prepare(
     "SELECT id
      FROM platforms
@@ -346,6 +349,7 @@ if (!$stmt->execute()) {
     $error = $stmt->error;
 
     $stmt->close();
+    $conn->rollback();
     $conn->close();
 
     sendResponse(
@@ -360,6 +364,24 @@ if (!$stmt->execute()) {
 $customerId = $conn->insert_id;
 
 $stmt->close();
+$createdCustomer = [
+    'platform_id' => $platformId,
+    'username' => $username,
+    'primary_mobile_no' => $primaryMobile,
+    'secondary_mobile_no' => $secondaryValue,
+    'email' => $emailValue,
+    'location' => $location,
+    'pincode' => $pincode,
+    'status' => 'Active'
+];
+try {
+    writeCreatedFields($conn, $customerId, 'Customer', $createdCustomer, $currentUser);
+    $conn->commit();
+} catch (Throwable $e) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}
 $conn->close();
 
 

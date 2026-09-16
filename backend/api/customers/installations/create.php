@@ -2,6 +2,7 @@
 
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
+require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 
 handlePreflight();
@@ -15,6 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         405
     );
 }
+
+$currentUser = authenticate();
 
 $data = json_decode(
     file_get_contents('php://input')
@@ -527,6 +530,13 @@ try {
         $installationId =
             (int) $existingInstallation['id'];
 
+        writeChangedFields($conn, $installationId, 'Customer Installation', $existingInstallation, [
+            'installation_person_type' => $installationPersonType,
+            'installation_person_id' => $installationPersonId,
+            'lead_closure_id' => $leadClosureId,
+            'installation_date' => $installationDate
+        ], $currentUser);
+
         $updateStmt = $conn->prepare(
             'UPDATE customer_installations
              SET installation_person_type = ?,
@@ -564,6 +574,184 @@ try {
             $updateStmt->affected_rows;
 
         $updateStmt->close();
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | 5b. Sync renewal record after installation update
+        |--------------------------------------------------------------------------
+        |
+        | When installation_date changes, recalculate next_renewal_date
+        | in customer_renewals based on validity_months.
+        |
+        | - If last_renewed_date is NULL (never renewed):
+        |     next_renewal_date = new installation_date + validity_months
+        |
+        | - If last_renewed_date is set (already renewed):
+        |     next_renewal_date stays based on last_renewed_date (no change)
+        |
+        | - If no renewal record exists, create one.
+        |--------------------------------------------------------------------------
+        */
+
+        $renewalCheck = $conn->prepare(
+            'SELECT id, last_renewed_date, validity_months
+             FROM customer_renewals
+             WHERE customer_id = ?
+             LIMIT 1'
+        );
+
+        if ($renewalCheck) {
+            $renewalCheck->bind_param('i', $customerId);
+            $renewalCheck->execute();
+
+            $renewalResult = $renewalCheck->get_result();
+            $renewalRow = $renewalResult->fetch_assoc();
+
+            $renewalCheck->close();
+
+            if ($renewalRow) {
+
+                /*
+                 * Renewal record exists.
+                 * Only recalculate if never renewed (last_renewed_date IS NULL).
+                 */
+                if (
+                    $renewalRow['last_renewed_date'] === null ||
+                    $renewalRow['last_renewed_date'] === ''
+                ) {
+                    $newRenewalDate = date(
+                        'Y-m-d',
+                        strtotime(
+                            $installationDate .
+                            ' +' . (int) $renewalRow['validity_months'] . ' months'
+                        )
+                    );
+
+                    $renewalUpdate = $conn->prepare(
+                        'UPDATE customer_renewals
+                         SET installation_date = ?,
+                             next_renewal_date = ?
+                         WHERE id = ?'
+                    );
+
+                    if ($renewalUpdate) {
+                        $renewalUpdate->bind_param(
+                            'ssi',
+                            $installationDate,
+                            $newRenewalDate,
+                            $renewalRow['id']
+                        );
+
+                        $renewalUpdate->execute();
+                        $renewalUpdate->close();
+                    }
+                } else {
+
+                    /*
+                     * Already renewed — only update the stored installation_date
+                     * but keep next_renewal_date based on last_renewed_date.
+                     */
+                    $renewalUpdate = $conn->prepare(
+                        'UPDATE customer_renewals
+                         SET installation_date = ?
+                         WHERE id = ?'
+                    );
+
+                    if ($renewalUpdate) {
+                        $renewalUpdate->bind_param(
+                            'si',
+                            $installationDate,
+                            $renewalRow['id']
+                        );
+
+                        $renewalUpdate->execute();
+                        $renewalUpdate->close();
+                    }
+                }
+
+            } else {
+
+                /*
+                 * No renewal record exists.
+                 * Create one using validity_months from customer_vehicle_details.
+                 */
+                $vehicleStmt = $conn->prepare(
+                    'SELECT validity_months
+                     FROM customer_vehicle_details
+                     WHERE customer_id = ?
+                       AND validity_months > 0
+                     ORDER BY created_at DESC, id DESC
+                     LIMIT 1'
+                );
+
+                if ($vehicleStmt) {
+                    $vehicleStmt->bind_param('i', $customerId);
+                    $vehicleStmt->execute();
+
+                    $vehicleResult = $vehicleStmt->get_result();
+                    $vehicleRow = $vehicleResult->fetch_assoc();
+
+                    $vehicleStmt->close();
+
+                    if ($vehicleRow) {
+                        $validityMonths = (int) $vehicleRow['validity_months'];
+
+                        $nextRenewalDate = date(
+                            'Y-m-d',
+                            strtotime(
+                                $installationDate .
+                                ' +' . $validityMonths . ' months'
+                            )
+                        );
+
+                        /*
+                         * Get default lifecycle settings.
+                         */
+                        $settingsResult = $conn->query(
+                            'SELECT expired_to_safe_days, safe_to_deactive_days
+                             FROM renewal_settings
+                             ORDER BY id DESC
+                             LIMIT 1'
+                        );
+
+                        $settings = $settingsResult
+                            ? $settingsResult->fetch_assoc()
+                            : null;
+
+                        $expiredToSafe = (int) ($settings['expired_to_safe_days'] ?? 0);
+                        $safeToDeactive = (int) ($settings['safe_to_deactive_days'] ?? 0);
+
+                        $renewalInsert = $conn->prepare(
+                            'INSERT INTO customer_renewals (
+                                customer_id,
+                                installation_date,
+                                next_renewal_date,
+                                validity_months,
+                                sim_status,
+                                expired_to_safe_days,
+                                safe_to_deactive_days
+                             ) VALUES (?, ?, ?, ?, \'Active\', ?, ?)'
+                        );
+
+                        if ($renewalInsert) {
+                            $renewalInsert->bind_param(
+                                'issiii',
+                                $customerId,
+                                $installationDate,
+                                $nextRenewalDate,
+                                $validityMonths,
+                                $expiredToSafe,
+                                $safeToDeactive
+                            );
+
+                            $renewalInsert->execute();
+                            $renewalInsert->close();
+                        }
+                    }
+                }
+            }
+        }
 
         $conn->commit();
         $conn->close();
@@ -632,6 +820,120 @@ try {
         $insertStmt->insert_id;
 
     $insertStmt->close();
+
+    writeCreatedFields($conn, $installationId, 'Customer Installation', [
+        'customer_id' => $customerId,
+        'installation_person_type' => $installationPersonType,
+        'installation_person_id' => $installationPersonId,
+        'lead_closure_id' => $leadClosureId,
+        'installation_date' => $installationDate
+    ], $currentUser);
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | 6b. Auto-create renewal record for new installation
+    |--------------------------------------------------------------------------
+    |
+    | When a new installation is created, automatically create a
+    | customer_renewals record if one does not already exist and
+    | the customer has vehicle details with validity_months > 0.
+    |
+    | next_renewal_date = installation_date + validity_months
+    |--------------------------------------------------------------------------
+    */
+
+    $renewalExists = $conn->prepare(
+        'SELECT id
+         FROM customer_renewals
+         WHERE customer_id = ?
+         LIMIT 1'
+    );
+
+    if ($renewalExists) {
+        $renewalExists->bind_param('i', $customerId);
+        $renewalExists->execute();
+
+        $renewalExistsResult = $renewalExists->get_result();
+        $hasRenewal = $renewalExistsResult->num_rows > 0;
+
+        $renewalExists->close();
+
+        if (!$hasRenewal) {
+
+            $vehicleStmt = $conn->prepare(
+                'SELECT validity_months
+                 FROM customer_vehicle_details
+                 WHERE customer_id = ?
+                   AND validity_months > 0
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1'
+            );
+
+            if ($vehicleStmt) {
+                $vehicleStmt->bind_param('i', $customerId);
+                $vehicleStmt->execute();
+
+                $vehicleResult = $vehicleStmt->get_result();
+                $vehicleRow = $vehicleResult->fetch_assoc();
+
+                $vehicleStmt->close();
+
+                if ($vehicleRow) {
+                    $validityMonths = (int) $vehicleRow['validity_months'];
+
+                    $nextRenewalDate = date(
+                        'Y-m-d',
+                        strtotime(
+                            $installationDate .
+                            ' +' . $validityMonths . ' months'
+                        )
+                    );
+
+                    $settingsResult = $conn->query(
+                        'SELECT expired_to_safe_days, safe_to_deactive_days
+                         FROM renewal_settings
+                         ORDER BY id DESC
+                         LIMIT 1'
+                    );
+
+                    $settings = $settingsResult
+                        ? $settingsResult->fetch_assoc()
+                        : null;
+
+                    $expiredToSafe = (int) ($settings['expired_to_safe_days'] ?? 0);
+                    $safeToDeactive = (int) ($settings['safe_to_deactive_days'] ?? 0);
+
+                    $renewalInsert = $conn->prepare(
+                        'INSERT INTO customer_renewals (
+                            customer_id,
+                            installation_date,
+                            next_renewal_date,
+                            validity_months,
+                            sim_status,
+                            expired_to_safe_days,
+                            safe_to_deactive_days
+                         ) VALUES (?, ?, ?, ?, \'Active\', ?, ?)'
+                    );
+
+                    if ($renewalInsert) {
+                        $renewalInsert->bind_param(
+                            'issiii',
+                            $customerId,
+                            $installationDate,
+                            $nextRenewalDate,
+                            $validityMonths,
+                            $expiredToSafe,
+                            $safeToDeactive
+                        );
+
+                        $renewalInsert->execute();
+                        $renewalInsert->close();
+                    }
+                }
+            }
+        }
+    }
 
     $conn->commit();
     $conn->close();

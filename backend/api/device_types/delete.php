@@ -1,12 +1,14 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
+$currentUser = authenticate();
 requirePermission('device_types.delete');
 $data = json_decode(file_get_contents('php://input'));
 $id = (int) ($data->id ?? 0);
@@ -23,14 +25,25 @@ if ($used->get_result()->num_rows > 0) {
     sendResponse(false, 'This device type is already used by existing devices and cannot be deleted.', [], [], 409);
 }
 $used->close();
+$oldStmt = $conn->prepare('SELECT * FROM device_types WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id); $oldStmt->execute(); $oldDeviceType = $oldStmt->get_result()->fetch_assoc(); $oldStmt->close();
+if (!$oldDeviceType) { $conn->close(); sendResponse(false, 'Device type not found.', [], [], 404); }
+$conn->begin_transaction();
+try {
+writeDeleteSnapshot($conn, $id, 'Device Type', $oldDeviceType, $currentUser);
 $stmt = $conn->prepare('DELETE FROM device_types WHERE id = ?');
 $stmt->bind_param('i', $id);
 $stmt->execute();
 if ($stmt->affected_rows === 0) {
-    $stmt->close();
-    $conn->close();
-    sendResponse(false, 'Device type not found.', [], [], 404);
+    throw new RuntimeException('Device type not found.');
 }
 $stmt->close();
+$conn->commit();
 $conn->close();
 sendResponse(true, 'Device type deleted successfully.');
+} catch (Throwable $e) {
+    $conn->rollback();
+    if (isset($stmt) && $stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

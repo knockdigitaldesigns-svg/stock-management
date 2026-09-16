@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { Edit } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import { formatDate } from '../../../utils/date';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
 import { showGlobalError } from '../../../context/ErrorContext';
+import StockAllocationEditModal from '../../StockManagement/StockAllocationEditModal';
 
 const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     const getStatusLabel = (item) => item?.status_label || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
@@ -22,6 +24,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
     const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
+    const [editingAllocationId, setEditingAllocationId] = useState(null);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -76,6 +79,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     };
 
     return (
+        <>
         <Modal
             isOpen={Boolean(dealer)}
             onClose={onClose}
@@ -138,9 +142,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
                 <h4>Allocated Devices (Total: {stockSummary.total_device || 0}, Used: {stockSummary.used_device || 0}, Available: {stockSummary.available_device || 0})</h4>
                 {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.allocation_id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
                 <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
-                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>Type</th><th>Software</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.software || '-'}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
+                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>SIM Type</th><th>Software</th><th>Given Date</th><th>Activation Date</th><th>Validity</th><th>Expiry / Renewal Date</th><th>Deactivation Date</th><th>Total</th><th>Paid</th><th>Pending</th><th>Status</th>{dealer?.installation_status === 'Not Willing' && <th>Actions</th>}</tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.software || '-'}</td><td>{formatDate(item.given_date)}</td><td>{formatDate(item.activation_date)}</td><td>{item.sim_validity_months ? `${item.sim_validity_months} Months` : '-'}</td><td>{formatDate(item.expiry_date)}</td><td>{formatDate(item.deactivation_date)}</td><td>₹{Number(item.total_amount).toFixed(2)}</td><td>₹{Number(item.amount_paid).toFixed(2)}</td><td>₹{Number(item.pending_amount).toFixed(2)}</td><td>{getStatusLabel(item)}</td>{dealer?.installation_status === 'Not Willing' && <td><button type="button" className="icon-btn edit" aria-label="Edit SIM lifecycle" title="Edit activation date and SIM validity" onClick={() => setEditingAllocationId(item.allocation_id)}><Edit size={16} /></button></td>}</tr>)}</tbody></table></div>}
             </form>
         </Modal>
+        {editingAllocationId && <StockAllocationEditModal allocationId={editingAllocationId} onClose={() => setEditingAllocationId(null)} onSuccess={() => { setEditingAllocationId(null); onSuccess(); }} />}
+        </>
     );
 };
 

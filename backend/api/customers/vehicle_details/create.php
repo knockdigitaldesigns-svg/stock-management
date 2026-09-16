@@ -2,6 +2,7 @@
 
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
+require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 
 handlePreflight();
@@ -16,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     );
 }
 
-authenticate();
+$currentUser = authenticate();
 
 /*
 |--------------------------------------------------------------------------
@@ -579,7 +580,7 @@ try {
     | INSERT OR UPDATE CUSTOMER VEHICLE DETAILS
     |--------------------------------------------------------------------------
     */
-    $checkCustomerStmt = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE customer_id = ? LIMIT 1');
+    $checkCustomerStmt = $conn->prepare('SELECT * FROM customer_vehicle_details WHERE customer_id = ? LIMIT 1 FOR UPDATE');
     $checkCustomerStmt->bind_param('i', $customerId);
     $checkCustomerStmt->execute();
     $existingRow = $checkCustomerStmt->get_result()->fetch_assoc();
@@ -589,6 +590,12 @@ try {
 
     if ($existingRow) {
         $vehicleDetailsId = (int) $existingRow['id'];
+        writeChangedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', $existingRow, [
+            'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId, 'device_id' => $deviceId,
+            'device_model_id' => $deviceModelId, 'imei_no' => $imeiNo, 'sim_id_1' => $simId1,
+            'sim_no_1' => $simNo1, 'sim_id_2' => $simId2, 'sim_no_2' => $cleanSimNo2,
+            'validity_months' => $validityMonths
+        ], $currentUser);
         $stmt = $conn->prepare(
             'UPDATE customer_vehicle_details
              SET vehicle_no = ?,
@@ -667,6 +674,12 @@ try {
         }
         $vehicleDetailsId = (int) $conn->insert_id;
         $stmt->close();
+        writeCreatedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', [
+            'customer_id' => $customerId, 'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId,
+            'device_id' => $deviceId, 'device_model_id' => $deviceModelId, 'imei_no' => $imeiNo,
+            'sim_id_1' => $simId1, 'sim_no_1' => $simNo1, 'sim_id_2' => $simId2,
+            'sim_no_2' => $cleanSimNo2, 'validity_months' => $validityMonths
+        ], $currentUser);
     }
 
     $conn->commit();

@@ -23,6 +23,7 @@ export const getAvailableYears = (items, dateKeys = []) => {
 export const filterTableRows = (items, filters, {
     dateKeys = [],
     searchKeys = [],
+    searchNestedKeys = [],
     platformKey,
     deviceModelKey,
     deviceAlertKey,
@@ -34,7 +35,8 @@ export const filterTableRows = (items, filters, {
     ownerKey,
     softwareKey,
     statusKey = 'status',
-    installationStatusKey = 'installation_status'
+    installationStatusKey = 'installation_status',
+    customDateFilters = []
 } = {}) => {
     const query = (filters.search || '').trim().toLowerCase();
 
@@ -43,6 +45,10 @@ export const filterTableRows = (items, filters, {
         if (query && searchKeys.length > 0) {
             const matchesSearch = searchKeys.some((key) =>
                 String(item[key] ?? '').toLowerCase().includes(query)
+            ) || searchNestedKeys.some(({ key, fields = [] }) =>
+                Array.isArray(item[key]) && item[key].some((nestedItem) =>
+                    fields.some((field) => String(nestedItem[field] ?? '').toLowerCase().includes(query))
+                )
             );
             if (!matchesSearch) return false;
         }
@@ -145,7 +151,40 @@ export const filterTableRows = (items, filters, {
             if (rawPayment !== ps) return false;
         }
 
-        // 12. Owner Type filter
+        // 12. Custom Date Filters (Exact / Before / After)
+        for (const dateFilter of customDateFilters) {
+            const key = dateFilter.key;
+            const value = filters[key];
+            const operator = (filters[`${key}_operator`] || 'exact').toLowerCase();
+            if (!value) continue;
+            if (dateFilter.nestedKey) {
+                const nestedItems = Array.isArray(item[dateFilter.nestedKey]) ? item[dateFilter.nestedKey] : [];
+                const nestedDateKey = dateFilter.nestedDateKey || key;
+                const targetDate = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+                const matchesNested = nestedItems.some((nestedItem) => {
+                    const nestedValue = nestedItem[nestedDateKey];
+                    if (!nestedValue) return false;
+                    const currentDate = new Date(`${String(nestedValue).slice(0, 10)}T00:00:00`);
+                    if (operator === 'year') return currentDate.getFullYear() === Number(value);
+                    if (operator === 'month') return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}` === String(value).slice(0, 7);
+                    return currentDate.getTime() === targetDate.getTime();
+                });
+                if (!matchesNested) return false;
+                continue;
+            }
+            const currentValue = item[key] ?? null;
+            if (!currentValue) return false;
+            const currentDate = new Date(`${String(currentValue).slice(0, 10)}T00:00:00`);
+            const targetDate = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+            const matches = operator === 'year'
+                ? currentDate.getFullYear() === Number(value)
+                : operator === 'month'
+                    ? `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}` === String(value).slice(0, 7)
+                    : currentDate.getTime() === targetDate.getTime();
+            if (!matches) return false;
+        }
+
+        // 13. Owner Type filter
         if (filters.ownerType) {
             const ot = filters.ownerType.toLowerCase();
             const rawOwner = String((ownerKey ? item[ownerKey] : null) || item.owner_type || '').toLowerCase();
@@ -189,7 +228,8 @@ const TableFilterBar = ({
     ownerKey,
     softwareKey,
     deviceOptions,
-    simOptions
+    simOptions,
+    customDateFilters = []
 }) => {
     const years = useMemo(() => getAvailableYears(items, dateKeys), [items, dateKeys]);
 
@@ -251,6 +291,19 @@ const TableFilterBar = ({
         if (ownerTypeOptions) return unique(ownerTypeOptions);
         return ['Dealer', 'Technician'];
     }, [ownerTypeOptions]);
+
+    const getCustomDateYears = (dateFilter) => {
+        const values = items.flatMap((item) => {
+            const nestedItems = dateFilter.nestedKey && Array.isArray(item[dateFilter.nestedKey])
+                ? item[dateFilter.nestedKey]
+                : [item];
+            return nestedItems.map((nestedItem) => nestedItem[dateFilter.nestedDateKey || dateFilter.key]);
+        });
+        return unique(values
+            .map((value) => String(value || '').slice(0, 4))
+            .filter((year) => /^\d{4}$/.test(year)))
+            .sort((first, second) => Number(second) - Number(first));
+    };
 
     const set = (key) => (event) => onChange({ ...filters, [key]: event.target.value });
 
@@ -386,7 +439,43 @@ const TableFilterBar = ({
                 </select>
             )}
 
-            {/* 13. Reset Filters Button */}
+            {/* 13. Extra Date Filters */}
+            {customDateFilters.length > 0 && customDateFilters.map((dateFilter) => (
+                <div key={dateFilter.key} className="date-filter-inline" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span className="date-filter-label">{dateFilter.label}:</span>
+                    {filters[`${dateFilter.key}_operator`] === 'year' ? (
+                        <select
+                            className="form-control"
+                            value={filters[dateFilter.key] || ''}
+                            onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
+                            aria-label={dateFilter.label}
+                        >
+                            <option value="">Select year</option>
+                            {getCustomDateYears(dateFilter).map((year) => <option key={year} value={year}>{year}</option>)}
+                        </select>
+                    ) : (
+                        <input
+                            className="form-control"
+                            type={filters[`${dateFilter.key}_operator`] === 'month' ? 'month' : 'date'}
+                            value={filters[dateFilter.key] || ''}
+                            onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
+                            aria-label={dateFilter.label}
+                        />
+                    )}
+                    <select
+                        className="form-control"
+                        value={filters[`${dateFilter.key}_operator`] || 'exact'}
+                        onChange={(event) => onChange({ ...filters, [dateFilter.key]: '', [`${dateFilter.key}_operator`]: event.target.value })}
+                        aria-label={`${dateFilter.label} operator`}
+                    >
+                        <option value="exact">Exact Date</option>
+                        <option value="month">Month</option>
+                        <option value="year">Year</option>
+                    </select>
+                </div>
+            ))}
+
+            {/* 14. Reset Filters Button */}
             <button type="button" className="btn btn-outline table-filter-reset" onClick={onReset}>
                 Reset Filters
             </button>
@@ -408,7 +497,11 @@ export const emptyTableFilters = () => ({
     status: '',
     paymentStatus: '',
     deviceType: '',
-    ownerType: ''
+    ownerType: '',
+    given_date: '',
+    given_date_operator: 'exact',
+    activation_date: '',
+    activation_date_operator: 'exact'
 });
 
 export default TableFilterBar;

@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'DELETE' &&
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('customers.delete');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -52,7 +54,7 @@ if (!$conn) {
 */
 
 $stmt = $conn->prepare(
-    "SELECT id
+    "SELECT *
      FROM customers
      WHERE id = ?
      LIMIT 1"
@@ -77,11 +79,13 @@ if ($result->num_rows === 0) {
     );
 }
 
+$oldCustomer = $result->fetch_assoc();
 $stmt->close();
 
 $conn->begin_transaction();
 
 try {
+    writeDeleteSnapshot($conn, $customerId, 'Customer', $oldCustomer, $currentUser);
     $vehicleStmt = $conn->prepare('SELECT device_id, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE customer_id = ? FOR UPDATE');
     $vehicleStmt->bind_param('i', $customerId);
     $vehicleStmt->execute();

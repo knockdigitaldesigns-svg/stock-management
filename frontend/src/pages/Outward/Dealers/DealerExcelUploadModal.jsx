@@ -12,7 +12,8 @@ export const DEALER_COLUMNS = [
     { key: 'location', header: 'Location', required: true },
     { key: 'enrolled_date', header: 'Enrolled Date', required: true },
     { key: 'installation_status', header: 'Installation Status', required: true },
-    { key: 'notes', header: 'Notes', required: false }
+    { key: 'notes', header: 'Notes', required: false },
+    { key: 'software', header: 'Software', required: false }
 ];
 
 const normalizeHeader = (str) =>
@@ -46,7 +47,8 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'Location': 'Coimbatore',
                 'Enrolled Date': '03-09-2026',
                 'Installation Status': 'Onsite',
-                'Notes': 'Test dealer'
+                'Notes': 'Test dealer',
+                'Software': 'Eagle India'
             },
             {
                 'Dealer Name': 'Sri Auto',
@@ -54,7 +56,8 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'Location': 'Madurai',
                 'Enrolled Date': '02-09-2026',
                 'Installation Status': 'Offsite',
-                'Notes': 'Test dealer'
+                'Notes': 'Test dealer',
+                'Software': 'Tracoo'
             },
             {
                 'Dealer Name': 'Kumar Motors',
@@ -62,7 +65,8 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'Location': 'Chennai',
                 'Enrolled Date': '01-09-2026',
                 'Installation Status': 'Not Willing',
-                'Notes': 'Test dealer'
+                'Notes': 'Test dealer',
+                'Software': 'Navilap'
             }
         ];
 
@@ -331,6 +335,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                             </li>
                             <li>
                                 <strong>Notes</strong> is optional.
+                            </li>
+                            <li>
+                                <strong>Software</strong> is optional and must match a supported software value when provided.
                             </li>
                             <li>
                                 Installation Status must be: <strong>Onsite / Offsite / Not Willing</strong>

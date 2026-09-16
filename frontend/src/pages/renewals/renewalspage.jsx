@@ -8,7 +8,7 @@ import { showGlobalError } from '../../context/ErrorContext';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUSES = ['Active', 'Deactive', 'Expired', 'Safe Custody'];
 const EMPTY_FILTERS = { search: '', date: '', month: '', year: '', validity: '', status: '' };
-const EMPTY_FORM = { action: 'Renew SIM', renewal_date: new Date().toISOString().slice(0, 10), reactivation_date: new Date().toISOString().slice(0, 10), validity_months: '', payment_amount: '', amount_paid: '', payment_status: 'Not Paid', payment_mode: '', transaction_id: '', notes: '', expired_to_safe_days: '', safe_to_deactive_days: '' };
+const EMPTY_FORM = { action: '', renewal_date: new Date().toISOString().slice(0, 10), reactivation_date: new Date().toISOString().slice(0, 10), validity_months: '', payment_amount: '', amount_paid: '0', payment_status: 'Not Paid', payment_mode: '', transaction_id: '', notes: '', expired_to_safe_days: '', safe_to_deactive_days: '', installation_date: '' };
 
 const display = (value) => value === null || value === undefined || value === '' ? '-' : value;
 const formatDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '-';
@@ -52,12 +52,12 @@ const RenewalsPage = () => {
     const paymentStatus = Number(form.amount_paid || 0) <= 0 ? 'Not Paid' : Number(form.amount_paid || 0) < Number(form.payment_amount || 0) ? 'Partially Paid' : 'Paid';
     const calculatedDate = useMemo(() => {
         if (!form.validity_months) return '-';
-        const start = form.action === 'Reactivate SIM' ? form.reactivation_date : form.renewal_date;
+        const start = form.action === 'Reactivate SIM' ? form.reactivation_date : form.action === 'Renew SIM' ? form.renewal_date : form.installation_date;
         if (!start) return '-';
         const date = new Date(`${start}T00:00:00`);
         date.setMonth(date.getMonth() + Number(form.validity_months));
         return date.toISOString().slice(0, 10);
-    }, [form.action, form.reactivation_date, form.renewal_date, form.validity_months]);
+    }, [form.action, form.reactivation_date, form.renewal_date, form.installation_date, form.validity_months]);
 
     const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
     const openView = async (row) => {
@@ -69,7 +69,7 @@ const RenewalsPage = () => {
             const response = await api.get(`/renewals/view.php?renewal_id=${row.id}`);
             const renewal = response.data?.data?.renewal || row;
             setSelected(renewal);
-            setForm({ ...EMPTY_FORM, validity_months: renewal.validity_months || '', action: renewal.sim_status === 'Deactive' ? 'Reactivate SIM' : 'Renew SIM', expired_to_safe_days: renewal.expired_to_safe_days ?? '', safe_to_deactive_days: renewal.safe_to_deactive_days ?? '' });
+            setForm({ ...EMPTY_FORM, validity_months: renewal.validity_months || '', action: '', expired_to_safe_days: renewal.expired_to_safe_days ?? '', safe_to_deactive_days: renewal.safe_to_deactive_days ?? '', installation_date: String(renewal.installation_date || '').slice(0, 10) });
             setModal('edit');
         } catch (error) { showGlobalError(error.response?.data?.message || 'Failed to load renewal for editing.'); }
     };
@@ -79,48 +79,50 @@ const RenewalsPage = () => {
     };
     const executeAction = async () => {
         if (!selected) return;
+        if (form.expired_to_safe_days !== '' && (Number(form.expired_to_safe_days) < 0 || !Number.isInteger(Number(form.expired_to_safe_days)))) {
+            showGlobalError('Expired → Safe Custody Days must be a non-negative integer.');
+            return;
+        }
+        if (form.safe_to_deactive_days !== '' && (Number(form.safe_to_deactive_days) < 0 || !Number.isInteger(Number(form.safe_to_deactive_days)))) {
+            showGlobalError('Safe Custody → Deactive Days must be a non-negative integer.');
+            return;
+        }
         if (form.action === 'Deactivate SIM' || form.action === 'Safe Custody') { setModal('confirm'); return; }
         await saveAction();
     };
-    const updateDetail = (key, value) => setSelected((current) => ({ ...current, [key]: value }));
-    const saveExistingDetails = async () => {
-        const customerId = Number(selected.customer_record_id || selected.customer_id);
-        await api.put('/customers/update.php', {
-            id: customerId,
-            platform_id: Number(selected.platform_id || 0),
-            username: String(selected.username || '').trim(),
-            primary_mobile_no: String(selected.primary_mobile_no || '').trim(),
-            secondary_mobile_no: String(selected.secondary_mobile_no || '').trim(),
-            email: String(selected.email || '').trim(),
-            location: String(selected.location || '').trim(),
-            pincode: String(selected.pincode || '').trim(),
-            status: selected.customer_status || 'Active'
-        });
-        await api.put('/customers/vehicle_details/update.php', {
-            id: Number(selected.vehicle_record_id || 0),
-            customer_id: customerId,
-            vehicle_no: String(selected.vehicle_no || '').trim(),
-            vehicle_type_id: Number(selected.vehicle_type_id || 0),
-            device_model_id: Number(selected.device_model_id || 0),
-            imei_no: String(selected.imei_no || '').trim(),
-            sim_no_1: String(selected.sim_no_1 || '').trim(),
-            sim_no_2: String(selected.sim_no_2 || '').trim(),
-            validity_id: Number(selected.validity_id || 0)
-        });
-        await api.post('/customers/installations/create.php', {
-            customer_id: customerId,
-            installation_person_type: selected.installation_person_type || 'Technician',
-            installation_person_id: Number(selected.installation_person_id || 0),
-            lead_closure_id: Number(selected.lead_closure_id || 0),
-            installation_date: String(selected.installation_date || '').slice(0, 10)
-        });
+    const closeActionModal = () => {
+        setModal(null);
+        setForm(EMPTY_FORM);
     };
+    const updateDetail = (key, value) => setSelected((current) => ({ ...current, [key]: value }));
     const saveAction = async () => {
+        if (form.action === 'Renew SIM') {
+            if (form.payment_mode && (form.amount_paid === '' || form.amount_paid === null || form.amount_paid === undefined)) {
+                showGlobalError('Please enter Amount Paid.');
+                return;
+            }
+            if (form.amount_paid === '' || form.amount_paid === null || form.amount_paid === undefined) {
+                showGlobalError('Please enter Amount Paid.');
+                return;
+            }
+            if (Number(form.amount_paid) < 0) {
+                showGlobalError('Amount Paid cannot be negative.');
+                return;
+            }
+            if (Number(form.amount_paid) > Number(form.payment_amount || 0)) {
+                showGlobalError('Amount Paid cannot exceed Total Amount.');
+                return;
+            }
+            if (form.payment_mode && form.payment_mode !== 'Cash' && !form.transaction_id) {
+                showGlobalError('Please enter Transaction ID.');
+                return;
+            }
+        }
         try {
             setSaving(true);
-            await saveExistingDetails();
-            await api.post('/renewals/action.php', { ...form, action_type: form.action, renewal_id: selected.id, payment_amount: Number(form.payment_amount || 0), amount_paid: Number(form.amount_paid || 0), payment_status: paymentStatus, expired_to_safe_days: Number(form.expired_to_safe_days), safe_to_deactive_days: Number(form.safe_to_deactive_days) });
+            await api.post('/renewals/action.php', { ...form, action_type: form.action, renewal_id: selected.id, payment_amount: Number(form.payment_amount || 0), amount_paid: Number(form.amount_paid || 0), payment_status: paymentStatus, expired_to_safe_days: Number(form.expired_to_safe_days), safe_to_deactive_days: Number(form.safe_to_deactive_days), installation_date: form.installation_date });
             setModal(null);
+            setForm(EMPTY_FORM);
             await load(pagination.page, filters);
         } catch (error) { showGlobalError(error.response?.data?.message || error.message || 'Renewal action failed.'); }
         finally { setSaving(false); }
@@ -140,6 +142,12 @@ const RenewalsPage = () => {
         : selected?.sim_status === 'Safe Custody'
             ? ['Renew SIM', 'Deactivate SIM']
             : ['Renew SIM', 'Deactivate SIM', 'Safe Custody'];
+    const renewalDetailFields = [
+        ['Next Renewal Date', 'next_renewal_date', true],
+        ['Validity', 'validity_months'],
+        ['SIM Status', 'sim_status'],
+        ...(selected?.last_renewed_date ? [['Last Renewed Date', 'last_renewed_date', true]] : [])
+    ];
 
     return <div className="page-container"><div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}><h2>Renewals</h2><button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button></div>
@@ -157,14 +165,14 @@ const RenewalsPage = () => {
     </div>
 
     <Modal isOpen={modal === 'view'} onClose={() => setModal(null)} title="Renewal Details" maxWidth="900px" footer={<><button className="btn" type="button" onClick={openHistory}><History size={16} /> View History</button><button className="btn btn-primary" type="button" onClick={() => openEdit(selected)}>Edit</button></>}>
-        {selected && <><InfoSection title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><InfoSection title="Installation Details" record={selected} fields={[['Installation Person', 'installation_person'], ['Installation Person Type', 'installation_person_type'], ['Lead Closure', 'lead_closure'], ['Installation Date', 'installation_date', true]]} /><InfoSection title="Renewal Details" record={selected} fields={[['Next Renewal Date', 'next_renewal_date', true], ['Validity', 'validity_months'], ['SIM Status', 'sim_status'], ['Last Renewed Date', 'last_renewed_date', true]]} /><InfoSection title="SIM Lifecycle Settings" record={selected} fields={[['Expired -> Safe Custody After', 'expired_to_safe_days'], ['Safe Custody -> Deactive After', 'safe_to_deactive_days']]} /></>}
+        {selected && <><InfoSection title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><InfoSection title="Installation Details" record={selected} fields={[['Installation Person', 'installation_person'], ['Installation Person Type', 'installation_person_type'], ['Lead Closure', 'lead_closure'], ['Installation Date', 'installation_date', true]]} /><InfoSection title="Renewal Details" record={selected} fields={renewalDetailFields} /></>}
     </Modal>
 
     <Modal isOpen={modal === 'history'} onClose={() => setModal('view')} title="Renewal History" maxWidth="1150px"><div className="table-container"><table><thead><tr>{['Date', 'Action', 'Old Status', 'New Status', 'Old Validity', 'New Validity', 'Old Renewal Date', 'New Renewal Date', 'Amount', 'Paid', 'Pending', 'Payment Mode', 'Transaction ID', 'Changed By'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{history.length ? history.map((item) => <tr key={item.id}><td>{formatDateTime(item.action_date)}</td><td>{item.action_type}</td><td>{display(item.old_status)}</td><td>{display(item.new_status)}</td><td>{display(item.old_validity_months)}</td><td>{display(item.new_validity_months)}</td><td>{formatDate(item.old_renewal_date)}</td><td>{formatDate(item.new_renewal_date)}</td><td>{display(item.payment_amount)}</td><td>{display(item.amount_paid)}</td><td>{display(item.amount_pending)}</td><td>{display(item.payment_mode)}</td><td>{display(item.transaction_id)}</td><td>{display(item.changed_by_name)}</td></tr>) : <tr><td colSpan="14">No history found.</td></tr>}</tbody></table></div></Modal>
 
-    <Modal isOpen={modal === 'edit'} onClose={() => setModal(null)} title={`Renewal Action - ${selected?.username || ''}`} maxWidth="900px" footer={<><button className="btn" type="button" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-primary" type="button" disabled={saving} onClick={executeAction}>{saving ? 'Saving...' : 'Save Action'}</button></>}>
-        {selected && <><InfoSection inputStyle title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection inputStyle title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><InfoSection inputStyle title="Installation Details" record={selected} fields={[['Installation Person', 'installation_person'], ['Installation Person Type', 'installation_person_type'], ['Lead Closure', 'lead_closure'], ['Installation Date', 'installation_date', true]]} /><InfoSection inputStyle title="Current Renewal Details" record={selected} fields={[['Next Renewal Date', 'next_renewal_date', true], ['Validity', 'validity_months'], ['SIM Status', 'sim_status'], ['Last Renewed Date', 'last_renewed_date', true]]} /><section style={{ marginBottom: 18 }}><h4>SIM Lifecycle Settings</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}><Field label="Expired -> Safe Custody After (days)"><input className="form-control" type="number" min="0" step="1" value={form.expired_to_safe_days} onChange={(event) => setForm({ ...form, expired_to_safe_days: event.target.value })} /></Field><Field label="Safe Custody -> Deactive After (days)"><input className="form-control" type="number" min="0" step="1" value={form.safe_to_deactive_days} onChange={(event) => setForm({ ...form, safe_to_deactive_days: event.target.value })} /></Field></div></section></>}
-        <div style={{ marginBottom: 18 }}><h4>Actions</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>{availableActions.map((action) => <button key={action} type="button" className={`btn ${form.action === action ? 'btn-primary' : ''}`} onClick={() => setForm((current) => ({ ...current, action }))}>[ ] {action}</button>)}</div></div>
+    <Modal isOpen={modal === 'edit'} onClose={closeActionModal} title={`Renewal Action - ${selected?.username || ''}`} maxWidth="900px" footer={<><button className="btn" type="button" onClick={closeActionModal}>Cancel</button><button className="btn btn-primary" type="button" disabled={saving} onClick={executeAction}>{saving ? 'Saving...' : 'Save Action'}</button></>}>
+        {selected && <><InfoSection inputStyle title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection inputStyle title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><section style={{ marginBottom: 18 }}><h4 style={{ margin: '0 0 10px', borderBottom: '1px solid #e2e8f0', paddingBottom: 6 }}>Installation Details</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}><div><strong>Installation Person</strong><input className="form-control" type="text" defaultValue={selected.installation_person || ''} readOnly /></div><div><strong>Installation Person Type</strong><input className="form-control" type="text" defaultValue={selected.installation_person_type || ''} readOnly /></div><div><strong>Lead Closure</strong><input className="form-control" type="text" defaultValue={selected.lead_closure || ''} readOnly /></div><div><strong>Installation Date</strong><input className="form-control" type="date" value={form.installation_date} onChange={(e) => setForm({ ...form, installation_date: e.target.value })} /></div></div>{!form.action && form.installation_date && form.validity_months && calculatedDate !== '-' && (<div style={{ marginTop: 10, padding: '8px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: 13, color: '#15803d' }}>📅 New Renewal Date: <strong>{formatDate(calculatedDate)}</strong> (installation date + {form.validity_months} months)</div>)}</section><InfoSection inputStyle title="Current Renewal Details" record={selected} fields={renewalDetailFields} /></>}
+        <div className="renewal-actions" role="group" aria-label="Renewal actions" style={{ marginBottom: 18 }}><h4>Actions</h4><div className="renewal-action-options" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>{availableActions.map((action) => <label className="renewal-action-option" key={action} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={form.action === action} onChange={() => setForm((current) => ({ ...current, action: current.action === action ? '' : action }))} /><span>{action}</span></label>)}</div></div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
             {form.action === 'Reactivate SIM' ? <><Field label="Actual Reactivation Date *"><input className="form-control" type="date" value={form.reactivation_date} onChange={(event) => setForm({ ...form, reactivation_date: event.target.value })} /></Field><Field label="Validity *"><select className="form-control" value={form.validity_months} onChange={(event) => setForm({ ...form, validity_months: event.target.value })}><option value="">Select validity</option>{validities.map((validity) => <option key={validity} value={validity}>{validity} Months</option>)}</select></Field><Field label="Next Renewal Date"><input className="form-control" readOnly value={formatDate(calculatedDate)} /></Field></> : form.action === 'Renew SIM' ? <><Field label="Validity *"><select className="form-control" value={form.validity_months} onChange={(event) => setForm({ ...form, validity_months: event.target.value })}><option value="">Select validity</option>{validities.map((validity) => <option key={validity} value={validity}>{validity} Months</option>)}</select></Field><Field label="Renewal Date"><input className="form-control" type="date" value={form.renewal_date} onChange={(event) => setForm({ ...form, renewal_date: event.target.value })} /></Field><Field label="Next Renewal Date"><input className="form-control" readOnly value={formatDate(calculatedDate)} /></Field><Field label="Total Amount *"><input className="form-control" type="number" min="0" value={form.payment_amount} onChange={(event) => setForm({ ...form, payment_amount: event.target.value })} /></Field><Field label="Amount Paid *"><input className="form-control" type="number" min="0" value={form.amount_paid} onChange={(event) => setForm({ ...form, amount_paid: event.target.value })} /></Field><Field label="Pending Amount"><input className="form-control" readOnly value={pending} /></Field><Field label="Payment Status *"><input className="form-control" readOnly value={paymentStatus} /></Field><Field label="Payment Mode *"><select className="form-control" value={form.payment_mode} onChange={(event) => setForm({ ...form, payment_mode: event.target.value })}><option value="">Select mode</option><option>Cash</option><option>UPI</option><option>Card</option><option>Bank Transfer</option></select></Field><Field label="Transaction ID *"><input className="form-control" value={form.transaction_id} onChange={(event) => setForm({ ...form, transaction_id: event.target.value })} /></Field></> : <div style={{ gridColumn: '1 / -1' }}>Select the action to continue.</div>}
         </div>

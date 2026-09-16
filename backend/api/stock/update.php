@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
@@ -50,8 +50,13 @@ if ($software !== '' && !in_array($software, $allowedSoftware, true)) {
     sendResponse(false, 'Invalid software selection', [], [], 400);
 }
 
-if ($totalAmount !== null && ($totalAmount < 0 || $amountPaid < 0 || $amountPaid > $totalAmount)) {
-    sendResponse(false, 'Invalid payment amount', [], [], 400);
+if ($totalAmount !== null) {
+    if ($amountPaid < 0) {
+        sendResponse(false, 'Amount Paid cannot be negative.', [], [], 400);
+    }
+    if ($amountPaid > $totalAmount) {
+        sendResponse(false, 'Amount Paid cannot exceed Total Amount.', [], [], 400);
+    }
 }
 
 $usedForMap = [
@@ -194,6 +199,26 @@ try {
             if ($normalizedUsedFor === 'ET') {
                 $ensureUsageTransaction($conn, $ownerType, $ownerId, $normalizedUsedFor, $deviceId, null, trim((string) ($deviceNotes[$deviceId] ?? '')));
             }
+
+            // Update payment fields on existing allocation
+            if ($totalAmount !== null) {
+                $rowTotal = (float) $totalAmount;
+                $rowPaid = (float) $amountPaid;
+                $rowPending = max(0, $rowTotal - $rowPaid);
+                $rowStatus = $rowTotal <= 0 ? 'Not Paid' : ($rowPending <= 0 ? 'Paid' : ($rowPaid > 0 ? 'Partially Paid' : 'Not Paid'));
+                $existingAllocId = $conn->prepare("SELECT id FROM stock_allocations WHERE device_id = ? AND owner_type = ? AND owner_id = ? ORDER BY id DESC LIMIT 1");
+                $existingAllocId->bind_param('isi', $deviceId, $ownerType, $ownerId);
+                $existingAllocId->execute();
+                $allocRow = $existingAllocId->get_result()->fetch_assoc();
+                $existingAllocId->close();
+                if ($allocRow) {
+                    $updatePayment = $conn->prepare("UPDATE stock_allocations SET total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, software = NULLIF(?, '') WHERE id = ?");
+                    $updatePayment->bind_param('dddssi', $rowTotal, $rowPaid, $rowPending, $rowStatus, $software, $allocRow['id']);
+                    $updatePayment->execute();
+                    $updatePayment->close();
+                }
+            }
+
             continue;
         }
 
@@ -267,6 +292,26 @@ try {
             if ($normalizedUsedFor === 'ET') {
                 $ensureUsageTransaction($conn, $ownerType, $ownerId, $normalizedUsedFor, null, $simId, trim((string) ($simNotes[$simId] ?? '')));
             }
+
+            // Update payment fields on existing allocation
+            if ($totalAmount !== null) {
+                $rowTotal = (float) $totalAmount;
+                $rowPaid = (float) $amountPaid;
+                $rowPending = max(0, $rowTotal - $rowPaid);
+                $rowStatus = $rowTotal <= 0 ? 'Not Paid' : ($rowPending <= 0 ? 'Paid' : ($rowPaid > 0 ? 'Partially Paid' : 'Not Paid'));
+                $existingAllocId = $conn->prepare("SELECT id FROM stock_allocations WHERE sim_id = ? AND owner_type = ? AND owner_id = ? ORDER BY id DESC LIMIT 1");
+                $existingAllocId->bind_param('isi', $simId, $ownerType, $ownerId);
+                $existingAllocId->execute();
+                $allocRow = $existingAllocId->get_result()->fetch_assoc();
+                $existingAllocId->close();
+                if ($allocRow) {
+                    $updatePayment = $conn->prepare("UPDATE stock_allocations SET total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, software = NULLIF(?, '') WHERE id = ?");
+                    $updatePayment->bind_param('dddssi', $rowTotal, $rowPaid, $rowPending, $rowStatus, $software, $allocRow['id']);
+                    $updatePayment->execute();
+                    $updatePayment->close();
+                }
+            }
+
             continue;
         }
 

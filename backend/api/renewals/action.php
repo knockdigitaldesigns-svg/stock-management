@@ -9,7 +9,7 @@ requirePermission($permission);
 $token = getCurrentUserFromToken();
 $userId = (int)($token['user_id'] ?? 0);
 $renewalId = (int)($payload['renewal_id'] ?? 0);
-$allowedActions = ['Renew SIM', 'Deactivate SIM', 'Safe Custody', 'Reactivate SIM'];
+$allowedActions = ['', 'Renew SIM', 'Deactivate SIM', 'Safe Custody', 'Reactivate SIM'];
 if ($renewalId <= 0) sendResponse(false, 'Renewal ID is required.', [], [], 400);
 if (!in_array($action, $allowedActions, true)) sendResponse(false, 'Invalid renewal action.', [], [], 400);
 $conn = (new Database())->getConnection();
@@ -71,19 +71,77 @@ try {
         $paymentMode = trim((string)($payload['payment_mode'] ?? ''));
         $transactionId = trim((string)($payload['transaction_id'] ?? ''));
         if ($total <= 0) throw new Exception('Total Amount is required.');
-        if ($paid < 0 || $paid > $total) throw new Exception('Amount Paid cannot exceed Total Amount.');
-        $expectedStatus = $paid <= 0 ? 'Not Paid' : ($paid < $total ? 'Partially Paid' : 'Paid');
-        if ($paymentStatus !== $expectedStatus) throw new Exception('Payment Status does not match the amounts.');
+        if ($paid < 0) throw new Exception('Amount Paid cannot be negative.');
+        if ($paid > $total) throw new Exception('Amount Paid cannot exceed Total Amount.');
+        $pending = max(0, $total - $paid);
+        $expectedStatus = $total <= 0 ? 'Not Paid' : ($pending <= 0 ? 'Paid' : ($paid > 0 ? 'Partially Paid' : 'Not Paid'));
+        if ($paymentStatus !== '' && $paymentStatus !== $expectedStatus) throw new Exception('Payment Status does not match the amounts.');
         if ($transactionId !== '' && $paymentMode === '') throw new Exception('Payment Mode is required when Transaction ID is entered.');
         if ($paymentMode !== '' && $paymentMode !== 'Cash' && $transactionId === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
         $payment = ['payment_amount' => $total, 'amount_paid' => $paid, 'amount_pending' => $pending, 'payment_mode' => $paymentMode ?: null, 'transaction_id' => $transactionId ?: null];
     }
 
-    $update = $conn->prepare('UPDATE customer_renewals SET sim_status = ?, validity_months = ?, next_renewal_date = ?, last_renewed_date = ?, expired_to_safe_days = ?, safe_to_deactive_days = ? WHERE id = ?');
-    $update->bind_param('sissiii', $newStatus, $newValidity, $newDate, $lastRenewedDate, $lifecycleExpiredDays, $lifecycleDeactiveDays, $renewalId); $update->execute(); $update->close();
-    if (!renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes)) throw new Exception('Failed to save renewal history.');
+    /*
+     * Handle installation_date change from the renewal edit modal.
+     * If the user changed the installation_date, sync it to both
+     * customer_renewals and customer_installations, and recalculate
+     * next_renewal_date for un-renewed customers.
+     */
+    $newInstallationDate = $current['installation_date'];
+    $installationDatePayload = trim((string)($payload['installation_date'] ?? ''));
+
+    if ($installationDatePayload !== '' && $installationDatePayload !== $current['installation_date']) {
+        $instDate = DateTime::createFromFormat('Y-m-d', $installationDatePayload);
+        if (!$instDate || $instDate->format('Y-m-d') !== $installationDatePayload) {
+            throw new Exception('Invalid Installation Date format.');
+        }
+        $newInstallationDate = $installationDatePayload;
+
+        /* Update customer_installations table as well */
+        $instUpdate = $conn->prepare(
+            'UPDATE customer_installations
+             SET installation_date = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE customer_id = ?'
+        );
+        if ($instUpdate) {
+            $instUpdate->bind_param('si', $newInstallationDate, $current['customer_id']);
+            $instUpdate->execute();
+            $instUpdate->close();
+        }
+
+        /*
+         * Recalculate next_renewal_date if customer has never been renewed
+         * AND no Renew/Reactivate action is being performed right now.
+         */
+        if (
+            ($lastRenewedDate === null || $lastRenewedDate === '') &&
+            !in_array($action, ['Renew SIM', 'Reactivate SIM'], true)
+        ) {
+            $calcDate = new DateTime($newInstallationDate);
+            $calcDate->modify('+' . $newValidity . ' months');
+            $newDate = $calcDate->format('Y-m-d');
+        }
+    }
+
+    $newSafeCustodyDate = $current['safe_custody_date'];
+    if ($action === 'Safe Custody') {
+        $newSafeCustodyDate = date('Y-m-d');
+    } elseif (in_array($action, ['Renew SIM', 'Reactivate SIM'], true)) {
+        $newSafeCustodyDate = null;
+    }
+
+    $update = $conn->prepare('UPDATE customer_renewals SET sim_status = ?, validity_months = ?, next_renewal_date = ?, last_renewed_date = ?, installation_date = ?, expired_to_safe_days = ?, safe_to_deactive_days = ?, safe_custody_date = ? WHERE id = ?');
+    if (!$update) throw new Exception('Failed to prepare renewal update.');
+    $update->bind_param('sisssiisi', $newStatus, $newValidity, $newDate, $lastRenewedDate, $newInstallationDate, $lifecycleExpiredDays, $lifecycleDeactiveDays, $newSafeCustodyDate, $renewalId);
+    if (!$update->execute()) {
+        $error = $update->error;
+        $update->close();
+        throw new Exception('Failed to update renewal: ' . $error);
+    }
+    $update->close();
+    if ($action !== '' && !renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes)) throw new Exception('Failed to save renewal history.');
     $conn->commit(); $conn->close();
-    sendResponse(true, 'Renewal action completed successfully.', ['status' => $newStatus, 'next_renewal_date' => $newDate, 'last_renewed_date' => $lastRenewedDate]);
+    sendResponse(true, 'Renewal action completed successfully.', ['status' => $newStatus, 'next_renewal_date' => $newDate, 'last_renewed_date' => $lastRenewedDate, 'installation_date' => $newInstallationDate]);
 } catch (Throwable $error) {
     $conn->rollback(); $conn->close();
     sendResponse(false, $error->getMessage(), [], [], 400);

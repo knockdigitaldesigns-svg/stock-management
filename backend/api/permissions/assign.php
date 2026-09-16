@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -9,6 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('permissions.assign');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -49,6 +51,16 @@ $permissionKeys = array_values(array_unique(array_filter(array_map('trim', $perm
 
 $conn->begin_transaction();
 try {
+    $oldPermissions = [];
+    $oldStmt = $conn->prepare('SELECT p.permission_key FROM role_permissions rp INNER JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ? ORDER BY p.permission_key');
+    $oldStmt->bind_param('i', $roleId);
+    $oldStmt->execute();
+    $oldResult = $oldStmt->get_result();
+    while ($oldRow = $oldResult->fetch_assoc()) $oldPermissions[] = $oldRow['permission_key'];
+    $oldStmt->close();
+    if ($oldPermissions !== $permissionKeys) {
+        writeAudit($conn, $roleId, 'Role Permissions', 'Edit', 'permissions', $oldPermissions, $permissionKeys, $currentUser);
+    }
     $conn->query('DELETE FROM role_permissions WHERE role_id = ' . (int) $roleId);
 
     if (!empty($permissionKeys)) {

@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
 require_once '../../utils/dealer_validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -12,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('dealers.add');
 
 $data = json_decode(file_get_contents("php://input"), true);
@@ -41,12 +42,26 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
+$conn->begin_transaction();
 $stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
 $stmt->bind_param("sssssss", $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['notes']);
 
 if ($stmt->execute()) {
-    sendResponse(true, "Dealer created successfully", ["id" => $conn->insert_id]);
+    $dealerId = $conn->insert_id;
+    try {
+        writeCreatedFields($conn, $dealerId, 'Dealer', $validData, $currentUser);
+        $conn->commit();
+    } catch (Throwable $e) {
+        $conn->rollback();
+        $stmt->close();
+        $conn->close();
+        sendResponse(false, $e->getMessage(), [], [], 500);
+    }
+    $stmt->close();
+    $conn->close();
+    sendResponse(true, "Dealer created successfully", ["id" => $dealerId]);
 } else {
+    $conn->rollback();
     sendResponse(false, "Failed to create dealer: " . $stmt->error, [], [], 500);
 }
 

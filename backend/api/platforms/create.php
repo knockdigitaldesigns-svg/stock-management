@@ -2,6 +2,7 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('platforms.add');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -62,6 +64,7 @@ if ($check->get_result()->num_rows > 0) {
 
 $check->close();
 
+$conn->begin_transaction();
 $stmt = $conn->prepare(
     'INSERT INTO platforms (platform_name, status)
      VALUES (?, ?)'
@@ -89,6 +92,9 @@ if (!$stmt->execute()) {
 $id = $conn->insert_id;
 
 $stmt->close();
+$created = ['platform_name' => $platformName, 'status' => $status];
+writeCreatedFields($conn, $id, 'Platform', $created, $currentUser);
+$conn->commit();
 $conn->close();
 
 sendResponse(

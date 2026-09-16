@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
 require_once '../../utils/technician_validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -12,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('technicians.edit');
 
 $data = json_decode(file_get_contents('php://input'), true);
@@ -42,13 +43,33 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
+$oldStmt = $conn->prepare('SELECT technician_name, mobile_no, location, enrolled_date, notes FROM technicians WHERE id = ? LIMIT 1');
+$oldStmt->bind_param('i', $id);
+$oldStmt->execute();
+$oldTechnician = $oldStmt->get_result()->fetch_assoc();
+$oldStmt->close();
+if (!$oldTechnician) sendResponse(false, 'Technician not found', [], [], 404);
+
+$conn->begin_transaction();
+try {
+writeChangedFields($conn, $id, 'Technician', $oldTechnician, $validData, $currentUser);
+
 $stmt = $conn->prepare('UPDATE technicians SET technician_name = ?, mobile_no = ?, location = ?, enrolled_date = ?, notes = ? WHERE id = ?');
 $stmt->bind_param('sssssi', $validData['technician_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['notes'], $id);
 
 if ($stmt->execute()) {
+    $stmt->close();
+    $conn->commit();
+    $conn->close();
     sendResponse(true, 'Technician updated successfully');
 }
 
 if ($stmt->errno === 1062) sendResponse(false, 'Technician mobile number already exists.', [], [], 400);
 
-sendResponse(false, 'Failed to update technician', [], [], 500);
+throw new RuntimeException('Failed to update technician');
+} catch (Throwable $e) {
+    $conn->rollback();
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 500);
+}

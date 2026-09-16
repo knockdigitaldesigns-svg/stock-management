@@ -14,14 +14,14 @@ $conn = $db->getConnection();
 $sql = "
     SELECT sa.*, d.dealer_name, d.mobile_no AS dealer_mobile, t.technician_name, t.mobile_no AS technician_mobile,
            dev.imei_no, dev.status AS device_status, dt.device_type AS device_model, dev.purchase_date AS device_purchase_date,
-           s.sim_no, s.sim_type, s.status AS sim_status, sv.months AS sim_validity_months, s.purchase_date AS sim_purchase_date
+           s.sim_no, s.sim_type, s.status AS sim_master_status, COALESCE(sa.sim_status, 'Available') AS sim_status, COALESCE(sa.sim_validity_id, s.sim_validity_id) AS sim_validity_id, sv.months AS sim_validity_months, sa.sim_given_date, sa.sim_activation_date, sa.sim_expiry_date, sa.sim_deactivation_date, s.purchase_date AS sim_purchase_date
     FROM stock_allocations sa
     LEFT JOIN dealers d ON d.id = sa.owner_id AND sa.owner_type = 'dealer'
     LEFT JOIN technicians t ON t.id = sa.owner_id AND sa.owner_type = 'technician'
     LEFT JOIN devices dev ON dev.id = sa.device_id
     LEFT JOIN device_types dt ON dt.id = dev.device_model_id
     LEFT JOIN sims s ON s.id = sa.sim_id
-    LEFT JOIN sim_validities sv ON sv.id = s.sim_validity_id
+    LEFT JOIN sim_validities sv ON sv.id = COALESCE(sa.sim_validity_id, s.sim_validity_id)
     WHERE sa.id = ?
 ";
 $stmt = $conn->prepare($sql);

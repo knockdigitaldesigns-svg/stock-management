@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/user_identity.php';
+require_once '../../utils/audit.php';
 
 handlePreflight();
 
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('users.add');
 
 $data = json_decode(file_get_contents('php://input'));
@@ -76,6 +78,7 @@ $role = $roleResult->fetch_assoc();
 $roleCheck->close();
 
 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+$conn->begin_transaction();
 $insert = $conn->prepare('INSERT INTO users (employee_name, mobile_no, username, password, role, role_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
 $insert->bind_param('sssssis', $employeeName, $mobileNo, $username, $hashedPassword, $role['role_name'], $roleId, $status);
 if (!$insert->execute()) {
@@ -89,6 +92,15 @@ if (!$insert->execute()) {
     sendResponse(false, 'Failed to create user', [], [], 500);
 }
 $insert->close();
+$userId = $conn->insert_id;
+writeCreatedFields($conn, $userId, 'User', [
+    'employee_name' => $employeeName,
+    'mobile_no' => $mobileNo,
+    'username' => $username,
+    'role_id' => $roleId,
+    'status' => $status
+], $currentUser);
+$conn->commit();
 $conn->close();
 
 sendResponse(true, 'User created successfully', ['user' => ['employee_name' => $employeeName, 'mobile_no' => $mobileNo, 'role_id' => $roleId, 'status' => $status]]);

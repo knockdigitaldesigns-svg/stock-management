@@ -78,7 +78,11 @@ const StockManagement = () => {
 
     const filteredStock = filterTableRows(allowedAllocations, filters, {
         dateKeys: ['allocation_date'],
-        searchKeys: ['owner_name', 'owner_type', 'imei_no', 'sim_no', 'software']
+        searchKeys: ['owner_name', 'owner_type', 'imei_no', 'sim_no', 'software'],
+        customDateFilters: [
+            { key: 'given_date', label: 'Given Date' },
+            { key: 'activation_date', label: 'Activation Date' }
+        ]
     });
 
     const {
@@ -108,6 +112,10 @@ const StockManagement = () => {
                     onReset={() => setFilters(emptyTableFilters())}
                     items={allowedAllocations}
                     dateKeys={['allocation_date']}
+                    customDateFilters={[
+                        { key: 'given_date', label: 'Given Date' },
+                        { key: 'activation_date', label: 'Activation Date' }
+                    ]}
                     showOwnerType
                     showPlatform
                     platformOptions={platforms}
@@ -128,6 +136,7 @@ const StockManagement = () => {
                                 <th>Status</th>
                                 <th>Software</th>
                                 <th>Total Amount</th>
+                                <th>Amount Paid</th>
                                 <th>Pending Amount</th>
                                 <th>Payment Status</th>
                                 <th>Actions</th>
@@ -136,11 +145,11 @@ const StockManagement = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="12" className="text-center">Loading stock data...</td>
+                                    <td colSpan="13" className="text-center">Loading stock data...</td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="12" className="text-center empty-state">
+                                    <td colSpan="13" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
@@ -171,9 +180,14 @@ const StockManagement = () => {
                                                 </span>
                                             </td>
                                             <td>{row.software || '-'}</td>
-                                            <td>₹{Number(row.total_amount || 0).toFixed(2)}</td>
-                                            <td>₹{Number(row.pending_amount || 0).toFixed(2)}</td>
-                                            <td>{row.payment_status || 'No Payment Required'}</td>
+                                            <td>₹{Number(row.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td>₹{Number(row.amount_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td>₹{Number(row.pending_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td>
+                                                <span className={`badge ${row.payment_status === 'Paid' ? 'badge-success' : row.payment_status === 'Partially Paid' ? 'badge-warning' : row.payment_status === 'Not Paid' ? 'badge-danger' : 'badge-info'}`}>
+                                                    {row.payment_status || 'No Payment Required'}
+                                                </span>
+                                            </td>
                                             <td>
                                                 <div className="action-buttons">
                                                     <button type="button" className="icon-btn view" aria-label="View stock allocation" title="View" onClick={() => setViewingAllocation(row)}><Eye size={16} /></button>
@@ -220,9 +234,9 @@ const StockManagement = () => {
                         { label: 'SIM Number', key: 'sim_no', format: (val, row) => (!row.device_id && !row.imei_no && (row.sim_id || row.sim_no) ? row.sim_no || '-' : '-') },
                         { label: 'Status', key: 'asset_status', format: (val, row) => { const s = row.device_id || row.imei_no ? row.device_status : row.sim_status; return s ? s.charAt(0).toUpperCase() + s.slice(1) : val || 'Allocated'; } },
                         { label: 'Software', key: 'software' },
-                        { label: 'Total Amount', key: 'total_amount' },
-                        { label: 'Amount Paid', key: 'amount_paid' },
-                        { label: 'Pending Amount', key: 'pending_amount' },
+                        { label: 'Total Amount', key: 'total_amount', format: (val) => `₹${Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                        { label: 'Amount Paid', key: 'amount_paid', format: (val) => `₹${Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                        { label: 'Pending Amount', key: 'pending_amount', format: (val) => `₹${Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
                         { label: 'Payment Status', key: 'payment_status' },
                         { label: 'Payment Mode', key: 'payment_mode' },
                         { label: 'Notes', key: 'notes' }

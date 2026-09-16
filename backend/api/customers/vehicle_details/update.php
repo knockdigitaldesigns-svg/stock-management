@@ -2,6 +2,7 @@
 
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
+require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 
 handlePreflight();
@@ -10,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'PUT') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
+$currentUser = authenticate();
 requirePermission('customers.edit');
 
 $data = json_decode(
@@ -176,12 +178,16 @@ try {
         'SELECT
             id,
             customer_id,
+            vehicle_no,
+            vehicle_type_id,
             device_id,
+            device_model_id,
             sim_id_1,
             sim_id_2,
             imei_no,
             sim_no_1,
-            sim_no_2
+            sim_no_2,
+            validity_months
          FROM customer_vehicle_details
          WHERE id = ?
          LIMIT 1
@@ -274,6 +280,19 @@ try {
     | VALIDITY
     |--------------------------------------------------------------------------
     */
+
+    writeChangedFields($conn, $id, 'Customer Vehicle Details', $old, [
+        'vehicle_no' => $vehicleNo,
+        'vehicle_type_id' => $vehicleTypeId,
+        'device_id' => $newDeviceId,
+        'device_model_id' => $deviceModelId,
+        'imei_no' => $imeiNo,
+        'sim_id_1' => $newSimId1,
+        'sim_no_1' => $simNo1,
+        'sim_id_2' => $newSimId2,
+        'sim_no_2' => $simNo2,
+        'validity_months' => $validityId
+    ], $currentUser);
 
     $stmt = $conn->prepare(
         'SELECT id, months, status
