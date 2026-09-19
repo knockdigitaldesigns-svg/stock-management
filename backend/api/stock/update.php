@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/dealer_threshold.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -131,13 +132,25 @@ $conn->begin_transaction();
 
 try {
     if ($ownerType === 'dealer') {
-        $check = $conn->prepare("SELECT id FROM dealers WHERE id = ? AND installation_status IN ('Onsite', 'Offsite')");
+        $check = $conn->prepare("SELECT id FROM dealers WHERE id = ?");
         $check->bind_param("i", $ownerId);
         $check->execute();
         if ($check->get_result()->num_rows === 0) {
             throw new Exception("Selected dealer is not valid");
         }
         $check->close();
+
+        if (!empty($deviceIds)) {
+            $thresholdCheck = checkDealerPendingThreshold($conn, $ownerId, true);
+            if (!$thresholdCheck['allowed']) {
+                $conn->rollback();
+                sendResponse(false, $thresholdCheck['message'], [
+                    'error_code' => $thresholdCheck['error_code'],
+                    'pending_amount' => $thresholdCheck['pending_amount'],
+                    'threshold_amount' => $thresholdCheck['threshold_amount']
+                ], [], 400);
+            }
+        }
     } else {
         $check = $conn->prepare("SELECT id FROM technicians WHERE id = ?");
         $check->bind_param("i", $ownerId);

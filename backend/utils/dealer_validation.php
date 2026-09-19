@@ -17,26 +17,23 @@ function validateDealerFields($input, $rowNumber = null) {
     $errors = [];
 
     $dealerName = trim((string) ($input['dealer_name'] ?? $input['Dealer Name'] ?? ''));
-    $mobileNo = trim((string) ($input['mobile_no'] ?? $input['Mobile No'] ?? ''));
+    $rawMobile = trim((string) ($input['mobile_no'] ?? $input['Mobile No'] ?? ''));
     $location = trim((string) ($input['location'] ?? $input['Location'] ?? ''));
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $installationStatus = trim((string) ($input['installation_status'] ?? $input['Installation Status'] ?? ''));
     $notes = trim((string) ($input['notes'] ?? $input['Notes'] ?? ''));
-    $software = trim((string) ($input['software'] ?? $input['Software'] ?? ''));
-    $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
-    if ($software !== '' && !in_array($software, $allowedSoftware, true)) $errors[] = "{$prefix}Invalid Software.";
 
     // 1. Dealer Name
     if ($dealerName === '') {
         $errors[] = "{$prefix}Dealer Name is required.";
     }
 
-    // 2. Mobile No
-    $normalizedMobile = normalizeMobile($mobileNo);
-    if ($mobileNo === '') {
+    // 2. Mobile No (EXACTLY 10 numeric digits)
+    $cleanMobile = preg_replace('/\D+/', '', $rawMobile);
+    if ($rawMobile === '') {
         $errors[] = "{$prefix}Mobile No is required.";
-    } elseif (!preg_match('/^[0-9+\-\s()]{10,15}$/', $mobileNo) || strlen($normalizedMobile) < 10 || strlen($normalizedMobile) > 15) {
-        $errors[] = "{$prefix}Mobile No is invalid.";
+    } elseif (strlen($cleanMobile) !== 10 || !preg_match('/^[0-9]{10}$/', $cleanMobile)) {
+        $errors[] = "{$prefix}Mobile No must be exactly 10 digits.";
     }
 
     // 3. Location
@@ -71,17 +68,48 @@ function validateDealerFields($input, $rowNumber = null) {
         }
     }
 
+    // 6. Threshold Amount (optional for all statuses, must be non-negative numeric if provided)
+    $thresholdAmount = null;
+    $rawThreshold = $input['threshold_amount'] ?? $input['Threshold Amount'] ?? null;
+    if ($rawThreshold !== null && trim((string)$rawThreshold) !== '') {
+        if (!is_numeric($rawThreshold) || (float)$rawThreshold < 0) {
+            $errors[] = "{$prefix}Threshold Amount must be a valid non-negative number.";
+        } else {
+            $thresholdAmount = (float)$rawThreshold;
+        }
+    }
+
+    // 7. Software Multi-Select
+    $rawSoftware = $input['software'] ?? $input['Software'] ?? [];
+    $softwareList = [];
+    if (is_array($rawSoftware)) {
+        $softwareList = array_values(array_unique(array_filter(array_map('trim', $rawSoftware))));
+    } elseif (is_string($rawSoftware) && trim($rawSoftware) !== '') {
+        $softwareList = array_values(array_unique(array_filter(array_map('trim', explode(',', $rawSoftware)))));
+    }
+
+    $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
+    foreach ($softwareList as $sw) {
+        if (!in_array($sw, $allowedSoftware, true)) {
+            $errors[] = "{$prefix}Invalid Software: {$sw}.";
+        }
+    }
+
+    $softwareStr = !empty($softwareList) ? implode(', ', $softwareList) : null;
+
     return [
         'errors' => $errors,
         'data' => [
             'dealer_name' => $dealerName,
-            'mobile_no' => $normalizedMobile,
-            'raw_mobile' => $mobileNo,
+            'mobile_no' => $cleanMobile,
+            'raw_mobile' => $rawMobile,
             'location' => $location,
             'enrolled_date' => $isoDate,
             'installation_status' => $normalizedStatus,
             'notes' => $notes,
-            'software' => $software !== '' ? $software : null
+            'software' => $softwareStr,
+            'software_list' => $softwareList,
+            'threshold_amount' => $thresholdAmount
         ]
     ];
 }
@@ -126,4 +154,3 @@ function checkDealerDuplicatesInDb($conn, $dealerName, $normalizedMobile, $exclu
 
     return $errors;
 }
-?>

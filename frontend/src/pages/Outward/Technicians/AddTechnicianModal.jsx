@@ -36,6 +36,12 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
             return;
         }
 
+        const digitsOnly = formData.mobile_no.replace(/\D/g, '');
+        if (digitsOnly.length !== 10) {
+            triggerError('Mobile No must be exactly 10 digits.');
+            return;
+        }
+
         setLoading(true);
         try {
             const response = await api.post('/technicians/create.php', formData);
@@ -84,8 +90,12 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
                                 name="mobile_no"
                                 className="form-control"
                                 value={formData.mobile_no}
-                                onChange={handleChange}
-                                maxLength={15}
+                                onChange={(e) => {
+                                    const val = e.target.value.replace(/\D/g, '');
+                                    setFormData(prev => ({ ...prev, mobile_no: val }));
+                                }}
+                                maxLength={10}
+                                placeholder="Enter 10 digit mobile no"
                                 required
                             />
                         </div>

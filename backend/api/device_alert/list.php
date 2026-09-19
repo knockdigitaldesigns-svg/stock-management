@@ -18,8 +18,12 @@ if (!$conn) {
 }
 
 $configSql = "
-    SELECT s.id, s.owner_type, s.owner_id, s.minimum_device_count, s.minimum_sim_count, s.notes
+        SELECT s.id, s.owner_type, s.owner_id, s.asset_type, s.device_model_id, s.sim_type_id, s.min_count,
+            s.minimum_device_count, s.minimum_sim_count, s.notes,
+           dt.device_type AS device_model_name, st.sim_type AS sim_type_name
     FROM stock_alert_settings s
+    LEFT JOIN device_types dt ON s.device_model_id = dt.id
+    LEFT JOIN sim_types st ON s.sim_type_id = st.id
     ORDER BY s.owner_type ASC, s.owner_id ASC
 ";
 
@@ -30,6 +34,12 @@ if ($configResult) {
     while ($row = $configResult->fetch_assoc()) {
         $ownerType = strtolower((string) ($row['owner_type'] ?? ''));
         $ownerId = (int) ($row['owner_id'] ?? 0);
+        $assetType = strtolower((string) ($row['asset_type'] ?? ''));
+        $legacyDeviceMinimum = (int) ($row['minimum_device_count'] ?? 0);
+        $legacySimMinimum = (int) ($row['minimum_sim_count'] ?? 0);
+        if (!in_array($assetType, ['device', 'sim', 'both'], true) || ($assetType === 'device' && empty($row['device_model_id']) && empty($row['sim_type_id']) && $legacySimMinimum > 0)) {
+            $assetType = $legacyDeviceMinimum > 0 && $legacySimMinimum > 0 ? 'both' : ($legacySimMinimum > 0 ? 'sim' : 'device');
+        }
         $ownerName = '';
 
         if ($ownerType === 'dealer') {
@@ -53,93 +63,94 @@ if ($configResult) {
             $installationStatus = '';
         }
 
-        $deviceCountSql = "
-            SELECT
-                COUNT(DISTINCT sa.device_id) AS total_count,
-                COUNT(DISTINCT CASE WHEN
-                    EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id)
-                    OR EXISTS (
-                        SELECT 1 FROM stock_transactions st
-                        WHERE st.device_id = sa.device_id
-                          AND st.from_owner_type = sa.owner_type
-                          AND st.from_owner_id = sa.owner_id
-                                                    AND st.id = (
-                                                            SELECT MAX(st_latest.id)
-                                                            FROM stock_transactions st_latest
-                                                            WHERE st_latest.device_id = sa.device_id
-                                                                AND st_latest.from_owner_type = sa.owner_type
-                                                                AND st_latest.from_owner_id = sa.owner_id
-                                                    )
-                                                    AND st.transaction_type = 'USE'
-                    )
-                THEN sa.device_id END) AS used_count
-            FROM stock_allocations sa
-            WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.device_id IS NOT NULL
-        ";
-        $deviceStmt = $conn->prepare($deviceCountSql);
-        $deviceStmt->bind_param('si', $ownerType, $ownerId);
-        $deviceStmt->execute();
-        $deviceData = $deviceStmt->get_result()->fetch_assoc() ?: [];
-        $deviceStmt->close();
-        $totalDeviceCount = (int) ($deviceData['total_count'] ?? 0);
-        $usedDeviceCount = (int) ($deviceData['used_count'] ?? 0);
-        $deviceCount = max(0, $totalDeviceCount - $usedDeviceCount);
-
-        $simCountSql = "
-            SELECT
-                COUNT(DISTINCT sa.sim_id) AS total_count,
-                COUNT(DISTINCT CASE WHEN
-                    EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = sa.sim_id OR cvd.sim_id_2 = sa.sim_id)
-                    OR EXISTS (
-                        SELECT 1 FROM stock_transactions st
-                        WHERE st.sim_id = sa.sim_id
-                          AND st.from_owner_type = sa.owner_type
-                          AND st.from_owner_id = sa.owner_id
-                                                    AND st.id = (
-                                                            SELECT MAX(st_latest.id)
-                                                            FROM stock_transactions st_latest
-                                                            WHERE st_latest.sim_id = sa.sim_id
-                                                                AND st_latest.from_owner_type = sa.owner_type
-                                                                AND st_latest.from_owner_id = sa.owner_id
-                                                    )
-                                                    AND st.transaction_type = 'USE'
-                    )
-                THEN sa.sim_id END) AS used_count
-            FROM stock_allocations sa
-            WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.sim_id IS NOT NULL
-        ";
-        $simStmt = $conn->prepare($simCountSql);
-        $simStmt->bind_param('si', $ownerType, $ownerId);
-        $simStmt->execute();
-        $simData = $simStmt->get_result()->fetch_assoc() ?: [];
-        $simStmt->close();
-        $totalSimCount = (int) ($simData['total_count'] ?? 0);
-        $usedSimCount = (int) ($simData['used_count'] ?? 0);
-        $simCount = max(0, $totalSimCount - $usedSimCount);
-
-        $minimumDevice = (int) ($row['minimum_device_count'] ?? 0);
-        $minimumSim = (int) ($row['minimum_sim_count'] ?? 0);
-
-        $deviceStatus = 'SAFE';
-        if ($deviceCount < $minimumDevice) {
-            $deviceStatus = 'ALERT';
-        } elseif ($deviceCount == $minimumDevice) {
-            $deviceStatus = 'WARNING';
+        $deviceAvailableCount = 0;
+        $simAvailableCount = 0;
+        
+        if (in_array($assetType, ['device', 'both'], true) && !empty($row['device_model_id'])) {
+            $deviceModelId = (int) $row['device_model_id'];
+            $deviceCountSql = "
+                SELECT
+                    COUNT(DISTINCT sa.device_id) AS total_count,
+                    COUNT(DISTINCT CASE WHEN
+                        EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id)
+                        OR EXISTS (
+                            SELECT 1 FROM stock_transactions st
+                            WHERE st.device_id = sa.device_id
+                              AND st.from_owner_type = sa.owner_type
+                              AND st.from_owner_id = sa.owner_id
+                              AND st.id = (
+                                  SELECT MAX(st_latest.id)
+                                  FROM stock_transactions st_latest
+                                  WHERE st_latest.device_id = sa.device_id
+                                      AND st_latest.from_owner_type = sa.owner_type
+                                      AND st_latest.from_owner_id = sa.owner_id
+                              )
+                              AND st.transaction_type = 'USE'
+                        )
+                    THEN sa.device_id END) AS used_count
+                FROM stock_allocations sa
+                JOIN devices d ON sa.device_id = d.id
+                WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.device_id IS NOT NULL AND d.device_model_id = ?
+            ";
+            $deviceStmt = $conn->prepare($deviceCountSql);
+            $deviceStmt->bind_param('sii', $ownerType, $ownerId, $deviceModelId);
+            $deviceStmt->execute();
+            $deviceData = $deviceStmt->get_result()->fetch_assoc() ?: [];
+            $deviceStmt->close();
+            $totalCount = (int) ($deviceData['total_count'] ?? 0);
+            $usedCount = (int) ($deviceData['used_count'] ?? 0);
+            $deviceAvailableCount = max(0, $totalCount - $usedCount);
+        }
+        if (in_array($assetType, ['sim', 'both'], true) && !empty($row['sim_type_id'])) {
+            $simTypeId = (int) $row['sim_type_id'];
+            $simCountSql = "
+                SELECT
+                    COUNT(DISTINCT sa.sim_id) AS total_count,
+                    COUNT(DISTINCT CASE WHEN
+                        EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = sa.sim_id OR cvd.sim_id_2 = sa.sim_id)
+                        OR EXISTS (
+                            SELECT 1 FROM stock_transactions st
+                            WHERE st.sim_id = sa.sim_id
+                              AND st.from_owner_type = sa.owner_type
+                              AND st.from_owner_id = sa.owner_id
+                              AND st.id = (
+                                  SELECT MAX(st_latest.id)
+                                  FROM stock_transactions st_latest
+                                  WHERE st_latest.sim_id = sa.sim_id
+                                      AND st_latest.from_owner_type = sa.owner_type
+                                      AND st_latest.from_owner_id = sa.owner_id
+                              )
+                              AND st.transaction_type = 'USE'
+                        )
+                    THEN sa.sim_id END) AS used_count
+                FROM stock_allocations sa
+                JOIN sims s ON sa.sim_id = s.id
+                JOIN sim_types st ON s.sim_type = st.sim_type
+                WHERE sa.owner_type = ? AND sa.owner_id = ? AND sa.sim_id IS NOT NULL AND st.id = ?
+            ";
+            $simStmt = $conn->prepare($simCountSql);
+            $simStmt->bind_param('sii', $ownerType, $ownerId, $simTypeId);
+            $simStmt->execute();
+            $simData = $simStmt->get_result()->fetch_assoc() ?: [];
+            $simStmt->close();
+            $totalCount = (int) ($simData['total_count'] ?? 0);
+            $usedCount = (int) ($simData['used_count'] ?? 0);
+            $simAvailableCount = max(0, $totalCount - $usedCount);
         }
 
-        $simStatus = 'SAFE';
-        if ($simCount < $minimumSim) {
-            $simStatus = 'ALERT';
-        } elseif ($simCount == $minimumSim) {
-            $simStatus = 'WARNING';
+        $minimumDeviceCount = (int) ($row['minimum_device_count'] ?? 0);
+        $minimumSimCount = (int) ($row['minimum_sim_count'] ?? 0);
+        if ($minimumDeviceCount === 0 && $assetType === 'device') {
+            $minimumDeviceCount = (int) ($row['min_count'] ?? 0);
+        }
+        if ($minimumSimCount === 0 && $assetType === 'sim') {
+            $minimumSimCount = (int) ($row['min_count'] ?? 0);
         }
 
-        $overallStatus = 'SAFE';
-        if ($deviceStatus === 'ALERT' || $simStatus === 'ALERT') {
-            $overallStatus = 'ALERT';
-        } elseif ($deviceStatus === 'WARNING' || $simStatus === 'WARNING') {
-            $overallStatus = 'WARNING';
-        }
+        $deviceStatus = $assetType === 'sim' ? null : ($deviceAvailableCount < $minimumDeviceCount ? 'ALERT' : ($deviceAvailableCount === $minimumDeviceCount ? 'WARNING' : 'SAFE'));
+        $simStatus = $assetType === 'device' ? null : ($simAvailableCount < $minimumSimCount ? 'ALERT' : ($simAvailableCount === $minimumSimCount ? 'WARNING' : 'SAFE'));
+        $statuses = array_filter([$deviceStatus, $simStatus]);
+        $status = in_array('ALERT', $statuses, true) ? 'ALERT' : (in_array('WARNING', $statuses, true) ? 'WARNING' : 'SAFE');
 
         $owners[] = [
             'id' => (int) $row['id'],
@@ -147,18 +158,21 @@ if ($configResult) {
             'owner_id' => $ownerId,
             'owner_name' => $ownerName,
             'installation_status' => $installationStatus,
-            'minimum_device_count' => $minimumDevice,
-            'minimum_sim_count' => $minimumSim,
+            'asset_type' => $assetType,
+            'device_model_id' => $row['device_model_id'] ? (int)$row['device_model_id'] : null,
+            'sim_type_id' => $row['sim_type_id'] ? (int)$row['sim_type_id'] : null,
+            'device_model_name' => $row['device_model_name'] ?? '',
+            'sim_type_name' => $row['sim_type_name'] ?? '',
+            'min_count' => (int) ($row['min_count'] ?? 0),
+            'minimum_device_count' => $minimumDeviceCount,
+            'minimum_sim_count' => $minimumSimCount,
             'notes' => $row['notes'] ?? '',
-            'total_device_count' => $totalDeviceCount,
-            'used_device_count' => $usedDeviceCount,
-            'available_device_count' => $deviceCount,
-            'total_sim_count' => $totalSimCount,
-            'used_sim_count' => $usedSimCount,
-            'available_sim_count' => $simCount,
+            'device_available_count' => $deviceAvailableCount,
+            'sim_available_count' => $simAvailableCount,
+            'available_count' => $assetType === 'sim' ? $simAvailableCount : $deviceAvailableCount,
             'device_status' => $deviceStatus,
             'sim_status' => $simStatus,
-            'status' => $overallStatus,
+            'status' => $status,
         ];
     }
 }

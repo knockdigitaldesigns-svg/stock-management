@@ -24,7 +24,9 @@ import {
     SlidersHorizontal,
     Clock,
     History as HistoryIcon,
-    LifeBuoy
+    LifeBuoy,
+    Menu,
+    X
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
@@ -35,6 +37,8 @@ const AdminLayout = () => {
     const location = useLocation();
     const { user, hasPermission, logout } = useAuth();
 
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
     const [inwardOpen, setInwardOpen] = useState(false);
     const [outwardOpen, setOutwardOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -42,6 +46,7 @@ const AdminLayout = () => {
     const [masterSettingsOpen, setMasterSettingsOpen] = useState(false);
 
     useEffect(() => {
+        setSidebarOpen(false);
         if (location.pathname.startsWith('/customer-management')) {
             setCustomerOpen(true);
         }
@@ -196,8 +201,8 @@ const showCustomerManagement =
             {/* =========================================
                 SIDEBAR
             ========================================= */}
-
-            <aside className="sidebar">
+            <div className={`sidebar-backdrop ${sidebarOpen ? 'active' : ''}`} onClick={() => setSidebarOpen(false)} />
+            <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
 
                 {/* Sidebar Header */}
                 <div className="sidebar-header">
@@ -363,6 +368,20 @@ const showCustomerManagement =
                                         >
                                             <Users size={18} />
                                             <span>Dealer</span>
+                                        </NavLink>
+                                    )}
+
+                                    {canViewDealer && (
+                                        <NavLink
+                                            to="/outward/dealer-sim-activation"
+                                            className={({ isActive }) =>
+                                                `nav-sub-item ${
+                                                    isActive ? 'active' : ''
+                                                }`
+                                            }
+                                        >
+                                            <Users size={18} />
+                                            <span>Dealer SIM Activation</span>
                                         </NavLink>
                                     )}
 
@@ -864,7 +883,9 @@ const showCustomerManagement =
             <main className="main-content">
 
                 <header className="topbar">
-
+                    <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
+                        {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
+                    </button>
                     <div className="user-profile">
 
                         <div className="avatar">

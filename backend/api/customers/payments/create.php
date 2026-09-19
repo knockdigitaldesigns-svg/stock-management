@@ -36,6 +36,7 @@ if (!$data) {
 $customerId = isset($data->customer_id)
     ? (int) $data->customer_id
     : 0;
+$vehicleId = isset($data->vehicle_id) ? (int) $data->vehicle_id : 0;
 
 $paymentStep = isset($data->payment_step)
     ? (int) $data->payment_step
@@ -475,9 +476,21 @@ try {
 
     $conn->begin_transaction();
 
-    $completeCustomerStock = static function ($conn, $customerId) {
-        $vehicleStmt = $conn->prepare('SELECT device_id, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE');
-        $vehicleStmt->bind_param('i', $customerId);
+    if ($vehicleId > 0) {
+        $vehicleCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE id = ? AND customer_id = ? LIMIT 1');
+        $vehicleCheck->bind_param('ii', $vehicleId, $customerId);
+        $vehicleCheck->execute();
+        if ($vehicleCheck->get_result()->num_rows === 0) {
+            $vehicleCheck->close();
+            throw new Exception('Selected customer vehicle was not found.');
+        }
+        $vehicleCheck->close();
+    }
+
+    $completeCustomerStock = static function ($conn, $customerId, $vehicleId) {
+        $vehicleStmt = $conn->prepare('SELECT device_id, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE ' . ($vehicleId > 0 ? 'id = ?' : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1') . ' FOR UPDATE');
+        $stockTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
+        $vehicleStmt->bind_param('i', $stockTargetId);
         $vehicleStmt->execute();
         $vehicle = $vehicleStmt->get_result()->fetch_assoc();
         $vehicleStmt->close();
@@ -538,7 +551,7 @@ try {
         $consume($conn, 'sim', (int) ($vehicle['sim_id_2'] ?? 0), $customerId);
     };
 
-    $syncCashCollection = static function ($conn, int $customerId, int $paymentId, float $totalAmount, bool $cashToTechnician, bool $cashToDealer, array $currentUser): void {
+    $syncCashCollection = static function ($conn, int $customerId, int $vehicleId, int $paymentId, float $totalAmount, bool $cashToTechnician, bool $cashToDealer, array $currentUser): void {
         $selectedType = $cashToTechnician ? 'Technician' : ($cashToDealer ? 'Dealer' : null);
         $existingStmt = $conn->prepare('SELECT * FROM customer_cash_collections WHERE customer_id = ? AND payment_id = ? LIMIT 1 FOR UPDATE');
         $existingStmt->bind_param('ii', $customerId, $paymentId);
@@ -558,13 +571,29 @@ try {
             return;
         }
 
-        $installationStmt = $conn->prepare('SELECT id, installation_person_type, installation_person_id FROM customer_installations WHERE customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE');
-        $installationStmt->bind_param('i', $customerId);
+        $installationStmt = $conn->prepare('SELECT id, installation_person_type, installation_person_id FROM customer_installations WHERE ' . ($vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1') . ' FOR UPDATE');
+        $installationTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
+        $installationStmt->bind_param('i', $installationTargetId);
         $installationStmt->execute();
         $installation = $installationStmt->get_result()->fetch_assoc();
         $installationStmt->close();
         if (!$installation) throw new Exception('Installation details are required before assigning customer cash.');
-        if ($installation['installation_person_type'] !== $selectedType) {
+        $installationPersonType = $installation['installation_person_type'];
+        if ($installationPersonType === '') {
+            $dealerCheck = $conn->prepare('SELECT id FROM dealers WHERE id = ? LIMIT 1');
+            $installationPersonId = (int) $installation['installation_person_id'];
+            $dealerCheck->bind_param('i', $installationPersonId);
+            $dealerCheck->execute();
+            $isDealer = $dealerCheck->get_result()->num_rows > 0;
+            $dealerCheck->close();
+            $installationPersonType = $isDealer ? 'Dealer' : 'Technician';
+        }
+        $installationRecipientType = in_array(
+            $installationPersonType,
+            ['Onsite Dealer', 'Offsite Dealer', 'Dealer'],
+            true
+        ) ? 'Dealer' : $installationPersonType;
+        if ($installationRecipientType !== $selectedType) {
             throw new Exception('Cash recipient must match the installation person type.');
         }
 
@@ -612,13 +641,14 @@ try {
      * ---------------------------------------------------------------
      */
 
+    $paymentWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
     $checkStmt = $conn->prepare(
-        'SELECT id
+        "SELECT id
          FROM customer_payments
-         WHERE customer_id = ?
+         WHERE {$paymentWhere}
          ORDER BY created_at DESC, id DESC
          LIMIT 1
-         FOR UPDATE'
+         FOR UPDATE"
     );
 
     if (!$checkStmt) {
@@ -627,10 +657,8 @@ try {
         );
     }
 
-    $checkStmt->bind_param(
-        'i',
-        $customerId
-    );
+    $paymentTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
+    $checkStmt->bind_param('i', $paymentTargetId);
 
     if (!$checkStmt->execute()) {
         $checkStmt->close();
@@ -769,8 +797,8 @@ if ($existingPaymentId !== null) {
     }
     $updateStmt->close();
     if ($paymentStep === 2) {
-        $syncCashCollection($conn, $customerId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
-        $completeCustomerStock($conn, $customerId);
+        $syncCashCollection($conn, $customerId, $vehicleId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
+        $completeCustomerStock($conn, $customerId, $vehicleId);
     }
     $conn->commit();
     $conn->close();
@@ -797,6 +825,7 @@ if ($existingPaymentId !== null) {
     $insertStmt = $conn->prepare(
         'INSERT INTO customer_payments (
             customer_id,
+            vehicle_id,
             total_sale_amount,
             transaction_id,
             payment_mode,
@@ -809,7 +838,7 @@ if ($existingPaymentId !== null) {
             amount_paid,
             amount_pending,
             payment_status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
 
     if (!$insertStmt) {
@@ -818,9 +847,11 @@ if ($existingPaymentId !== null) {
         );
     }
 
+    $paymentVehicleId = $vehicleId > 0 ? $vehicleId : null;
     $bindResult = $insertStmt->bind_param(
-        'idssdddddddds',
+        'iidssdddddddds',
         $customerId,
+        $paymentVehicleId,
         $totalSaleAmount,
         $transactionIdValue,
         $paymentModeValue,
@@ -873,8 +904,8 @@ if ($existingPaymentId !== null) {
     ], $currentUser);
 
     if ($paymentStep === 2) {
-        $syncCashCollection($conn, $customerId, $paymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
-        $completeCustomerStock($conn, $customerId);
+        $syncCashCollection($conn, $customerId, $vehicleId, $paymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
+        $completeCustomerStock($conn, $customerId, $vehicleId);
     }
 
 

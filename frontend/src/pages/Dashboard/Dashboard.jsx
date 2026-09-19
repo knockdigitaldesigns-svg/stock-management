@@ -82,17 +82,9 @@ const getCurrentFyString = () => {
 };
 
 const getDefaultDateRange = () => {
-    const today = new Date();
-
-    const firstDay = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        1
-    );
-
     return {
-        startDate: toIsoDate(firstDay),
-        endDate: toIsoDate(today)
+        startDate: '',
+        endDate: ''
     };
 };
 
@@ -245,6 +237,19 @@ const Dashboard = () => {
         setFinancialYear(newFy);
 
         fetchStats(newFy, dateRange);
+    };
+
+
+    // =====================================================
+    // Reset Filters
+    // =====================================================
+
+    const handleResetFilters = () => {
+        const emptyRange = { startDate: '', endDate: '' };
+        setDateRange(emptyRange);
+        setTempStartDate('');
+        setTempEndDate('');
+        fetchStats(financialYear, emptyRange);
     };
 
 
@@ -704,28 +709,7 @@ const Dashboard = () => {
 
                 <div className="dashboard-global-filters">
 
-                    {/* Financial Year */}
 
-                    <div className="filter-item">
-
-                        <select
-                            className="form-control fy-dropdown"
-                            value={financialYear}
-                            onChange={handleFyChange}
-                        >
-                            {availableFYs.map(
-                                (fy) => (
-                                    <option
-                                        key={fy}
-                                        value={fy}
-                                    >
-                                        {fy}
-                                    </option>
-                                )
-                            )}
-                        </select>
-
-                    </div>
 
 
                     {/* Date Range */}
@@ -740,14 +724,26 @@ const Dashboard = () => {
                             <Calendar size={18} />
 
                             <span>
-                                {toDisplayDate(
-                                    dateRange.startDate
-                                )}{' '}
-                                To{' '}
-                                {toDisplayDate(
-                                    dateRange.endDate
-                                )}
+                                {dateRange.startDate || dateRange.endDate
+                                    ? `${toDisplayDate(dateRange.startDate)} To ${toDisplayDate(dateRange.endDate)}`
+                                    : 'All Time'}
                             </span>
+                        </button>
+
+                    </div>
+
+
+                    {/* Reset */}
+
+                    <div className="filter-item">
+
+                        <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={handleResetFilters}
+                            disabled={refreshing}
+                        >
+                            Reset
                         </button>
 
                     </div>

@@ -56,12 +56,16 @@ CREATE TABLE IF NOT EXISTS stock_alert_settings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     owner_type ENUM('dealer', 'technician') NOT NULL,
     owner_id INT NOT NULL,
+    asset_type ENUM('device', 'sim', 'both') NOT NULL DEFAULT 'device',
+    device_model_id INT DEFAULT NULL,
+    sim_type_id INT DEFAULT NULL,
+    min_count INT NOT NULL DEFAULT 0,
     minimum_device_count INT NOT NULL DEFAULT 0,
     minimum_sim_count INT NOT NULL DEFAULT 0,
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_stock_alert_owner (owner_type, owner_id)
+    UNIQUE KEY unique_alert_config (owner_type, owner_id, asset_type, device_model_id, sim_type_id)
 );
 
 -- =====================================================
@@ -118,11 +122,21 @@ CREATE TABLE IF NOT EXISTS dealers (
     enrolled_date DATE NOT NULL,
     installation_status ENUM('Onsite', 'Offsite', 'Not Willing') NOT NULL,
     software VARCHAR(50) DEFAULT NULL,
+    threshold_amount DECIMAL(10,2) DEFAULT NULL,
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     , UNIQUE KEY dealer_mobile_unique (mobile_no)
     , UNIQUE KEY dealer_name_unique (dealer_name)
+);
+
+CREATE TABLE IF NOT EXISTS dealer_software (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    dealer_id INT NOT NULL,
+    software VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_dealer_software (dealer_id, software),
+    FOREIGN KEY (dealer_id) REFERENCES dealers(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS technicians (
@@ -167,6 +181,10 @@ CREATE TABLE IF NOT EXISTS stock_allocations (
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_stock_allocations_owner (owner_type, owner_id),
+    INDEX idx_stock_allocations_owner_device (owner_type, owner_id, device_id),
+    INDEX idx_stock_allocations_owner_sim (owner_type, owner_id, sim_id),
+    INDEX idx_stock_allocations_owner_created (owner_type, owner_id, created_at),
     FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
     FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL,
     FOREIGN KEY (sim_validity_id) REFERENCES sim_validities(id) ON DELETE SET NULL
@@ -185,6 +203,8 @@ CREATE TABLE IF NOT EXISTS stock_transactions (
     transaction_date DATE NOT NULL,
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_stock_transactions_device_owner (device_id, from_owner_type, from_owner_id, transaction_type),
+    INDEX idx_stock_transactions_sim_owner (sim_id, from_owner_type, from_owner_id, transaction_type),
     FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
     FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
 );
@@ -491,8 +511,6 @@ CREATE TABLE IF NOT EXISTS customers (
     PRIMARY KEY (id),
 
     UNIQUE KEY uq_customer_platform_username (platform_id, username),
-    UNIQUE KEY uq_customer_primary_mobile (primary_mobile_no),
-
     INDEX idx_customer_platform (platform_id),
 
     CONSTRAINT fk_customer_platform
@@ -514,6 +532,7 @@ CREATE TABLE IF NOT EXISTS customer_vehicle_details (
     id INT NOT NULL AUTO_INCREMENT,
 
     customer_id INT NOT NULL,
+    vehicle_id INT DEFAULT NULL,
 
     vehicle_no VARCHAR(30) NOT NULL,
     vehicle_type_id INT NOT NULL,
@@ -591,7 +610,10 @@ CREATE TABLE IF NOT EXISTS customer_installations (
 
     PRIMARY KEY (id),
 
-    UNIQUE KEY uq_customer_installation_customer
+    UNIQUE KEY uq_customer_installation_vehicle
+        (vehicle_id),
+
+    INDEX idx_customer_installation_customer
         (customer_id),
 
     INDEX idx_installation_person_type
@@ -628,6 +650,7 @@ CREATE TABLE IF NOT EXISTS customer_payments (
     id INT NOT NULL AUTO_INCREMENT,
 
     customer_id INT NOT NULL,
+    vehicle_id INT DEFAULT NULL,
 
     total_sale_amount DECIMAL(12,2) NOT NULL,
 
@@ -672,7 +695,10 @@ CREATE TABLE IF NOT EXISTS customer_payments (
 
     PRIMARY KEY (id),
 
-    UNIQUE KEY uq_customer_payment_customer
+    UNIQUE KEY uq_customer_payment_vehicle
+        (vehicle_id),
+
+    INDEX idx_customer_payment_customer
         (customer_id),
 
     INDEX idx_customer_payment_status
@@ -720,6 +746,42 @@ CREATE TABLE IF NOT EXISTS customer_cash_collections (
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cash_collection_settlements (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    recipient_type ENUM('Technician', 'Dealer') NOT NULL,
+    recipient_id INT NOT NULL,
+    settlement_amount DECIMAL(12,2) NOT NULL,
+    outstanding_before DECIMAL(12,2) NOT NULL,
+    outstanding_after DECIMAL(12,2) NOT NULL,
+    settlement_date DATE NOT NULL,
+    payment_mode VARCHAR(50) NOT NULL,
+    transaction_id VARCHAR(100) DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    settled_by_user_id INT DEFAULT NULL,
+    settled_by_name VARCHAR(150) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_cash_settlement_recipient (recipient_type, recipient_id),
+    INDEX idx_cash_settlement_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cash_collection_settlement_allocations (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    settlement_id BIGINT NOT NULL,
+    collection_id INT NOT NULL,
+    customer_id INT NOT NULL,
+    amount_allocated DECIMAL(12,2) NOT NULL,
+    outstanding_before DECIMAL(12,2) NOT NULL,
+    outstanding_after DECIMAL(12,2) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_cash_settlement_collection (settlement_id, collection_id),
+    INDEX idx_cash_allocation_collection (collection_id),
+    CONSTRAINT fk_cash_allocation_settlement FOREIGN KEY (settlement_id) REFERENCES cash_collection_settlements(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cash_allocation_collection FOREIGN KEY (collection_id) REFERENCES customer_cash_collections(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cash_allocation_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- =========================================================

@@ -19,6 +19,7 @@ const SimValidityPage = () => {
     const [showModal, setShowModal] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [months, setMonths] = useState('');
+    const [status, setStatus] = useState('active');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -46,11 +47,12 @@ const SimValidityPage = () => {
     }, []);
 
     const openModal = (validity = null) => {
-        setEditing(validity);
-        setMonths(validity ? String(validity.months) : '');
-        setError('');
-        setShowModal(true);
-    };
+    setEditing(validity);
+    setMonths(validity ? String(validity.months) : '');
+    setStatus(validity?.status || 'active');
+    setError('');
+    setShowModal(true);
+};
 
     const save = async () => {
         if (!/^[1-9][0-9]*$/.test(months.trim())) {
@@ -61,15 +63,25 @@ const SimValidityPage = () => {
         setError('');
         try {
             const response = editing
-                ? await api.post('/sim_validities/update.php', { id: editing.id, months: months.trim() })
-                : await api.post('/sim_validities/create.php', { months: months.trim() });
+    ? await api.post('/sim_validities/update.php', {
+        id: editing.id,
+        months: months.trim(),
+        status
+    })
+    : await api.post('/sim_validities/create.php', {
+        months: months.trim(),
+        status
+    });
             if (!response.data.success) {
                 triggerError(response.data.message || 'Unable to save SIM validity.');
                 return;
             }
             setShowModal(false);
-            setMessage(response.data.message);
-            await fetchValidities();
+setEditing(null);
+setMonths('');
+setStatus('active');
+setMessage(response.data.message);
+await fetchValidities();
         } catch (err) {
             triggerError(err.response?.data?.message || 'Unable to save SIM validity.');
         } finally {
@@ -150,7 +162,18 @@ const SimValidityPage = () => {
                                     <tr key={validity.id}>
                                         <td style={{ fontWeight: 500 }}>{validity.months} Months</td>
                                         <td>
-                                            <span className="badge badge-success">{validity.status || 'active'}</span>
+                                            <span
+    className={
+        String(validity.status).toLowerCase() === 'active'
+            ? 'badge badge-success'
+            : 'badge badge-danger'
+    }
+>
+    {String(validity.status || 'active')
+        .charAt(0)
+        .toUpperCase() +
+        String(validity.status || 'active').slice(1)}
+</span>
                                         </td>
                                         <td>{formatDate(validity.created_at)}</td>
                                         <td>
@@ -222,6 +245,18 @@ const SimValidityPage = () => {
                             onChange={(event) => setMonths(event.target.value)}
                             autoFocus
                         />
+                        <div className="form-group">
+    <label className="form-label">Status *</label>
+
+    <select
+        className="form-control"
+        value={status}
+        onChange={(event) => setStatus(event.target.value)}
+    >
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+    </select>
+</div>
                         {error && <div className="text-danger">{error}</div>}
                     </div>
                 </Modal>

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useError } from '../../context/ErrorContext';
 import './TableFilterBar.css';
 
 const MONTHS = [
@@ -29,6 +30,7 @@ export const filterTableRows = (items, filters, {
     deviceAlertKey,
     simTypeKey,
     simValidityKey,
+    assetKey,
     paymentStatusKey = 'payment_status',
     deviceKey,
     simKey,
@@ -41,7 +43,26 @@ export const filterTableRows = (items, filters, {
     const query = (filters.search || '').trim().toLowerCase();
 
     return items.filter((item) => {
-        // 1. Search filter
+        // 1. Global Date Range Filtering
+        if (filters.date_from || filters.date_to) {
+            const fromDate = filters.date_from ? new Date(`${filters.date_from}T00:00:00`).getTime() : -Infinity;
+            const toDate = filters.date_to ? new Date(`${filters.date_to}T23:59:59.999`).getTime() : Infinity;
+            
+            // if dateKeys is empty, how do we know the date? We'll assume customDateFilters if dateKeys empty or check all dateKeys.
+            // But wait, the instruction says: "using the correct configured date key."
+            // We use dateKeys as the source of truth for global date range filter on local tables.
+            if (dateKeys.length > 0) {
+                const matchesRange = dateKeys.some((key) => {
+                    const value = item[key];
+                    if (!value) return false;
+                    const d = new Date(String(value).includes(' ') ? String(value).replace(' ', 'T') : `${String(value).slice(0, 10)}T00:00:00`);
+                    return d.getTime() >= fromDate && d.getTime() <= toDate;
+                });
+                if (!matchesRange) return false;
+            }
+        }
+
+        // 2. Search filter
         if (query && searchKeys.length > 0) {
             const matchesSearch = searchKeys.some((key) =>
                 String(item[key] ?? '').toLowerCase().includes(query)
@@ -53,19 +74,7 @@ export const filterTableRows = (items, filters, {
             if (!matchesSearch) return false;
         }
 
-        // 2. Year & Month date filters
-        if (filters.year || filters.month) {
-            const matchesDate = dateKeys.some((key) => {
-                const value = item[key];
-                if (!value) return false;
-                const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
-                return (
-                    (!filters.year || date.getFullYear() === Number(filters.year)) &&
-                    (!filters.month || date.getMonth() + 1 === Number(filters.month))
-                );
-            });
-            if (!matchesDate) return false;
-        }
+        // 2. Year & Month date filters (Removed, now using global date range)
 
         // 3. Platform filter
         if (filters.platform) {
@@ -121,6 +130,13 @@ export const filterTableRows = (items, filters, {
                 return num === svNormalized || String(val).toLowerCase() === String(filters.simValidity).toLowerCase();
             });
             if (!matchesValidity) return false;
+        }
+
+        // 7b. Asset filter
+        if (filters.asset) {
+            const asset = String(filters.asset).toLowerCase();
+            const itemAsset = String((assetKey ? item[assetKey] : null) || item.item_type || (item.device_id !== null || item.imei_no ? 'Device' : 'SIM')).toLowerCase();
+            if (itemAsset !== asset) return false;
         }
 
         // 8. Software filter
@@ -218,6 +234,7 @@ const TableFilterBar = ({
     showDeviceAlert = false,
     showSimType = false,
     showSimValidity = false,
+    showAsset = false,
     showSoftware = false,
     showInstallationStatus = false,
     showPaymentStatus = false,
@@ -229,8 +246,12 @@ const TableFilterBar = ({
     softwareKey,
     deviceOptions,
     simOptions,
-    customDateFilters = []
+    customDateFilters = [],
+    showDateRange = false,
+    dealerOptions,
+    showDealer = false
 }) => {
+    const { showError } = useError();
     const years = useMemo(() => getAvailableYears(items, dateKeys), [items, dateKeys]);
 
     const resolvedPlatforms = useMemo(() => {
@@ -319,7 +340,20 @@ const TableFilterBar = ({
                 />
             )}
 
-            {/* 2. Platform */}
+            {/* 2. Dealer */}
+            {(showDealer || dealerOptions) && (
+                <select className="form-control" value={filters.dealer_id || ''} onChange={set('dealer_id')}>
+                    <option value="">All Dealers</option>
+                    {(dealerOptions || []).map((dealer) => (
+                        <option key={dealer.value} value={dealer.value}>{dealer.label}</option>
+                    ))}
+                    {!dealerOptions && unique(items.map(i => i.dealer_name)).map((dealer) => (
+                        <option key={dealer} value={dealer}>{dealer}</option>
+                    ))}
+                </select>
+            )}
+
+            {/* 3. Platform */}
             {(showPlatform || platformOptions) && (
                 <select className="form-control" value={filters.platform || ''} onChange={set('platform')}>
                     <option value="">All Platforms</option>
@@ -372,6 +406,15 @@ const TableFilterBar = ({
             )}
 
             {/* 7. Software */}
+            {showAsset && (
+                <select className="form-control" value={filters.asset || ''} onChange={set('asset')}>
+                    <option value="">All Assets</option>
+                    <option value="Device">Device</option>
+                    <option value="SIM">SIM</option>
+                </select>
+            )}
+
+            {/* 8. Software */}
             {(showSoftware || softwareOptions) && (
                 <select className="form-control" value={filters.software || ''} onChange={set('software')}>
                     <option value="">All Software</option>
@@ -421,57 +464,82 @@ const TableFilterBar = ({
                 </select>
             )}
 
-            {/* 12. Date Filters (Year & Month) */}
+            {/* 12. Global Date Range (Replaces Year/Month) */}
             {dateKeys.length > 0 && (
-                <select className="form-control" value={filters.year || ''} onChange={set('year')}>
-                    <option value="">All Years</option>
-                    {years.map((year) => (
-                        <option key={year} value={year}>{year}</option>
-                    ))}
-                </select>
-            )}
-            {dateKeys.length > 0 && (
-                <select className="form-control" value={filters.month || ''} onChange={set('month')}>
-                    <option value="">All Months</option>
-                    {MONTHS.map((month, index) => (
-                        <option key={month} value={index + 1}>{month}</option>
-                    ))}
-                </select>
+                <>
+                    <div className="date-range-group">
+                        <label className="date-range-label">From Date</label>
+                        <input
+                            className="form-control"
+                            type="date"
+                            value={filters.date_from || ''}
+                            onChange={(e) => {
+                                if (filters.date_to && e.target.value > filters.date_to) {
+                                    showError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                onChange({ ...filters, date_from: e.target.value });
+                            }}
+                            aria-label="From Date"
+                        />
+                    </div>
+                    <div className="date-range-group">
+                        <label className="date-range-label">To Date</label>
+                        <input
+                            className="form-control"
+                            type="date"
+                            value={filters.date_to || ''}
+                            onChange={(e) => {
+                                if (filters.date_from && e.target.value && e.target.value < filters.date_from) {
+                                    showError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                onChange({ ...filters, date_to: e.target.value });
+                            }}
+                            aria-label="To Date"
+                        />
+                    </div>
+                </>
             )}
 
             {/* 13. Extra Date Filters */}
             {customDateFilters.length > 0 && customDateFilters.map((dateFilter) => (
-                <div key={dateFilter.key} className="date-filter-inline" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span className="date-filter-label">{dateFilter.label}:</span>
-                    {filters[`${dateFilter.key}_operator`] === 'year' ? (
+                <div key={dateFilter.key} className="date-range-group">
+                    <label className="date-range-label">{dateFilter.label}</label>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                        {filters[`${dateFilter.key}_operator`] === 'year' ? (
+                            <select
+                                className="form-control"
+                                value={filters[dateFilter.key] || ''}
+                                onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
+                                aria-label={dateFilter.label}
+                                style={{ flex: 1 }}
+                            >
+                                <option value="">Select year</option>
+                                {getCustomDateYears(dateFilter).map((year) => <option key={year} value={year}>{year}</option>)}
+                            </select>
+                        ) : (
+                            <input
+                                className="form-control"
+                                type={filters[`${dateFilter.key}_operator`] === 'month' ? 'month' : 'date'}
+                                value={filters[dateFilter.key] || ''}
+                                onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
+                                aria-label={dateFilter.label}
+                                style={{ flex: 1 }}
+                            />
+                        )}
                         <select
                             className="form-control"
-                            value={filters[dateFilter.key] || ''}
-                            onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
-                            aria-label={dateFilter.label}
+                            value={filters[`${dateFilter.key}_operator`] || 'exact'}
+                            onChange={(event) => onChange({ ...filters, [dateFilter.key]: '', [`${dateFilter.key}_operator`]: event.target.value })}
+                            aria-label={`${dateFilter.label} operator`}
+                            style={{ width: 'auto', minWidth: '80px' }}
                         >
-                            <option value="">Select year</option>
-                            {getCustomDateYears(dateFilter).map((year) => <option key={year} value={year}>{year}</option>)}
+                            <option value="exact">Exact Date</option>
+                            <option value="month">Month</option>
+                            <option value="year">Year</option>
                         </select>
-                    ) : (
-                        <input
-                            className="form-control"
-                            type={filters[`${dateFilter.key}_operator`] === 'month' ? 'month' : 'date'}
-                            value={filters[dateFilter.key] || ''}
-                            onChange={(event) => onChange({ ...filters, [dateFilter.key]: event.target.value })}
-                            aria-label={dateFilter.label}
-                        />
-                    )}
-                    <select
-                        className="form-control"
-                        value={filters[`${dateFilter.key}_operator`] || 'exact'}
-                        onChange={(event) => onChange({ ...filters, [dateFilter.key]: '', [`${dateFilter.key}_operator`]: event.target.value })}
-                        aria-label={`${dateFilter.label} operator`}
-                    >
-                        <option value="exact">Exact Date</option>
-                        <option value="month">Month</option>
-                        <option value="year">Year</option>
-                    </select>
+                    </div>
                 </div>
             ))}
 
@@ -501,7 +569,9 @@ export const emptyTableFilters = () => ({
     given_date: '',
     given_date_operator: 'exact',
     activation_date: '',
-    activation_date_operator: 'exact'
+    activation_date_operator: 'exact',
+    date_from: '',
+    date_to: ''
 });
 
 export default TableFilterBar;

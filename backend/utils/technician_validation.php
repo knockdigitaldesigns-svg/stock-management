@@ -17,12 +17,12 @@ function validateTechnicianFields($input, $rowNumber = null) {
         $errors[] = "{$prefix}Technician Name is required.";
     }
 
-    // 2. Mobile No
+    // 2. Mobile No — must be exactly 10 digits
     $normalizedMobile = normalizeMobile($mobileNo);
     if ($mobileNo === '') {
         $errors[] = "{$prefix}Mobile No is required.";
-    } elseif (!preg_match('/^[0-9+\-\s()]{10,15}$/', $mobileNo) || strlen($normalizedMobile) < 10 || strlen($normalizedMobile) > 15) {
-        $errors[] = "{$prefix}Mobile No is invalid.";
+    } elseif (strlen($normalizedMobile) !== 10 || !preg_match('/^\d{10}$/', $normalizedMobile)) {
+        $errors[] = "{$prefix}Mobile No must be exactly 10 digits.";
     }
 
     // 3. Location

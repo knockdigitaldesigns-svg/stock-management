@@ -3,25 +3,32 @@ import { Trash2 } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
-import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
+// import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
 import { showGlobalError } from '../../../context/ErrorContext';
 
 const AddSimModal = ({ onClose, onSuccess }) => {
     const [simCount, setSimCount] = useState(1);
-    const [sims, setSims] = useState([{ id: Date.now(), purchase_date: '', sim_no: '', sim_type: '', sim_validity_id: '', notes: '' }]);
-    const [validities, setValidities] = useState([]);
+    const [sims, setSims] = useState([
+    {
+        id: Date.now(),
+        purchase_date: '',
+        sim_no: '',
+        sim_type: '',
+        notes: ''
+    }
+]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        api.get('/sim_validities/list.php')
-            .then((response) => setValidities(response.data.data?.validities || []))
-            .catch(() => {
-                const msg = 'Unable to load SIM validities.';
-                setError(msg);
-                showGlobalError(msg);
-            });
-    }, []);
+    // useEffect(() => {
+    //     api.get('/sim_validities/list.php')
+    //         .then((response) => setValidities(response.data.data?.validities || []))
+    //         .catch(() => {
+    //             const msg = 'Unable to load SIM validities.';
+    //             setError(msg);
+    //             showGlobalError(msg);
+    //         });
+    // }, []);
 
     useEffect(() => {
         const count = parseInt(simCount) || 1;
@@ -34,7 +41,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                     purchase_date: firstRow.purchase_date || '',
                     sim_no: '',
                     sim_type: '',
-                    sim_validity_id: '',
+                    // sim_validity_id: '',
                     notes: ''
                 });
             }
@@ -65,7 +72,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
             
             if (!row.purchase_date) return `Row ${rowNum}: Purchase date is required`;
             if (!['Voice', 'Non Voice'].includes(row.sim_type)) return `Row ${rowNum}: SIM type is required`;
-            if (!row.sim_validity_id) return `Row ${rowNum}: SIM validity is required`;
+            // if (!row.sim_validity_id) return `Row ${rowNum}: SIM validity is required`;
             
             if (!row.sim_no) return `Row ${rowNum}: SIM number is required`;
             if (!simRegex.test(row.sim_no)) return `Row ${rowNum}: SIM number must contain exactly 10 OR exactly 13 digits`;
@@ -166,7 +173,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                                     <option value="">Select SIM Type</option><option value="Voice">Voice</option><option value="Non Voice">Non Voice</option>
                                 </select>
                             </div>
-                            <div className="form-group">
+                            {/* <div className="form-group">
                                 <label className="form-label">SIM Validity *</label>
                                 <SearchableDropdown
                                     options={validities.map((v) => ({ value: String(v.id), label: `${v.months} Months` }))}
@@ -174,7 +181,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                                     onChange={(val) => handleSimChange(sim.id, 'sim_validity_id', val)}
                                     placeholder="Select Validity"
                                 />
-                            </div>
+                            </div> */}
                             <div className="form-group">
                                 <label className="form-label">SIM No *</label>
                                 <input 

@@ -96,31 +96,54 @@ function isSuperAdminUser($userId = null, $roleName = null) {
 }
 
 function ensurePermissionDefinitions($permissionKeys = []) {
+    if (empty($permissionKeys)) {
+        return;
+    }
+
     $conn = (new Database())->getConnection();
     if (!$conn) {
         return;
     }
 
     $definitions = [
+        'dashboard.view' => ['permission_name' => 'Dashboard View', 'module' => 'dashboard', 'action' => 'VIEW'],
+        'devices.view' => ['permission_name' => 'Device Maintenance View', 'module' => 'devices', 'action' => 'VIEW'],
+        'devices.add' => ['permission_name' => 'Device Maintenance Add', 'module' => 'devices', 'action' => 'ADD'],
+        'devices.edit' => ['permission_name' => 'Device Maintenance Edit', 'module' => 'devices', 'action' => 'EDIT'],
+        'devices.delete' => ['permission_name' => 'Device Maintenance Delete', 'module' => 'devices', 'action' => 'DELETE'],
+        'devices.export' => ['permission_name' => 'Device Maintenance Export', 'module' => 'devices', 'action' => 'EXPORT'],
+        'sims.view' => ['permission_name' => 'SIM Maintenance View', 'module' => 'sims', 'action' => 'VIEW'],
+        'sims.add' => ['permission_name' => 'SIM Maintenance Add', 'module' => 'sims', 'action' => 'ADD'],
+        'sims.edit' => ['permission_name' => 'SIM Maintenance Edit', 'module' => 'sims', 'action' => 'EDIT'],
+        'sims.delete' => ['permission_name' => 'SIM Maintenance Delete', 'module' => 'sims', 'action' => 'DELETE'],
+        'sims.export' => ['permission_name' => 'SIM Maintenance Export', 'module' => 'sims', 'action' => 'EXPORT'],
+        'inward_reports.view' => ['permission_name' => 'Inward Reports View', 'module' => 'inward_reports', 'action' => 'VIEW'],
+        'inward_reports.export' => ['permission_name' => 'Inward Reports Export', 'module' => 'inward_reports', 'action' => 'EXPORT'],
+        'dealers.view' => ['permission_name' => 'Dealer View', 'module' => 'dealers', 'action' => 'VIEW'],
+        'dealers.add' => ['permission_name' => 'Dealer Add', 'module' => 'dealers', 'action' => 'ADD'],
+        'dealers.edit' => ['permission_name' => 'Dealer Edit', 'module' => 'dealers', 'action' => 'EDIT'],
+        'dealers.delete' => ['permission_name' => 'Dealer Delete', 'module' => 'dealers', 'action' => 'DELETE'],
         'dealers.import' => ['permission_name' => 'Dealer Import', 'module' => 'dealers', 'action' => 'IMPORT'],
+        'dealers.export' => ['permission_name' => 'Dealer Export', 'module' => 'dealers', 'action' => 'EXPORT'],
+        'technicians.view' => ['permission_name' => 'Technician View', 'module' => 'technicians', 'action' => 'VIEW'],
+        'technicians.add' => ['permission_name' => 'Technician Add', 'module' => 'technicians', 'action' => 'ADD'],
+        'technicians.edit' => ['permission_name' => 'Technician Edit', 'module' => 'technicians', 'action' => 'EDIT'],
+        'technicians.delete' => ['permission_name' => 'Technician Delete', 'module' => 'technicians', 'action' => 'DELETE'],
         'technicians.import' => ['permission_name' => 'Technician Import', 'module' => 'technicians', 'action' => 'IMPORT'],
-        'device_types.view' => ['permission_name' => 'Device Types View', 'module' => 'device_types', 'action' => 'VIEW'],
-        'device_types.add' => ['permission_name' => 'Device Types Add', 'module' => 'device_types', 'action' => 'ADD'],
-        'device_types.edit' => ['permission_name' => 'Device Types Edit', 'module' => 'device_types', 'action' => 'EDIT'],
-        'device_types.delete' => ['permission_name' => 'Device Types Delete', 'module' => 'device_types', 'action' => 'DELETE'],
-        'history.view' => ['permission_name' => 'History View', 'module' => 'history', 'action' => 'VIEW'],
-        'sim_validity.view' => ['permission_name' => 'SIM Validity View', 'module' => 'sim_validity', 'action' => 'VIEW'],
-        'sim_validity.add' => ['permission_name' => 'SIM Validity Add', 'module' => 'sim_validity', 'action' => 'ADD'],
-        'sim_validity.edit' => ['permission_name' => 'SIM Validity Edit', 'module' => 'sim_validity', 'action' => 'EDIT'],
-        'sim_validity.delete' => ['permission_name' => 'SIM Validity Delete', 'module' => 'sim_validity', 'action' => 'DELETE'],
+        'technicians.export' => ['permission_name' => 'Technician Export', 'module' => 'technicians', 'action' => 'EXPORT'],
+        'outward_reports.view' => ['permission_name' => 'Outward Reports View', 'module' => 'outward_reports', 'action' => 'VIEW'],
+        'outward_reports.export' => ['permission_name' => 'Outward Reports Export', 'module' => 'outward_reports', 'action' => 'EXPORT'],
+        'stock.view' => ['permission_name' => 'Stock Management View', 'module' => 'stock', 'action' => 'VIEW'],
+        'stock.update' => ['permission_name' => 'Stock Management Update', 'module' => 'stock', 'action' => 'UPDATE'],
+        'stock.export' => ['permission_name' => 'Stock Management Export', 'module' => 'stock', 'action' => 'EXPORT'],
         'stock_transfer.view' => ['permission_name' => 'Stock Transfer View', 'module' => 'stock_transfer', 'action' => 'VIEW'],
-            'stock_transfer.add' => ['permission_name' => 'Stock Transfer Add', 'module' => 'stock_transfer', 'action' => 'ADD'],
-            'customers.view' => ['permission_name' => 'Customer Details View', 'module' => 'customers', 'action' => 'VIEW'],
-            'customers.add' => ['permission_name' => 'Customer Details Add', 'module' => 'customers', 'action' => 'ADD'],
-            'customers.edit' => ['permission_name' => 'Customer Details Edit', 'module' => 'customers', 'action' => 'EDIT'],
-            'customers.delete' => ['permission_name' => 'Customer Details Delete', 'module' => 'customers', 'action' => 'DELETE'],
-            'customers.export' => ['permission_name' => 'Customer Details Export', 'module' => 'customers', 'action' => 'EXPORT'],
-            'customers.update' => ['permission_name' => 'Customer Details Update', 'module' => 'customers', 'action' => 'UPDATE'],
+        'stock_transfer.add' => ['permission_name' => 'Stock Transfer Add', 'module' => 'stock_transfer', 'action' => 'ADD'],
+        'customers.view' => ['permission_name' => 'Customer Details View', 'module' => 'customers', 'action' => 'VIEW'],
+        'customers.add' => ['permission_name' => 'Customer Details Add', 'module' => 'customers', 'action' => 'ADD'],
+        'customers.edit' => ['permission_name' => 'Customer Details Edit', 'module' => 'customers', 'action' => 'EDIT'],
+        'customers.delete' => ['permission_name' => 'Customer Details Delete', 'module' => 'customers', 'action' => 'DELETE'],
+        'customers.export' => ['permission_name' => 'Customer Details Export', 'module' => 'customers', 'action' => 'EXPORT'],
+        'customers.update' => ['permission_name' => 'Customer Details Update', 'module' => 'customers', 'action' => 'UPDATE'],
         'customer_reports.view' => ['permission_name' => 'Customer Reports View', 'module' => 'customer_reports', 'action' => 'VIEW'],
         'customer_renewals.view' => ['permission_name' => 'Customer Renewals View', 'module' => 'customer_renewals', 'action' => 'VIEW'],
         'customer_renewals.edit' => ['permission_name' => 'Customer Renewals Edit', 'module' => 'customer_renewals', 'action' => 'EDIT'],
@@ -128,31 +151,55 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'customer_renewals.history' => ['permission_name' => 'Customer Renewals History', 'module' => 'customer_renewals', 'action' => 'HISTORY'],
         'sim_lifecycle.view' => ['permission_name' => 'SIM Lifecycle View', 'module' => 'sim_lifecycle', 'action' => 'VIEW'],
         'sim_lifecycle.edit' => ['permission_name' => 'SIM Lifecycle Edit', 'module' => 'sim_lifecycle', 'action' => 'EDIT'],
-            'platforms.view' => ['permission_name' => 'Platform View', 'module' => 'platforms', 'action' => 'VIEW'],
-            'platforms.add' => ['permission_name' => 'Platform Add', 'module' => 'platforms', 'action' => 'ADD'],
-            'platforms.edit' => ['permission_name' => 'Platform Edit', 'module' => 'platforms', 'action' => 'EDIT'],
-            'platforms.delete' => ['permission_name' => 'Platform Delete', 'module' => 'platforms', 'action' => 'DELETE'],
-            'vehicle_types.view' => ['permission_name' => 'Vehicle Types View', 'module' => 'vehicle_types', 'action' => 'VIEW'],
-            'vehicle_types.add' => ['permission_name' => 'Vehicle Types Add', 'module' => 'vehicle_types', 'action' => 'ADD'],
-            'vehicle_types.edit' => ['permission_name' => 'Vehicle Types Edit', 'module' => 'vehicle_types', 'action' => 'EDIT'],
-            'vehicle_types.delete' => ['permission_name' => 'Vehicle Types Delete', 'module' => 'vehicle_types', 'action' => 'DELETE'],
-            'lead_closures.view' => ['permission_name' => 'Lead Closure View', 'module' => 'lead_closures', 'action' => 'VIEW'],
-            'lead_closures.add' => ['permission_name' => 'Lead Closure Add', 'module' => 'lead_closures', 'action' => 'ADD'],
-            'lead_closures.edit' => ['permission_name' => 'Lead Closure Edit', 'module' => 'lead_closures', 'action' => 'EDIT'],
-            'lead_closures.delete' => ['permission_name' => 'Lead Closure Delete', 'module' => 'lead_closures', 'action' => 'DELETE'],
-            'sale_amounts.view' => ['permission_name' => 'Sale Amount View', 'module' => 'sale_amounts', 'action' => 'VIEW'],
-            'sale_amounts.add' => ['permission_name' => 'Sale Amount Add', 'module' => 'sale_amounts', 'action' => 'ADD'],
-            'sale_amounts.edit' => ['permission_name' => 'Sale Amount Edit', 'module' => 'sale_amounts', 'action' => 'EDIT'],
-            'sale_amounts.delete' => ['permission_name' => 'Sale Amount Delete', 'module' => 'sale_amounts', 'action' => 'DELETE'],
-            'support.view' => ['permission_name' => 'Support View', 'module' => 'support', 'action' => 'VIEW'],
-            'support.add' => ['permission_name' => 'Support Add', 'module' => 'support', 'action' => 'ADD'],
-            'support.edit' => ['permission_name' => 'Support Edit', 'module' => 'support', 'action' => 'EDIT'],
-            'support.delete' => ['permission_name' => 'Support Delete', 'module' => 'support', 'action' => 'DELETE'],
-            'support.assign' => ['permission_name' => 'Support Assign', 'module' => 'support', 'action' => 'ASSIGN'],
-            'support.close' => ['permission_name' => 'Support Close', 'module' => 'support', 'action' => 'CLOSE'],
-            'support.qa.view' => ['permission_name' => 'Support Questions View', 'module' => 'support', 'action' => 'QA_VIEW'],
-            'support.qa.manage' => ['permission_name' => 'Support Questions Manage', 'module' => 'support', 'action' => 'QA_MANAGE'],
-            'password.change' => ['permission_name' => 'Change Password', 'module' => 'password', 'action' => 'CHANGE']
+        'history.view' => ['permission_name' => 'History View', 'module' => 'history', 'action' => 'VIEW'],
+        'roles.view' => ['permission_name' => 'Roles View', 'module' => 'roles', 'action' => 'VIEW'],
+        'roles.add' => ['permission_name' => 'Roles Add', 'module' => 'roles', 'action' => 'ADD'],
+        'roles.edit' => ['permission_name' => 'Roles Edit', 'module' => 'roles', 'action' => 'EDIT'],
+        'roles.delete' => ['permission_name' => 'Roles Delete', 'module' => 'roles', 'action' => 'DELETE'],
+        'permissions.view' => ['permission_name' => 'Permissions View', 'module' => 'permissions', 'action' => 'VIEW'],
+        'permissions.assign' => ['permission_name' => 'Permissions Assign', 'module' => 'permissions', 'action' => 'ASSIGN'],
+        'users.view' => ['permission_name' => 'Users View', 'module' => 'users', 'action' => 'VIEW'],
+        'users.add' => ['permission_name' => 'Users Add', 'module' => 'users', 'action' => 'ADD'],
+        'users.edit' => ['permission_name' => 'Users Edit', 'module' => 'users', 'action' => 'EDIT'],
+        'users.delete' => ['permission_name' => 'Users Delete', 'module' => 'users', 'action' => 'DELETE'],
+        'users.status' => ['permission_name' => 'Users Status', 'module' => 'users', 'action' => 'STATUS'],
+        'device_alert.view' => ['permission_name' => 'Device Alert View', 'module' => 'device_alert', 'action' => 'VIEW'],
+        'device_alert.add' => ['permission_name' => 'Device Alert Add', 'module' => 'device_alert', 'action' => 'ADD'],
+        'device_alert.edit' => ['permission_name' => 'Device Alert Edit', 'module' => 'device_alert', 'action' => 'EDIT'],
+        'device_alert.delete' => ['permission_name' => 'Device Alert Delete', 'module' => 'device_alert', 'action' => 'DELETE'],
+        'device_types.view' => ['permission_name' => 'Device Types View', 'module' => 'device_types', 'action' => 'VIEW'],
+        'device_types.add' => ['permission_name' => 'Device Types Add', 'module' => 'device_types', 'action' => 'ADD'],
+        'device_types.edit' => ['permission_name' => 'Device Types Edit', 'module' => 'device_types', 'action' => 'EDIT'],
+        'device_types.delete' => ['permission_name' => 'Device Types Delete', 'module' => 'device_types', 'action' => 'DELETE'],
+        'sim_validity.view' => ['permission_name' => 'SIM Validity View', 'module' => 'sim_validity', 'action' => 'VIEW'],
+        'sim_validity.add' => ['permission_name' => 'SIM Validity Add', 'module' => 'sim_validity', 'action' => 'ADD'],
+        'sim_validity.edit' => ['permission_name' => 'SIM Validity Edit', 'module' => 'sim_validity', 'action' => 'EDIT'],
+        'sim_validity.delete' => ['permission_name' => 'SIM Validity Delete', 'module' => 'sim_validity', 'action' => 'DELETE'],
+        'password.change' => ['permission_name' => 'Change Password', 'module' => 'password', 'action' => 'CHANGE'],
+        'platforms.view' => ['permission_name' => 'Platform View', 'module' => 'platforms', 'action' => 'VIEW'],
+        'platforms.add' => ['permission_name' => 'Platform Add', 'module' => 'platforms', 'action' => 'ADD'],
+        'platforms.edit' => ['permission_name' => 'Platform Edit', 'module' => 'platforms', 'action' => 'EDIT'],
+        'platforms.delete' => ['permission_name' => 'Platform Delete', 'module' => 'platforms', 'action' => 'DELETE'],
+        'vehicle_types.view' => ['permission_name' => 'Vehicle Types View', 'module' => 'vehicle_types', 'action' => 'VIEW'],
+        'vehicle_types.add' => ['permission_name' => 'Vehicle Types Add', 'module' => 'vehicle_types', 'action' => 'ADD'],
+        'vehicle_types.edit' => ['permission_name' => 'Vehicle Types Edit', 'module' => 'vehicle_types', 'action' => 'EDIT'],
+        'vehicle_types.delete' => ['permission_name' => 'Vehicle Types Delete', 'module' => 'vehicle_types', 'action' => 'DELETE'],
+        'lead_closures.view' => ['permission_name' => 'Lead Closure View', 'module' => 'lead_closures', 'action' => 'VIEW'],
+        'lead_closures.add' => ['permission_name' => 'Lead Closure Add', 'module' => 'lead_closures', 'action' => 'ADD'],
+        'lead_closures.edit' => ['permission_name' => 'Lead Closure Edit', 'module' => 'lead_closures', 'action' => 'EDIT'],
+        'lead_closures.delete' => ['permission_name' => 'Lead Closure Delete', 'module' => 'lead_closures', 'action' => 'DELETE'],
+        'sale_amounts.view' => ['permission_name' => 'Sale Amount View', 'module' => 'sale_amounts', 'action' => 'VIEW'],
+        'sale_amounts.add' => ['permission_name' => 'Sale Amount Add', 'module' => 'sale_amounts', 'action' => 'ADD'],
+        'sale_amounts.edit' => ['permission_name' => 'Sale Amount Edit', 'module' => 'sale_amounts', 'action' => 'EDIT'],
+        'sale_amounts.delete' => ['permission_name' => 'Sale Amount Delete', 'module' => 'sale_amounts', 'action' => 'DELETE'],
+        'support.view' => ['permission_name' => 'Support View', 'module' => 'support', 'action' => 'VIEW'],
+        'support.add' => ['permission_name' => 'Support Add', 'module' => 'support', 'action' => 'ADD'],
+        'support.edit' => ['permission_name' => 'Support Edit', 'module' => 'support', 'action' => 'EDIT'],
+        'support.delete' => ['permission_name' => 'Support Delete', 'module' => 'support', 'action' => 'DELETE'],
+        'support.assign' => ['permission_name' => 'Support Assign', 'module' => 'support', 'action' => 'ASSIGN'],
+        'support.close' => ['permission_name' => 'Support Close', 'module' => 'support', 'action' => 'CLOSE'],
+        'support.qa.view' => ['permission_name' => 'Support Questions View', 'module' => 'support', 'action' => 'QA_VIEW'],
+        'support.qa.manage' => ['permission_name' => 'Support Questions Manage', 'module' => 'support', 'action' => 'QA_MANAGE']
     ];
 
     foreach ($permissionKeys as $key) {
@@ -160,6 +207,8 @@ function ensurePermissionDefinitions($permissionKeys = []) {
             $definitions[$key] = $definitions[$key];
         }
     }
+
+    $definitions = array_intersect_key($definitions, array_flip($permissionKeys));
 
     foreach ($definitions as $key => $info) {
         $safeKey = $conn->real_escape_string($key);
@@ -185,7 +234,6 @@ function ensurePermissionDefinitions($permissionKeys = []) {
 }
 
 function getUserPermissions($userId) {
-    ensurePermissionDefinitions();
     $conn = (new Database())->getConnection();
     if (!$conn) {
         return [];
@@ -197,6 +245,11 @@ function getUserPermissions($userId) {
     $userResult = $userQuery->get_result();
     $userData = $userResult->fetch_assoc();
     $userQuery->close();
+
+    if (!$userData) {
+        $conn->close();
+        return [];
+    }
 
     $roleName = $userData['role_name'] ?? $userData['role'] ?? '';
     if (isSuperAdminUser(null, $roleName)) {
@@ -212,6 +265,17 @@ function getUserPermissions($userId) {
     }
 
     $roleId = $userData['role_id'] ?? null;
+    if (!$roleId && !empty($userData['role'])) {
+        $roleStmt = $conn->prepare('SELECT id FROM roles WHERE LOWER(role_name) = LOWER(?) LIMIT 1');
+        $roleStmt->bind_param('s', $userData['role']);
+        $roleStmt->execute();
+        $roleRes = $roleStmt->get_result();
+        if ($row = $roleRes->fetch_assoc()) {
+            $roleId = (int)$row['id'];
+        }
+        $roleStmt->close();
+    }
+
     if (!$roleId) {
         $conn->close();
         return [];
@@ -246,6 +310,7 @@ function requirePermission($permissionKey) {
 }
 
 function requireAnyPermission($permissionKeys) {
+    ensurePermissionDefinitions($permissionKeys);
     $payload = authenticate();
     $userId = (int)($payload['user_id'] ?? 0);
     if (!$userId) {

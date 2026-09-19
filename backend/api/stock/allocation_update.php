@@ -25,6 +25,7 @@ $notes = trim((string) ($data['notes'] ?? ''));
 $activationDate = trim((string) ($data['activation_date'] ?? ''));
 $validityId = (int) ($data['sim_validity_id'] ?? 0);
 $deactivationDate = trim((string) ($data['deactivation_date'] ?? ''));
+$lifecycleUpdateRequested = array_key_exists('activation_date', $data) || array_key_exists('sim_validity_id', $data) || array_key_exists('deactivation_date', $data);
 $paymentMode = trim((string) ($data['payment_mode'] ?? ''));
 $transactionId = trim((string) ($data['transaction_id'] ?? ''));
 $activationDate = trim((string) ($data['activation_date'] ?? ''));
@@ -54,7 +55,7 @@ $stmt->close();
 $isSimAllocation = !empty($oldAllocation['sim_id']);
 $calculatedExpiryDate = $oldAllocation['sim_expiry_date'] ?? null;
 $lifecycleStatus = $oldAllocation['sim_status'] ?: 'Available';
-if ($isSimAllocation) {
+if ($isSimAllocation && $lifecycleUpdateRequested) {
 	if ($activationDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $activationDate)) sendResponse(false, 'Valid activation date is required', [], [], 400);
 	if ($deactivationDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deactivationDate)) sendResponse(false, 'Valid deactivation date is required', [], [], 400);
 	if ($activationDate !== '' && isFutureDate($activationDate)) sendResponse(false, 'Activation date cannot be in the future', [], [], 400);
@@ -78,7 +79,7 @@ if ($isSimAllocation) {
 try {
 	$auditFields = ['owner_type' => $ownerType, 'owner_id' => $ownerId, 'allocation_type' => $allocationType, 'software' => $software ?: null, 'total_amount' => $total, 'amount_paid' => $paid, 'pending_amount' => $pending, 'payment_status' => $status, 'payment_mode' => $paymentMode, 'transaction_id' => $transactionId ?: null, 'notes' => $notes];
 	if (!$isSimAllocation) $auditFields['allocation_date'] = $allocationDate;
-	if ($isSimAllocation) {
+	if ($isSimAllocation && $lifecycleUpdateRequested) {
 		$auditFields['sim_activation_date'] = $activationDate ?: null;
 		$auditFields['sim_validity_id'] = $validityId;
 		$auditFields['sim_expiry_date'] = $calculatedExpiryDate;
@@ -86,10 +87,14 @@ try {
 		$auditFields['sim_status'] = $lifecycleStatus;
 	}
 	writeChangedFields($conn, $id, 'Stock Allocation', $oldAllocation, $auditFields, $currentUser);
-	if ($isSimAllocation) {
+	if ($isSimAllocation && $lifecycleUpdateRequested) {
 		$sql = "UPDATE stock_allocations SET owner_type = ?, owner_id = ?, allocation_type = ?, software = NULLIF(?, ''), total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, payment_mode = NULLIF(?, ''), transaction_id = NULLIF(?, ''), notes = ?, sim_activation_date = NULLIF(?, ''), sim_validity_id = ?, sim_expiry_date = NULLIF(?, ''), sim_deactivation_date = NULLIF(?, ''), sim_status = ? WHERE id = ?";
 		$stmt = $conn->prepare($sql);
 		$stmt->bind_param('sissdddsssssisssi', $ownerType, $ownerId, $allocationType, $software, $total, $paid, $pending, $status, $paymentMode, $transactionId, $notes, $activationDate, $validityId, $calculatedExpiryDate, $deactivationDate, $lifecycleStatus, $id);
+	} else if ($isSimAllocation) {
+		$sql = "UPDATE stock_allocations SET owner_type = ?, owner_id = ?, allocation_type = ?, software = NULLIF(?, ''), total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, payment_mode = NULLIF(?, ''), transaction_id = NULLIF(?, ''), notes = ? WHERE id = ?";
+		$stmt = $conn->prepare($sql);
+		$stmt->bind_param('sissdddssssi', $ownerType, $ownerId, $allocationType, $software, $total, $paid, $pending, $status, $paymentMode, $transactionId, $notes, $id);
 	} else {
 		$sql = "UPDATE stock_allocations SET owner_type = ?, owner_id = ?, allocation_type = ?, allocation_date = ?, software = NULLIF(?, ''), total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, payment_mode = NULLIF(?, ''), transaction_id = NULLIF(?, ''), notes = ? WHERE id = ?";
 		$stmt = $conn->prepare($sql);

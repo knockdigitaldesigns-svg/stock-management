@@ -14,6 +14,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import Modal from '../../components/Modal/Modal';
 
 const initialForm = {
     platform_id: '',
@@ -45,6 +46,7 @@ const CustomerCreatePage = () => {
     const [success, setSuccess] = useState('');
     const [showValidation, setShowValidation] = useState(false);
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
+    const [mobileConflict, setMobileConflict] = useState(null);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -354,7 +356,7 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const saveStep1Session = (id) => {
+    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false) => {
         try {
             const existing = JSON.parse(
                 sessionStorage.getItem(
@@ -362,11 +364,27 @@ const loadCustomer = async () => {
                 ) || '{}'
             );
 
+            const nextSession = {
+                ...existing,
+                customer_id: Number(id),
+                append_vehicle: appendVehicle,
+                new_vehicle_flow: newVehicleFlow
+            };
+
+            if (appendVehicle) {
+                delete nextSession.vehicle_record_id;
+                delete nextSession.existing_vehicle_imei;
+                delete nextSession.existing_vehicle_sim_1;
+                delete nextSession.existing_vehicle_sim_2;
+                delete nextSession.step2;
+                delete nextSession.step3;
+                delete nextSession.step4;
+            }
+
             sessionStorage.setItem(
                 `customer_creation_${id}`,
                 JSON.stringify({
-                    ...existing,
-                    customer_id: Number(id),
+                    ...nextSession,
                     step1: {
                         platform_id: Number(
                             form.platform_id
@@ -465,6 +483,7 @@ const loadCustomer = async () => {
             };
 
             let response;
+            let appendVehicle = false;
 
             /*
             |--------------------------------------------------------------------------
@@ -489,10 +508,18 @@ const loadCustomer = async () => {
             */
 
             else {
-                response = await api.post(
-                    '/customers/create.php',
-                    payload
-                );
+                try {
+                    response = await api.post(
+                        '/customers/create.php',
+                        payload,
+                        { skipGlobalError: true }
+                    );
+                } catch (err) {
+                    if (!err.response?.data?.data?.mobile_conflict) throw err;
+                    setMobileConflict({ payload, message: err.response.data.message });
+                    setSaving(false);
+                    return;
+                }
             }
 
             if (!response.data?.success) {
@@ -520,7 +547,7 @@ const loadCustomer = async () => {
             |--------------------------------------------------------------------------
             */
 
-            saveStep1Session(savedId);
+            saveStep1Session(savedId, true, appendVehicle);
 
             setSuccess(
                 isEditMode
@@ -536,7 +563,7 @@ const loadCustomer = async () => {
 
             setTimeout(() => {
                 navigate(
-                    `/customer-management/details/vehicle/${savedId}`
+                    `/customer-management/details/vehicle/${savedId}?mode=add`
                 );
             }, 250);
         } catch (err) {
@@ -550,6 +577,31 @@ const loadCustomer = async () => {
                 err.message ||
                 'Failed to save customer details.'
             );
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const confirmMobileConflict = async () => {
+        if (!mobileConflict) return;
+        try {
+            setSaving(true);
+            setMobileConflict(null);
+            const response = await api.post(
+                '/customers/create.php',
+                { ...mobileConflict.payload, mobile_reuse_confirmed: true },
+                { skipGlobalError: true }
+            );
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to save customer details.');
+            }
+            const savedId = Number(response.data?.data?.customer_id || response.data?.data?.id);
+            if (!savedId) throw new Error('Customer ID was not returned by the server.');
+            saveStep1Session(savedId, true, false);
+            setSuccess('Customer details saved successfully.');
+            setTimeout(() => navigate(`/customer-management/details/vehicle/${savedId}`), 250);
+        } catch (err) {
+            triggerError(err.response?.data?.message || err.message || 'Failed to save customer details.');
         } finally {
             setSaving(false);
         }
@@ -1128,6 +1180,39 @@ const loadCustomer = async () => {
                 )}
 
             </div>
+
+            {mobileConflict && (
+                <Modal
+                    isOpen
+                    onClose={() => setMobileConflict(null)}
+                    title="Mobile number already exists"
+                    maxWidth="520px"
+                    footer={
+                        <>
+                            <button
+                                type="button"
+                                className="btn btn-outline"
+                                onClick={() => setMobileConflict(null)}
+                                disabled={saving}
+                            >
+                                No
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={confirmMobileConflict}
+                                disabled={saving}
+                            >
+                                {saving ? 'Saving...' : 'Yes'}
+                            </button>
+                        </>
+                    }
+                >
+                    <p>
+                        {mobileConflict.message || 'This mobile number is already associated with an existing user in this software. Do you want to continue with the same mobile number for this new user?'}
+                    </p>
+                </Modal>
+            )}
 
             {/* Step 5 navigation blocked modal */}
             {showStep5BlockedModal && (

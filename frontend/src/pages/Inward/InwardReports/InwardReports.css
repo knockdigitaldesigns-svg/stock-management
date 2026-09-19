@@ -26,3 +26,14 @@
     color: var(--primary-color);
     border-bottom-color: var(--primary-color);
 }
+
+@media (max-width: 768px) {
+    .tabs-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 0;
+        scrollbar-width: none;
+    }
+    .tabs-container::-webkit-scrollbar { display: none; }
+    .tab-btn { padding: 0.6rem 1rem; font-size: 0.875rem; white-space: nowrap; }
+}

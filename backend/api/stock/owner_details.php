@@ -9,7 +9,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+requireAnyPermission([
+    'dealers.view',
+    'technicians.view',
+    'stock.view',
+    'stock_transfer.view',
+    'customers.view'
+]);
 
 $ownerType = isset($_GET['owner_type']) ? strtolower(trim((string) $_GET['owner_type'])) : '';
 $ownerId = isset($_GET['owner_id']) ? (int) $_GET['owner_id'] : 0;

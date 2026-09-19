@@ -43,12 +43,20 @@ if (!empty($dbErrors)) {
 }
 
 $conn->begin_transaction();
-$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
-$stmt->bind_param("sssssss", $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['notes']);
+$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("ssssssds", $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes']);
 
 if ($stmt->execute()) {
     $dealerId = $conn->insert_id;
     try {
+        if (!empty($validData['software_list'])) {
+            $swStmt = $conn->prepare("INSERT IGNORE INTO dealer_software (dealer_id, software) VALUES (?, ?)");
+            foreach ($validData['software_list'] as $sw) {
+                $swStmt->bind_param("is", $dealerId, $sw);
+                $swStmt->execute();
+            }
+            $swStmt->close();
+        }
         writeCreatedFields($conn, $dealerId, 'Dealer', $validData, $currentUser);
         $conn->commit();
     } catch (Throwable $e) {

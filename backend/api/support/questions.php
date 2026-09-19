@@ -24,10 +24,15 @@ $currentUser = authenticate();
 $data = json_decode(file_get_contents('php://input'));
 $id = (int) ($data->id ?? $_GET['id'] ?? 0);
 if ($method === 'DELETE') {
+    $snapshotStmt = $conn->prepare('SELECT id, question, answer, is_active, display_order, created_by, updated_by, created_at, updated_at FROM support_questions WHERE id = ? LIMIT 1');
+    $snapshotStmt->bind_param('i', $id);
+    $snapshotStmt->execute();
+    $snapshot = $snapshotStmt->get_result()->fetch_assoc() ?: [];
+    $snapshotStmt->close();
     $stmt = $conn->prepare('DELETE FROM support_questions WHERE id = ?');
     $stmt->bind_param('i', $id);
     if (!$stmt->execute() || $stmt->affected_rows === 0) sendResponse(false, 'Question not found.', [], [], 404);
-    writeAudit($conn, $id, 'Support Question', 'Delete', 'id', $id, null, $currentUser);
+    writeDeleteSnapshot($conn, $id, 'Support Question', $snapshot, $currentUser);
     $stmt->close(); $conn->close(); sendResponse(true, 'Question deleted successfully.');
 }
 $question = trim((string) ($data->question ?? ''));

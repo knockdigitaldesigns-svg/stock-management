@@ -7,6 +7,17 @@ import DateInput from '../DateInput';
 import { softwareDropdownOptions } from '../../constants/software';
 import { showGlobalError } from '../../context/ErrorContext';
 
+const getDealerAssignedSoftware = (dealer) => {
+    if (!dealer) return [];
+    if (Array.isArray(dealer.software_list) && dealer.software_list.length > 0) {
+        return dealer.software_list.map(s => String(s).trim()).filter(Boolean);
+    }
+    if (typeof dealer.software === 'string' && dealer.software.trim() !== '') {
+        return dealer.software.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+};
+
 const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) => {
     const safeOwnersList = Array.isArray(ownersList) ? ownersList : [];
     const ownerOptions = safeOwnersList.map((owner) => ({
@@ -49,6 +60,11 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     };
 
     const selectedDealer = ownerType === 'dealer' ? safeOwnersList.find(d => Number(d.id) === Number(selectedOwner)) : null;
+    const assignedSoftware = getDealerAssignedSoftware(selectedDealer);
+    const availableSoftwareOptions = (ownerType === 'dealer' && assignedSoftware.length > 0)
+        ? assignedSoftware.map(s => ({ value: s, label: s }))
+        : softwareDropdownOptions;
+
     const dealerRequiresPayment = ownerType === 'dealer' && selectedDealer?.installation_status === 'Not Willing';
     const amountPaidEntered = String(amountPaid ?? '').trim() !== '';
     const pendingAmount = Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0));
@@ -72,6 +88,18 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         (activeDevices.length > 0 || activeSims.length > 0) &&
         (ownerType !== 'dealer' || (paymentFieldsComplete && paymentValuesAreValid))
     );
+
+    useEffect(() => {
+        if (ownerType === 'dealer' && selectedOwner) {
+            const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
+            const assigned = getDealerAssignedSoftware(dealer);
+            if (assigned.length > 0) {
+                if (software && !assigned.includes(software)) {
+                    setSoftware('');
+                }
+            }
+        }
+    }, [selectedOwner, ownerType, safeOwnersList]);
 
     useEffect(() => {
         const fetchStock = async () => {
@@ -111,8 +139,8 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                     id: Date.now() + i,
                     date: firstRow.date || '',
                     item_id: '',
-                    amount: ''
-                    , notes: ''
+                    amount: '',
+                    notes: ''
                 });
             }
             setDevices(newItems);
@@ -203,6 +231,15 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             if (amountPaidEntered && !paymentMode) {
                 return triggerError('Payment Mode is required when Amount Paid is entered.');
             }
+
+            if (dealer?.threshold_amount !== null && dealer?.threshold_amount !== '' && dealer?.threshold_amount !== undefined && activeDevices.length > 0) {
+                const threshold = Number(dealer.threshold_amount);
+                const currentPending = Number(dealer.pending_amount || 0);
+                if (Number.isFinite(threshold) && currentPending >= threshold) {
+                    return triggerError('Your pending amount exceeds the threshold amount. Clear the pending to buy GPS device.');
+                }
+            }
+
             if (dealer?.installation_status === 'Not Willing') {
                 if (totalAmount === '' || (amountPaidEntered && !paymentMode)) {
                     return triggerError('Payment details are mandatory for Not Willing dealers.');
@@ -212,6 +249,13 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 const paidValue = Number(amountPaid);
                 if (!Number.isFinite(totalValue) || (amountPaidEntered && (!Number.isFinite(paidValue) || paidValue < 0 || paidValue > totalValue))) {
                     return triggerError('Payment details are invalid for Not Willing dealers.');
+                }
+            }
+
+            if (software) {
+                const assigned = getDealerAssignedSoftware(dealer);
+                if (assigned.length > 0 && !assigned.includes(software)) {
+                    return triggerError(`Selected software '${software}' is not assigned to this dealer.`);
                 }
             }
         }
@@ -344,7 +388,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                         ))}
                     </div>
                 </>}
-                <div className="form-group"><label className="form-label">Software</label><SearchableDropdown options={softwareDropdownOptions} value={software} onChange={setSoftware} placeholder="Select software" /></div>
+                <div className="form-group"><label className="form-label">Software</label><SearchableDropdown options={availableSoftwareOptions} value={software} onChange={setSoftware} placeholder="Select software" /></div>
 
                 {ownerType === 'dealer' && (
                     <>

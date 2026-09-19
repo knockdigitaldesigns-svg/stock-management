@@ -24,6 +24,7 @@ const formatDateTime = (value) => {
     return `${day}-${month}-${date.getFullYear()} ${String(hours % 12 || 12).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
 };
 const fieldLabel = (field) => FIELD_LABELS[field] || String(field || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const actionLabel = (action) => action === 'Create' ? 'Add' : action;
 const parseValue = (value) => {
     if (value === null || value === undefined || value === '') return null;
     try { return JSON.parse(value); } catch { return value; }
@@ -45,6 +46,29 @@ const summary = (group) => {
     if (group.module === 'Role Permissions') return 'Permissions updated';
     const fields = (group.records || []).map((record) => fieldLabel(record.field_changed));
     return `${fields.slice(0, 2).join(', ')}${fields.length > 2 ? ` +${fields.length - 2} more` : ''} changed`;
+};
+
+const snapshotRecord = (group, key) => (group.records || []).find((record) => record.field_changed === 'record_snapshot')?.[key] || null;
+const snapshotSections = (snapshot) => {
+    if (typeof snapshot === 'string') snapshot = parseValue(snapshot);
+    if (!snapshot || typeof snapshot !== 'object') return [];
+    const labels = {
+        customer: 'Customer Details', customers: 'Customer Details', vehicle: 'Vehicle Details', vehicles: 'Vehicle Details',
+        installation: 'Installation Details', installations: 'Installation Details', payment: 'Payment Details', payments: 'Payment Details',
+        payment_part_2: 'Payment Details Part 2', cash_collections: 'Cash Collections'
+    };
+    const hasSections = Object.keys(snapshot).some((key) => labels[key]);
+    if (!hasSections) return [{ label: 'Customer Details', rows: [snapshot] }];
+    return Object.entries(snapshot).map(([section, value]) => ({
+        label: labels[section] || fieldLabel(section),
+        rows: Array.isArray(value) ? value : [value]
+    }));
+};
+const SnapshotView = ({ snapshot, title }) => {
+    if (typeof snapshot === 'string') snapshot = parseValue(snapshot);
+    const sections = snapshotSections(snapshot);
+    if (!sections.length) return null;
+    return <div className="history-snapshot"><h4>{title}</h4>{sections.map((section) => <section key={section.label}><h5>{section.label}</h5>{section.rows.map((row, index) => <dl key={`${section.label}-${index}`}>{Object.entries(row || {}).filter(([key]) => key !== 'id').map(([key, value]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(value)}</dd></div>)}</dl>)}</section>)}</div>;
 };
 
 const HistoryPage = () => {
@@ -91,8 +115,20 @@ const HistoryPage = () => {
                     <label className="history-search"><Search size={16} /><input value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} placeholder="Search history..." /></label>
                     <select value={filters.module} onChange={(event) => updateFilter('module', event.target.value)} aria-label="Filter by module"><option value="">All modules</option>{modules.map((module) => <option key={module}>{module}</option>)}</select>
                     <select value={filters.action} onChange={(event) => updateFilter('action', event.target.value)} aria-label="Filter by action"><option value="">All actions</option><option>Create</option><option>Edit</option><option>Delete</option></select>
-                    <input type="date" value={filters.date_from} onChange={(event) => updateFilter('date_from', event.target.value)} aria-label="Date from" />
-                    <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} aria-label="Date to" />
+                    <input type="date" value={filters.date_from} onChange={(event) => {
+                        if (filters.date_to && event.target.value > filters.date_to) {
+                            setError('From Date cannot be later than To Date.');
+                            return;
+                        }
+                        updateFilter('date_from', event.target.value);
+                    }} aria-label="Date from" />
+                    <input type="date" value={filters.date_to} onChange={(event) => {
+                        if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                            setError('From Date cannot be later than To Date.');
+                            return;
+                        }
+                        updateFilter('date_to', event.target.value);
+                    }} aria-label="Date to" />
                     <select
     value={filters.changed_by}
     onChange={(event) => updateFilter('changed_by', event.target.value)}
@@ -110,14 +146,14 @@ const HistoryPage = () => {
                 </form>
                 <div className="table-container history-table-wrap">
                     <table className="history-table"><thead><tr><th>Date &amp; Time</th><th>Module</th><th>Action</th><th>Summary</th><th>Changed By</th><th>Actions</th></tr></thead>
-                        <tbody>{loading ? <tr><td colSpan="6" className="text-center">Loading history...</td></tr> : history.length === 0 ? <tr><td colSpan="6" className="text-center empty-state">No history records found.</td></tr> : history.map((group) => <tr key={group.id}><td className="history-date">{formatDateTime(group.changed_at)}</td><td>{group.module}</td><td><span className={`badge badge-${String(group.action).toLowerCase()}`}>{group.action}</span></td><td className="history-summary">{summary(group)}</td><td>{group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-'}</td><td><button className="icon-btn view" type="button" title="View details" aria-label="View history details" onClick={() => setSelected(group)}><Eye size={16} /></button></td></tr>)}</tbody>
+                        <tbody>{loading ? <tr><td colSpan="6" className="text-center">Loading history...</td></tr> : history.length === 0 ? <tr><td colSpan="6" className="text-center empty-state">No history records found.</td></tr> : history.map((group) => <tr key={group.id}><td className="history-date">{formatDateTime(group.changed_at)}</td><td>{group.module}</td><td><span className={`badge badge-${String(group.action).toLowerCase()}`}>{actionLabel(group.action)}</span></td><td className="history-summary">{summary(group)}</td><td>{group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-'}</td><td><button className="icon-btn view" type="button" title="View details" aria-label="View history details" onClick={() => setSelected(group)}><Eye size={16} /></button></td></tr>)}</tbody>
                     </table>
                 </div>
                 <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => loadHistory(page)} onPageSizeChange={(size) => loadHistory(1, appliedFilters, size)} itemName="history entries" />
             </div>
             <Modal isOpen={Boolean(selected)} onClose={() => setSelected(null)} title="History Details" maxWidth="900px">
-                {selected && <div className="history-details"><div className="history-detail-meta"><div><strong>Date &amp; Time</strong><span>{formatDateTime(selected.changed_at)}</span></div><div><strong>Module</strong><span>{selected.module}</span></div><div><strong>Action</strong><span className={`badge badge-${String(selected.action).toLowerCase()}`}>{selected.action}</span></div><div><strong>Changed By</strong><span>{selected.changed_by_username || selected.changed_by_name || selected.changed_by_user_id || '-'}</span></div></div>
-                    {selected.action === 'Delete' ? <div className="history-detail-section"><h4>Deleted Record</h4><dl>{Object.entries(selected.records?.[0]?.old_display_snapshot || cleanSnapshot(parseValue(selected.records?.[0]?.old_value))).map(([key, value]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(value)}</dd></div>)}</dl></div> : <div className="history-detail-section"><h4>Changed Fields</h4><table className="history-detail-table"><thead><tr><th>Field</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>{selected.records?.map((record) => { let oldValue = auditDisplayValue(record, 'old_display_value'); let newValue = auditDisplayValue(record, 'new_display_value'); if (selected.module === 'Role Permissions') { const oldItems = arrayValue(record.old_display_value); const newItems = arrayValue(record.new_display_value); const added = newItems.filter((item) => !oldItems.includes(item)); const removed = oldItems.filter((item) => !newItems.includes(item)); oldValue = removed.length ? `Permissions Removed:\n${removed.join('\n')}` : '-'; newValue = added.length ? `Permissions Added:\n${added.join('\n')}` : '-'; } return <tr key={record.id}><td>{fieldLabel(record.field_changed)}</td><td><pre>{oldValue}</pre></td><td><pre>{newValue}</pre></td></tr>; })}</tbody></table></div>}
+                {selected && <div className="history-details"><div className="history-detail-meta"><div><strong>Date &amp; Time</strong><span>{formatDateTime(selected.changed_at)}</span></div><div><strong>Module</strong><span>{selected.module}</span></div><div><strong>Action</strong><span className={`badge badge-${String(selected.action).toLowerCase()}`}>{actionLabel(selected.action)}</span></div><div><strong>Changed By</strong><span>{selected.changed_by_username || selected.changed_by_name || selected.changed_by_user_id || '-'}</span></div></div>
+                    {selected.action === 'Delete' ? <SnapshotView snapshot={snapshotRecord(selected, 'old_display_snapshot') || cleanSnapshot(parseValue(selected.records?.[0]?.old_value))} title="Deleted Record" /> : selected.action === 'Create' ? <SnapshotView snapshot={snapshotRecord(selected, 'new_display_snapshot') || cleanSnapshot(parseValue(selected.records?.[0]?.new_value))} title="Created Record" /> : <><SnapshotView snapshot={snapshotRecord(selected, 'old_display_snapshot')} title="Old Record" /><SnapshotView snapshot={snapshotRecord(selected, 'new_display_snapshot')} title="New Record" /><div className="history-detail-section"><h4>Changes</h4><table className="history-detail-table"><thead><tr><th>Field</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>{selected.records?.filter((record) => record.field_changed !== 'record_snapshot').map((record) => { let oldValue = auditDisplayValue(record, 'old_display_value'); let newValue = auditDisplayValue(record, 'new_display_value'); if (selected.module === 'Role Permissions') { const oldItems = arrayValue(record.old_display_value); const newItems = arrayValue(record.new_display_value); const added = newItems.filter((item) => !oldItems.includes(item)); const removed = oldItems.filter((item) => !newItems.includes(item)); oldValue = removed.length ? `Permissions Removed:\n${removed.join('\n')}` : '-'; newValue = added.length ? `Permissions Added:\n${added.join('\n')}` : '-'; } return <tr key={record.id}><td>{fieldLabel(record.field_changed)}</td><td><pre>{oldValue}</pre></td><td><pre>{newValue}</pre></td></tr>; })}</tbody></table></div></>}
                 </div>}
             </Modal>
         </div>

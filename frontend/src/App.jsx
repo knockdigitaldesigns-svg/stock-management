@@ -22,6 +22,9 @@ import InwardReports
 import Dealers
     from './pages/Outward/Dealers/Dealers';
 
+import DealerSimActivation
+    from './pages/Outward/DealerSimActivation/DealerSimActivation';
+
 import Technicians
     from './pages/Outward/Technicians/Technicians';
 
@@ -243,6 +246,17 @@ function App() {
                                 permission="dealers.view"
                             >
                                 <Dealers />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="outward/dealer-sim-activation"
+                        element={
+                            <ProtectedRoute
+                                permission="dealers.view"
+                            >
+                                <DealerSimActivation />
                             </ProtectedRoute>
                         }
                     />

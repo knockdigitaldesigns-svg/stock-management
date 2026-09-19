@@ -2,6 +2,7 @@
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
+require_once '../../utils/dealer_threshold.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -10,7 +11,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+requireAnyPermission([
+    'dealers.edit',
+    'dealers.add',
+    'technicians.edit',
+    'technicians.add',
+    'stock.update',
+    'stock_transfer.add'
+]);
 
 $data = json_decode(file_get_contents("php://input"));
 
@@ -56,18 +64,56 @@ try {
     if ($payment_mode !== null && $payment_mode !== 'Cash' && $transaction_id === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
     if ($payment_mode === 'Cash') $transaction_id = '';
     $software = isset($data->software) ? trim((string) $data->software) : '';
-    $allowedSoftware = ['Tracoo', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
-    if ($software !== '' && !in_array($software, $allowedSoftware, true)) throw new Exception('Invalid software selection.');
+    $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
+
+    if ($software !== '') {
+        if (!in_array($software, $allowedSoftware, true)) {
+            throw new Exception("Invalid software selection.");
+        }
+
+        if ($owner_type === 'dealer') {
+            $swStmt = $conn->prepare("SELECT software FROM dealer_software WHERE dealer_id = ?");
+            $swStmt->bind_param("i", $owner_id);
+            $swStmt->execute();
+            $swRes = $swStmt->get_result();
+            $dealerSwList = [];
+            while ($swRow = $swRes->fetch_assoc()) {
+                if (!empty($swRow['software'])) {
+                    $dealerSwList[] = trim($swRow['software']);
+                }
+            }
+            $swStmt->close();
+
+            if (empty($dealerSwList)) {
+                $dSwStmt = $conn->prepare("SELECT software FROM dealers WHERE id = ?");
+                $dSwStmt->bind_param("i", $owner_id);
+                $dSwStmt->execute();
+                $dSwRow = $dSwStmt->get_result()->fetch_assoc();
+                $dSwStmt->close();
+
+                if (!empty($dSwRow['software'])) {
+                    $dealerSwList = array_values(array_filter(array_map('trim', explode(',', $dSwRow['software']))));
+                }
+            }
+
+            if (!empty($dealerSwList)) {
+                if (!in_array($software, $dealerSwList, true)) {
+                    throw new Exception("Selected software '{$software}' is not assigned to this dealer.");
+                }
+            }
+        }
+    }
+
     $server_total_amount = 0.0;
     $remaining_paid = $amount_paid;
     $seenDeviceIds = [];
     $seenSimIds = [];
-           $sim_given_date = null;
-           $sim_activation_date = null;
-           $sim_validity_id = 0;
-           $sim_expiry_date = null;
-           $sim_deactivation_date = null;
-           $sim_lifecycle_status = 'Available';
+    $sim_given_date = null;
+    $sim_activation_date = null;
+    $sim_validity_id = 0;
+    $sim_expiry_date = null;
+    $sim_deactivation_date = null;
+    $sim_lifecycle_status = 'Available';
     
     // Validate Owner
     if ($owner_type === 'dealer') {
@@ -87,6 +133,19 @@ try {
             }
         }
         $checkOwner->close();
+
+        // Check Pending Amount Threshold for Dealer Device Allocation
+        if (!empty($data->devices)) {
+            $thresholdCheck = checkDealerPendingThreshold($conn, $owner_id, true);
+            if (!$thresholdCheck['allowed']) {
+                $conn->rollback();
+                sendResponse(false, $thresholdCheck['message'], [
+                    'error_code' => $thresholdCheck['error_code'],
+                    'pending_amount' => $thresholdCheck['pending_amount'],
+                    'threshold_amount' => $thresholdCheck['threshold_amount']
+                ], [], 400);
+            }
+        }
     } else if ($owner_type === 'technician') {
         $checkOwner = $conn->prepare("SELECT id FROM technicians WHERE id = ?");
         $checkOwner->bind_param("i", $owner_id);
@@ -153,7 +212,7 @@ try {
             $server_total_amount += $sim_amount;
 
             // 1. Check exists & available (using FOR UPDATE to lock row)
-                 $checkSim = $conn->prepare("SELECT id, sim_validity_id, status FROM sims WHERE id = ? FOR UPDATE");
+            $checkSim = $conn->prepare("SELECT id, sim_validity_id, status FROM sims WHERE id = ? FOR UPDATE");
             $checkSim->bind_param("i", $sim_id);
             $checkSim->execute();
             $simResult = $checkSim->get_result()->fetch_assoc();
@@ -196,4 +255,3 @@ try {
 }
 
 $conn->close();
-?>

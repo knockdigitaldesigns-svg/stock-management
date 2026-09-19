@@ -52,6 +52,7 @@ $location = trim(
 $pincode = trim(
     (string) ($data->pincode ?? '')
 );
+$mobileReuseConfirmed = filter_var($data->mobile_reuse_confirmed ?? false, FILTER_VALIDATE_BOOLEAN);
 
 
 /*
@@ -254,7 +255,7 @@ if ($result->num_rows > 0) {
 
     sendResponse(
         false,
-        'Username already exists for this platform.',
+        'Username already exists in this software. Please use a different username.',
         [],
         [],
         409
@@ -266,36 +267,36 @@ $stmt->close();
 
 /*
 |--------------------------------------------------------------------------
-| Check Duplicate Primary Mobile
+| Check Same-Platform Mobile Reuse
 |--------------------------------------------------------------------------
 */
 
 $stmt = $conn->prepare(
-    "SELECT id
+    "SELECT id, username
      FROM customers
-     WHERE primary_mobile_no = ?
+     WHERE platform_id = ?
+       AND primary_mobile_no = ?
+     ORDER BY id ASC
      LIMIT 1"
 );
-
-$stmt->bind_param('s', $primaryMobile);
+$stmt->bind_param('is', $platformId, $primaryMobile);
 $stmt->execute();
-
-$result = $stmt->get_result();
-
-if ($result->num_rows > 0) {
-    $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Primary mobile number already exists.',
-        [],
-        [],
-        409
-    );
-}
-
+$mobileCustomer = $stmt->get_result()->fetch_assoc();
 $stmt->close();
+
+if ($mobileCustomer) {
+    if (!$mobileReuseConfirmed) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(
+            false,
+            'This mobile number is already associated with an existing user in this software. Do you want to continue with the same mobile number for this new user?',
+            ['mobile_conflict' => true],
+            [],
+            409
+        );
+    }
+}
 
 
 /*

@@ -9,6 +9,7 @@ import Modal from '../../components/Modal/Modal';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import StockAllocationEditModal from './StockAllocationEditModal';
 import { formatDate } from '../../utils/date';
+import { showGlobalError } from '../../context/ErrorContext';
 
 const StockManagement = () => {
     const [stockAllocations, setStockAllocations] = useState([]);
@@ -57,12 +58,12 @@ const StockManagement = () => {
         if (!deleteTarget) return;
         setDeleting(true);
         try {
-            const response = await api.post('/stock/delete.php', { owner_type: deleteTarget.owner_type, owner_id: deleteTarget.owner_id });
+            const response = await api.post('/stock/delete.php', { allocation_id: deleteTarget.allocation_id });
             if (!response.data.success) throw new Error(response.data.message);
             setDeleteTarget(null);
             fetchStockSummary();
         } catch (error) {
-            window.alert(error.response?.data?.message || error.message || 'Unable to delete allocated stock.');
+            showGlobalError(error.response?.data?.message || error.message || 'Unable to delete allocated stock.');
         } finally {
             setDeleting(false);
         }
@@ -117,6 +118,7 @@ const StockManagement = () => {
                         { key: 'activation_date', label: 'Activation Date' }
                     ]}
                     showOwnerType
+                    showAsset
                     showPlatform
                     platformOptions={platforms}
                     showPaymentStatus
@@ -245,7 +247,7 @@ const StockManagement = () => {
             )}
             {deleteTarget && (
                 <Modal isOpen onClose={() => setDeleteTarget(null)} title="Delete allocated stock" maxWidth="440px" footer={<><button className="btn btn-outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button><button className="btn btn-danger" onClick={deleteOwnerStock} disabled={deleting}>{deleting ? 'Deleting...' : 'Delete Stock'}</button></>}>
-                    <p>Remove all allocated stock for <strong>{deleteTarget.owner_name || deleteTarget.name}</strong>? Allocated devices and SIMs will be returned to available stock. The dealer/technician record will remain.</p>
+                    <p>Remove this {deleteTarget.item_type || (deleteTarget.device_id !== null ? 'Device' : 'SIM')} allocation for <strong>{deleteTarget.owner_name || deleteTarget.name}</strong>? Only this selected asset will be returned to available stock.</p>
                 </Modal>
             )}
         </div>

@@ -1018,11 +1018,15 @@ const CustomerDetailsPage = () => {
                         <input
                             type="date"
                             value={dateFrom}
-                            onChange={e =>
+                            onChange={e => {
+                                if (dateTo && e.target.value > dateTo) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
                                 setDateFrom(
                                     e.target.value
                                 )
-                            }
+                            }}
                             max={
                                 dateTo ||
                                 new Date()
@@ -1046,11 +1050,15 @@ const CustomerDetailsPage = () => {
                         <input
                             type="date"
                             value={dateTo}
-                            onChange={e =>
+                            onChange={e => {
+                                if (dateFrom && e.target.value && e.target.value < dateFrom) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
                                 setDateTo(
                                     e.target.value
                                 )
-                            }
+                            }}
                             min={dateFrom || undefined}
                             max={
                                 new Date()

@@ -19,8 +19,8 @@ if (!$conn) {
 
 $search = trim((string)($_GET['search'] ?? ''));
 $location = trim((string)($_GET['location'] ?? ''));
-$month = (int)($_GET['month'] ?? 0);
-$year = (int)($_GET['year'] ?? 0);
+$dateFrom = trim((string)($_GET['date_from'] ?? ''));
+$dateTo = trim((string)($_GET['date_to'] ?? ''));
 $installationPerson = trim((string)($_GET['installation_person'] ?? ''));
 $leadClosure = (int)($_GET['lead_closure'] ?? 0);
 $payment = strtolower(trim((string)($_GET['payment'] ?? '')));
@@ -42,15 +42,15 @@ if ($location !== '') {
     $params[] = $location;
     $types .= 's';
 }
-if ($month >= 1 && $month <= 12) {
-    $conditions[] = 'MONTH(ci.installation_date) = ?';
-    $params[] = $month;
-    $types .= 'i';
+if ($dateFrom !== '') {
+    $conditions[] = 'ci.installation_date >= ?';
+    $params[] = $dateFrom;
+    $types .= 's';
 }
-if ($year > 0) {
-    $conditions[] = 'YEAR(ci.installation_date) = ?';
-    $params[] = $year;
-    $types .= 'i';
+if ($dateTo !== '') {
+    $conditions[] = 'ci.installation_date <= ?';
+    $params[] = $dateTo;
+    $types .= 's';
 }
 if ($installationPerson !== '') {
     $parts = explode(':', $installationPerson, 2);

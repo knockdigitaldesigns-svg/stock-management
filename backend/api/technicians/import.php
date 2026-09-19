@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
 require_once '../../utils/technician_validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 
@@ -13,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('technicians.import');
 
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
@@ -99,6 +100,14 @@ try {
         if (!$insertStmt->execute()) {
             throw new Exception($insertStmt->error);
         }
+        $technicianId = (int) $conn->insert_id;
+        $snapshotStmt = $conn->prepare('SELECT * FROM technicians WHERE id = ? LIMIT 1');
+        $snapshotStmt->bind_param('i', $technicianId);
+        $snapshotStmt->execute();
+        $snapshot = $snapshotStmt->get_result()->fetch_assoc() ?: $technician;
+        $snapshotStmt->close();
+        $snapshot['_audit'] = ['source' => 'Excel Import', 'file' => $file['name']];
+        writeAuditSnapshot($conn, $technicianId, 'Technician', 'Create', null, $snapshot, $currentUser);
     }
     $insertStmt->close();
     $conn->commit();
