@@ -7,7 +7,7 @@ import { showGlobalError } from '../../context/ErrorContext';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUSES = ['Active', 'Deactive', 'Expired', 'Safe Custody'];
-const EMPTY_FILTERS = { search: '', date: '', month: '', year: '', validity: '', status: '' };
+const EMPTY_FILTERS = { search: '', date_from: '', date_to: '', validity: '', status: '' };
 const EMPTY_FORM = { action: '', renewal_date: new Date().toISOString().slice(0, 10), reactivation_date: new Date().toISOString().slice(0, 10), validity_months: '', payment_amount: '', amount_paid: '0', payment_status: 'Not Paid', payment_mode: '', transaction_id: '', notes: '', expired_to_safe_days: '', safe_to_deactive_days: '', installation_date: '' };
 
 const display = (value) => value === null || value === undefined || value === '' ? '-' : value;
@@ -45,7 +45,7 @@ const RenewalsPage = () => {
         } finally { setLoading(false); }
     };
 
-    useEffect(() => { load(1, filters); }, [filters.search, filters.date, filters.month, filters.year, filters.validity, filters.status]);
+    useEffect(() => { load(1, filters); }, [filters.search, filters.date_from, filters.date_to, filters.validity, filters.status]);
 
     const localYears = useMemo(() => [...new Set([...years, ...rows.flatMap((row) => [row.installation_date, row.next_renewal_date]).filter(Boolean).map((date) => Number(String(date).slice(0, 4)))])].sort((a, b) => b - a), [years, rows]);
     const pending = Math.max(0, Number(form.payment_amount || 0) - Number(form.amount_paid || 0));
@@ -153,9 +153,20 @@ const RenewalsPage = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}><h2>Renewals</h2><button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button></div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, margin: '18px 0' }}>
             <input className="form-control" placeholder="Search username, mobile, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
-            <input className="form-control" type="date" value={filters.date} onChange={(event) => updateFilter('date', event.target.value)} />
-            <select className="form-control" value={filters.month} onChange={(event) => updateFilter('month', event.target.value)}><option value="">All Months</option>{MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select>
-            <select className="form-control" value={filters.year} onChange={(event) => updateFilter('year', event.target.value)}><option value="">All Years</option>{localYears.map((year) => <option key={year} value={year}>{year}</option>)}</select>
+            <input className="form-control" type="date" value={filters.date_from || ''} onChange={(event) => {
+                if (filters.date_to && event.target.value > filters.date_to) {
+                    showGlobalError('From Date cannot be later than To Date.');
+                    return;
+                }
+                updateFilter('date_from', event.target.value);
+            }} aria-label="From Date" />
+            <input className="form-control" type="date" value={filters.date_to || ''} onChange={(event) => {
+                if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                    showGlobalError('From Date cannot be later than To Date.');
+                    return;
+                }
+                updateFilter('date_to', event.target.value);
+            }} aria-label="To Date" />
             <select className="form-control" value={filters.validity} onChange={(event) => updateFilter('validity', event.target.value)}><option value="">All Validity</option>{validities.map((validity) => <option key={validity} value={validity}>{validity} Months</option>)}</select>
             <select className="form-control" value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="">All Status</option>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
             <button className="btn" type="button" onClick={() => setFilters(EMPTY_FILTERS)}><RotateCcw size={16} /> Reset</button>

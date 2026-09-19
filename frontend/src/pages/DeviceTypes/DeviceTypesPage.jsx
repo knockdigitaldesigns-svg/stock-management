@@ -19,6 +19,7 @@ const DeviceTypesPage = () => {
     const [showModal, setShowModal] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [value, setValue] = useState('');
+    const [status, setStatus] = useState('Active');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -46,24 +47,40 @@ const DeviceTypesPage = () => {
     }, []);
 
     const openModal = (type = null) => {
-        setModal(type);
-        setShowModal(true);
-        setValue(type?.device_type || '');
-        setError('');
-    };
+    setModal(type);
+    setShowModal(true);
+    setValue(type?.device_type || '');
+    setStatus(type?.status || 'Active');
+    setError('');
+};
 
     const save = async () => {
-        const deviceType = value.trim();
-        if (!deviceType) {
-            triggerError('Device type is required.');
-            return;
-        }
-        setSaving(true);
-        setError('');
-        try {
-            const response = modal
-                ? await api.post('/device_types/update.php', { id: modal.id, device_type: deviceType })
-                : await api.post('/device_types/create.php', { device_type: deviceType });
+    const deviceType = value.trim();
+
+    if (!deviceType) {
+        triggerError('Device type is required.');
+        return;
+    }
+
+    if (!['Active', 'Inactive'].includes(status)) {
+        triggerError('Invalid device type status.');
+        return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+        const response = modal
+            ? await api.post('/device_types/update.php', {
+                id: modal.id,
+                device_type: deviceType,
+                status
+            })
+            : await api.post('/device_types/create.php', {
+                device_type: deviceType,
+                status
+            });
             if (!response.data.success) {
                 triggerError(response.data.message || 'Unable to save device type.');
                 return;
@@ -71,6 +88,7 @@ const DeviceTypesPage = () => {
             setShowModal(false);
             setModal(null);
             setValue('');
+            setStatus('Active');
             setMessage(response.data.message);
             await fetchDeviceTypes();
         } catch (err) {
@@ -131,13 +149,14 @@ const DeviceTypesPage = () => {
                             <tr>
                                 <th>Device Type</th>
                                 <th>Created Date</th>
+                                <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="3" className="text-center">
+                                    <td colSpan="4" className="text-center">
                                         Loading device types...
                                     </td>
                                 </tr>
@@ -151,6 +170,17 @@ const DeviceTypesPage = () => {
                                 paginatedItems.map((type) => (
                                     <tr key={type.id}>
                                         <td className="truncate-cell" title={type.device_type} style={{ fontWeight: 500 }}>{type.device_type}</td>
+                                        <td>
+    <span
+        className={`badge ${
+            type.status === 'Active'
+                ? 'badge-success'
+                : 'badge-danger'
+        }`}
+    >
+        {type.status || 'Active'}
+    </span>
+</td>
                                         <td>{formatDate(type.created_at)}</td>
                                         <td>
                                             <div className="action-buttons">
@@ -219,6 +249,18 @@ const DeviceTypesPage = () => {
                             onChange={(event) => setValue(event.target.value)}
                             autoFocus
                         />
+                        <div className="form-group">
+    <label className="form-label">Status *</label>
+
+    <select
+        className="form-control"
+        value={status}
+        onChange={(event) => setStatus(event.target.value)}
+    >
+        <option value="Active">Active</option>
+        <option value="Inactive">Inactive</option>
+    </select>
+</div>
                         {error && <div className="text-danger">{error}</div>}
                     </div>
                 </Modal>
@@ -244,7 +286,7 @@ const DeviceTypesPage = () => {
                     <p>Are you sure you want to delete this device type?</p>
                 </Modal>
             )}
-            {viewingType && <RecordViewModal isOpen onClose={() => setViewingType(null)} title="Device Type Details" record={viewingType} fetchRecord={async (row) => (await api.get('/device_types/list.php')).data.data.device_types.find((item) => String(item.id) === String(row.id)) || row} fields={[{ label: 'Device Type', key: 'device_type' }, { label: 'Created Date', key: 'created_at' }]} />}
+            {viewingType && <RecordViewModal isOpen onClose={() => setViewingType(null)} title="Device Type Details" record={viewingType} fetchRecord={async (row) => (await api.get('/device_types/list.php')).data.data.device_types.find((item) => String(item.id) === String(row.id)) || row} fields={[{ label: 'Device Type', key: 'device_type' }, { label: 'Created Date', key: 'created_at' }, { label: 'Status', key: 'status' }]} />}
         </div>
     );
 };

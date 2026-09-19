@@ -1,4 +1,5 @@
 <?php
+
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/date.php';
@@ -30,69 +31,159 @@ if (!$conn) {
 
 $conn->begin_transaction();
 
+$stmt = null;
+
 try {
-    $stmt = $conn->prepare("INSERT INTO sims (purchase_date, sim_no, sim_type, sim_validity_id, notes) VALUES (?, ?, ?, ?, ?)");
-    
+
+    /*
+     * SIM validity is no longer part of SIM Maintenance entry.
+     */
+    $stmt = $conn->prepare(
+        "INSERT INTO sims
+        (purchase_date, sim_no, sim_type, notes)
+        VALUES (?, ?, ?, ?)"
+    );
+
+    if (!$stmt) {
+        throw new Exception("Failed to prepare SIM insert.");
+    }
+
     $seenSims = [];
 
     foreach ($data->sims as $index => $sim) {
+
         $rowNum = $index + 1;
-        
-        if (empty($sim->purchase_date)) throw new Exception("Row $rowNum: Purchase date is required.");
-        if (isFutureDate($sim->purchase_date)) throw new Exception("Row $rowNum: Future dates are not allowed.");
-        if (empty($sim->sim_no)) throw new Exception("Row $rowNum: SIM number is required.");
+
+        $purchaseDate = trim((string) ($sim->purchase_date ?? ''));
+        $simNo = trim((string) ($sim->sim_no ?? ''));
         $simType = trim((string) ($sim->sim_type ?? ''));
-        $simValidityId = (int) ($sim->sim_validity_id ?? 0);
-        if (!in_array($simType, ['Voice', 'Non Voice'], true)) throw new Exception("Row $rowNum: SIM type must be Voice or Non Voice.");
-        if ($simValidityId <= 0) throw new Exception("Row $rowNum: SIM validity is required.");
-        
-        if (!preg_match('/^(?:[0-9]{10}|[0-9]{13})$/', $sim->sim_no)) {
-            throw new Exception("Row $rowNum: SIM number must contain exactly 10 OR exactly 13 digits.");
-        }
-        
-        if (in_array($sim->sim_no, $seenSims)) {
-            throw new Exception("Row $rowNum: Duplicate SIM number ({$sim->sim_no}) found in the request.");
-        }
-        $seenSims[] = $sim->sim_no;
-
-        $validityCheck = $conn->prepare('SELECT id FROM sim_validities WHERE id = ? LIMIT 1');
-        $validityCheck->bind_param('i', $simValidityId);
-        $validityCheck->execute();
-        if ($validityCheck->get_result()->num_rows === 0) { $validityCheck->close(); throw new Exception("Row $rowNum: SIM validity does not exist."); }
-        $validityCheck->close();
-        
-        // Check uniqueness in DB
-        $checkStmt = $conn->prepare("SELECT id FROM sims WHERE sim_no = ?");
-        $checkStmt->bind_param("s", $sim->sim_no);
-        $checkStmt->execute();
-        if ($checkStmt->get_result()->num_rows > 0) {
-            throw new Exception("Row $rowNum: SIM number already exists.");
-        }
-        $checkStmt->close();
-        
         $notes = trim((string) ($sim->notes ?? ''));
-        $stmt->bind_param("sssis", $sim->purchase_date, $sim->sim_no, $simType, $simValidityId, $notes);
-        if (!$stmt->execute()) {
-            if ($stmt->errno === 1062) throw new Exception("Row $rowNum: SIM number already exists.");
-            throw new Exception("Row $rowNum: Database error - " . $stmt->error);
+
+        if ($purchaseDate === '') {
+            throw new Exception(
+                "Row $rowNum: Purchase date is required."
+            );
         }
-        writeCreatedFields($conn, $conn->insert_id, 'SIM', [
-            'purchase_date' => $sim->purchase_date,
-            'sim_no' => $sim->sim_no,
-            'sim_type' => $simType,
-            'sim_validity_id' => $simValidityId,
-            'notes' => $notes
-        ], $currentUser);
+
+        if (isFutureDate($purchaseDate)) {
+            throw new Exception(
+                "Row $rowNum: Future dates are not allowed."
+            );
+        }
+
+        if ($simNo === '') {
+            throw new Exception(
+                "Row $rowNum: SIM number is required."
+            );
+        }
+
+        if (!in_array($simType, ['Voice', 'Non Voice'], true)) {
+            throw new Exception(
+                "Row $rowNum: SIM type must be Voice or Non Voice."
+            );
+        }
+
+        if (!preg_match('/^(?:[0-9]{10}|[0-9]{13})$/', $simNo)) {
+            throw new Exception(
+                "Row $rowNum: SIM number must contain exactly 10 OR exactly 13 digits."
+            );
+        }
+
+        if (in_array($simNo, $seenSims, true)) {
+            throw new Exception(
+                "Row $rowNum: Duplicate SIM number ($simNo) found in the request."
+            );
+        }
+
+        $seenSims[] = $simNo;
+
+        /*
+         * Check uniqueness in DB
+         */
+        $checkStmt = $conn->prepare(
+            "SELECT id FROM sims WHERE sim_no = ? LIMIT 1"
+        );
+
+        if (!$checkStmt) {
+            throw new Exception("Failed to prepare duplicate check.");
+        }
+
+        $checkStmt->bind_param("s", $simNo);
+        $checkStmt->execute();
+
+        if ($checkStmt->get_result()->num_rows > 0) {
+            $checkStmt->close();
+
+            throw new Exception(
+                "Row $rowNum: SIM number already exists."
+            );
+        }
+
+        $checkStmt->close();
+
+        /*
+         * Insert SIM
+         */
+        $stmt->bind_param(
+            "ssss",
+            $purchaseDate,
+            $simNo,
+            $simType,
+            $notes
+        );
+
+        if (!$stmt->execute()) {
+
+            if ($stmt->errno === 1062) {
+                throw new Exception(
+                    "Row $rowNum: SIM number already exists."
+                );
+            }
+
+            throw new Exception(
+                "Row $rowNum: Database error - " . $stmt->error
+            );
+        }
+
+        $simId = $conn->insert_id;
+
+        /*
+         * Audit
+         */
+        $snapshotStmt = $conn->prepare('SELECT * FROM sims WHERE id = ? LIMIT 1');
+        $snapshotStmt->bind_param('i', $simId);
+        $snapshotStmt->execute();
+        $snapshot = $snapshotStmt->get_result()->fetch_assoc() ?: [];
+        $snapshotStmt->close();
+        writeAuditSnapshot($conn, $simId, 'SIM', 'Create', null, $snapshot, $currentUser);
     }
-    
+
     $conn->commit();
-    sendResponse(true, "SIMs added successfully");
 
-} catch (Exception $e) {
+    $stmt->close();
+    $conn->close();
+
+    sendResponse(
+        true,
+        "SIMs added successfully"
+    );
+
+} catch (Throwable $e) {
+
     $conn->rollback();
-    sendResponse(false, $e->getMessage(), [], [], 400);
-}
 
-$stmt->close();
-$conn->close();
+    if ($stmt instanceof mysqli_stmt) {
+        $stmt->close();
+    }
+
+    $conn->close();
+
+    sendResponse(
+        false,
+        $e->getMessage(),
+        [],
+        [],
+        400
+    );
+}
 ?>

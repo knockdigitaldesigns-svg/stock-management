@@ -72,7 +72,8 @@ const PaymentDetailsPart1Page = () => {
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
     const [showPendingSaveModal, setShowPendingSaveModal] = useState(false);
 
-    const isEditMode = Boolean(customerId);
+    const [newVehicleFlow, setNewVehicleFlow] = useState(false);
+    const isEditMode = Boolean(customerId) && !newVehicleFlow;
 
     const canAddCustomer = hasPermission('customers.add');
     const canEditCustomer = hasPermission('customers.edit');
@@ -169,6 +170,14 @@ const PaymentDetailsPart1Page = () => {
             const stored = JSON.parse(
                 sessionStorage.getItem(storageKey) || '{}'
             );
+
+            if (stored.new_vehicle_flow || stored.append_vehicle) {
+                setNewVehicleFlow(true);
+                setForm(stored.step4 || initialForm);
+                return;
+            }
+
+            setNewVehicleFlow(false);
 
             const response = await api.get(
                 `/customers/details.php?customer_id=${encodeURIComponent(
@@ -376,8 +385,13 @@ const PaymentDetailsPart1Page = () => {
         try {
             setSaving(true);
 
+            const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+
             const paymentPayload = {
                 customer_id: Number(customerId),
+                vehicle_id: stored.new_vehicle_flow
+                    ? Number(stored.vehicle_record_id || 0)
+                    : 0,
 
                 /*
                  * Explicitly identify this as Part 1.

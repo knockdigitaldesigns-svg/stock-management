@@ -6,14 +6,22 @@ import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
 import { showGlobalError } from '../../../context/ErrorContext';
 
-export const DEALER_COLUMNS = [
+export const BULK_ALLOCATION_COLUMNS = [
     { key: 'dealer_name', header: 'Dealer Name', required: true },
-    { key: 'mobile_no', header: 'Mobile No', required: true },
-    { key: 'location', header: 'Location', required: true },
-    { key: 'enrolled_date', header: 'Enrolled Date', required: true },
-    { key: 'installation_status', header: 'Installation Status', required: true },
-    { key: 'notes', header: 'Notes', required: false },
-    { key: 'software', header: 'Software', required: false }
+    { key: 'allocation_type', header: 'Allocation Type', required: true },
+    { key: 'device_date', header: 'Device Date', required: false },
+    { key: 'imei_no', header: 'IMEI No', required: false },
+    { key: 'device_amount', header: 'Device Amount', required: false },
+    { key: 'device_notes', header: 'Device Notes', required: false },
+    { key: 'sim_date', header: 'SIM Date', required: false },
+    { key: 'sim_number', header: 'SIM Number', required: false },
+    { key: 'sim_amount', header: 'SIM Amount', required: false },
+    { key: 'sim_notes', header: 'SIM Notes', required: false },
+    { key: 'software', header: 'Software', required: false },
+    { key: 'total_amount', header: 'Total Amount', required: false },
+    { key: 'amount_paid', header: 'Amount Paid', required: false },
+    { key: 'payment_mode', header: 'Payment Mode', required: false },
+    { key: 'transaction_id', header: 'Transaction ID', required: false }
 ];
 
 const normalizeHeader = (str) =>
@@ -22,58 +30,74 @@ const normalizeHeader = (str) =>
         .trim()
         .replace(/\s+/g, ' ');
 
-const normalizeStatus = (val) => {
-    const clean = String(val || '').toLowerCase().trim().replace(/\s+/g, ' ');
-    if (clean === 'onsite') return 'Onsite';
-    if (clean === 'offsite') return 'Offsite';
-    if (clean === 'not willing') return 'Not Willing';
-    return null;
-};
-
 const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
 
     const [file, setFile] = useState(null);
-    const [errors, setErrors] = useState([]);
+    const [, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
 
     const downloadTemplate = () => {
-        const headers = DEALER_COLUMNS.map((c) => c.header);
+        const headers = BULK_ALLOCATION_COLUMNS.map((c) => c.header);
         const sampleData = [
             {
                 'Dealer Name': 'ABC Motors',
-                'Mobile No': '9876543210',
-                'Location': 'Coimbatore',
-                'Enrolled Date': '03-09-2026',
-                'Installation Status': 'Onsite',
-                'Notes': 'Test dealer',
-                'Software': 'Eagle India'
+                'Allocation Type': 'device',
+                'Device Date': '03-09-2026',
+                'IMEI No': '864294050123456',
+                'Device Amount': '2500',
+                'Device Notes': 'GPS Device',
+                'SIM Date': '',
+                'SIM Number': '',
+                'SIM Amount': '',
+                'SIM Notes': '',
+                'Software': 'Eagle India',
+                'Total Amount': '2500',
+                'Amount Paid': '2500',
+                'Payment Mode': 'UPI',
+                'Transaction ID': 'UPI98765432'
             },
             {
                 'Dealer Name': 'Sri Auto',
-                'Mobile No': '9876543211',
-                'Location': 'Madurai',
-                'Enrolled Date': '02-09-2026',
-                'Installation Status': 'Offsite',
-                'Notes': 'Test dealer',
-                'Software': 'Tracoo'
+                'Allocation Type': 'both',
+                'Device Date': '02-09-2026',
+                'IMEI No': '864294050123457',
+                'Device Amount': '3000',
+                'Device Notes': 'GPS Device',
+                'SIM Date': '02-09-2026',
+                'SIM Number': '8991101234567890123',
+                'SIM Amount': '500',
+                'SIM Notes': 'Airtel SIM',
+                'Software': 'Tracoo',
+                'Total Amount': '3500',
+                'Amount Paid': '1000',
+                'Payment Mode': 'Bank Transfer',
+                'Transaction ID': 'TXN123456'
             },
             {
                 'Dealer Name': 'Kumar Motors',
-                'Mobile No': '9876543212',
-                'Location': 'Chennai',
-                'Enrolled Date': '01-09-2026',
-                'Installation Status': 'Not Willing',
-                'Notes': 'Test dealer',
-                'Software': 'Navilap'
+                'Allocation Type': 'sim',
+                'Device Date': '',
+                'IMEI No': '',
+                'Device Amount': '',
+                'Device Notes': '',
+                'SIM Date': '01-09-2026',
+                'SIM Number': '8991101234567890124',
+                'SIM Amount': '600',
+                'SIM Notes': 'Jio SIM',
+                'Software': 'Navilap',
+                'Total Amount': '600',
+                'Amount Paid': '0',
+                'Payment Mode': '',
+                'Transaction ID': ''
             }
         ];
 
         const ws = XLSX.utils.json_to_sheet(sampleData, { header: headers });
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Dealers');
-        XLSX.writeFile(wb, 'Dealer_Upload_Template.xlsx');
+        XLSX.utils.book_append_sheet(wb, ws, 'Stock Allocation');
+        XLSX.writeFile(wb, 'Dealer_Bulk_Stock_Allocation_Template.xlsx');
     };
 
     const handleFileChange = (e) => {
@@ -182,7 +206,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             headerMap[normalizeHeader(k)] = k;
         });
 
-        const missingRequired = DEALER_COLUMNS.filter(
+        const missingRequired = BULK_ALLOCATION_COLUMNS.filter(
             (c) => c.required && !headerMap[normalizeHeader(c.header)]
         );
         if (missingRequired.length > 0) {
@@ -194,67 +218,90 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         }
 
         const clientErrors = [];
-        const seenNames = new Set();
-        const seenMobiles = new Set();
+        const seenImeis = new Set();
+        const seenSims = new Set();
+        const validModes = ['cash', 'upi', 'bank transfer', 'card', 'other'];
 
         rawRows.forEach((row, idx) => {
             const rowNum = idx + 2;
 
             const dealerName = String(row[headerMap[normalizeHeader('Dealer Name')]] || '').trim();
-            const mobileNo = String(row[headerMap[normalizeHeader('Mobile No')]] || '').trim();
-            const location = String(row[headerMap[normalizeHeader('Location')]] || '').trim();
-            const enrolledDateRaw = String(row[headerMap[normalizeHeader('Enrolled Date')]] || '').trim();
-            const statusRaw = String(row[headerMap[normalizeHeader('Installation Status')]] || '').trim();
+            const allocType = String(row[headerMap[normalizeHeader('Allocation Type')]] || '').trim().toLowerCase();
 
             if (!dealerName) {
                 clientErrors.push(`Row ${rowNum}: Dealer Name is required.`);
             }
 
-            const normalizedMobile = mobileNo.replace(/\D/g, '');
-            if (!mobileNo) {
-                clientErrors.push(`Row ${rowNum}: Mobile No is required.`);
-            } else if (
-                !/^[0-9+\-\s()]{10,15}$/.test(mobileNo) ||
-                normalizedMobile.length < 10 ||
-                normalizedMobile.length > 15
-            ) {
-                clientErrors.push(`Row ${rowNum}: Mobile No is invalid.`);
+            if (!allocType || !['device', 'sim', 'both'].includes(allocType)) {
+                clientErrors.push(`Row ${rowNum}: Allocation Type must be device, sim, or both.`);
             }
 
-            if (!location) {
-                clientErrors.push(`Row ${rowNum}: Location is required.`);
-            }
+            const hasDevice = allocType === 'device' || allocType === 'both';
+            const hasSim = allocType === 'sim' || allocType === 'both';
 
-            if (!enrolledDateRaw) {
-                clientErrors.push(`Row ${rowNum}: Enrolled Date is required.`);
-            } else {
-                const parsed = parseDate(enrolledDateRaw);
-                if (!parsed) {
-                    clientErrors.push(`Row ${rowNum}: Invalid Enrolled Date.`);
-                } else if (isFutureDate(parsed)) {
-                    clientErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
+            if (hasDevice) {
+                const devDate = String(row[headerMap[normalizeHeader('Device Date')]] || '').trim();
+                const imeiNo = String(row[headerMap[normalizeHeader('IMEI No')]] || '').trim();
+
+                if (!imeiNo) {
+                    clientErrors.push(`Row ${rowNum}: IMEI No is required for device allocation.`);
+                } else if (seenImeis.has(imeiNo)) {
+                    clientErrors.push(`Row ${rowNum}: Duplicate IMEI No '${imeiNo}' in uploaded Excel.`);
+                } else {
+                    seenImeis.add(imeiNo);
+                }
+
+                if (!devDate) {
+                    clientErrors.push(`Row ${rowNum}: Device Date is required.`);
+                } else {
+                    const parsed = parseDate(devDate);
+                    if (!parsed) {
+                        clientErrors.push(`Row ${rowNum}: Invalid Device Date.`);
+                    } else if (isFutureDate(parsed)) {
+                        clientErrors.push(`Row ${rowNum}: Future Device Date is not allowed.`);
+                    }
                 }
             }
 
-            if (!statusRaw) {
-                clientErrors.push(`Row ${rowNum}: Installation Status is required.`);
-            } else if (!normalizeStatus(statusRaw)) {
-                clientErrors.push(`Row ${rowNum}: Invalid Installation Status.`);
+            if (hasSim) {
+                const simDate = String(row[headerMap[normalizeHeader('SIM Date')]] || '').trim();
+                const simNo = String(row[headerMap[normalizeHeader('SIM Number')]] || '').trim();
+
+                if (!simNo) {
+                    clientErrors.push(`Row ${rowNum}: SIM Number is required for SIM allocation.`);
+                } else if (seenSims.has(simNo)) {
+                    clientErrors.push(`Row ${rowNum}: Duplicate SIM Number '${simNo}' in uploaded Excel.`);
+                } else {
+                    seenSims.add(simNo);
+                }
+
+                if (!simDate) {
+                    clientErrors.push(`Row ${rowNum}: SIM Date is required.`);
+                } else {
+                    const parsed = parseDate(simDate);
+                    if (!parsed) {
+                        clientErrors.push(`Row ${rowNum}: Invalid SIM Date.`);
+                    } else if (isFutureDate(parsed)) {
+                        clientErrors.push(`Row ${rowNum}: Future SIM Date is not allowed.`);
+                    }
+                }
             }
 
-            const normName = dealerName.toLowerCase().replace(/\s+/g, ' ');
-            if (normName) {
-                if (seenNames.has(normName)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate Dealer Name in uploaded Excel.`);
-                }
-                seenNames.add(normName);
-            }
+            const amtPaidRaw = String(row[headerMap[normalizeHeader('Amount Paid')]] || '').trim();
+            const amtPaid = amtPaidRaw !== '' ? parseFloat(amtPaidRaw) : 0;
+            const payMode = String(row[headerMap[normalizeHeader('Payment Mode')]] || '').trim();
+            const txnId = String(row[headerMap[normalizeHeader('Transaction ID')]] || '').trim();
 
-            if (normalizedMobile) {
-                if (seenMobiles.has(normalizedMobile)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate Mobile No in uploaded Excel.`);
+            if (amtPaid > 0) {
+                if (!payMode) {
+                    clientErrors.push(`Row ${rowNum}: Payment Mode is required when Amount Paid > 0.`);
+                } else if (!validModes.includes(payMode.toLowerCase())) {
+                    clientErrors.push(`Row ${rowNum}: Invalid Payment Mode '${payMode}'.`);
                 }
-                seenMobiles.add(normalizedMobile);
+
+                if (payMode && payMode.toLowerCase() !== 'cash' && !txnId) {
+                    clientErrors.push(`Row ${rowNum}: Transaction ID is required for non-cash payment mode.`);
+                }
             }
         });
 
@@ -274,7 +321,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             });
 
             if (response.data.success) {
-                setSuccessMsg(response.data.message || 'Dealers uploaded successfully.');
+                setSuccessMsg(response.data.message || 'Bulk stock allocation completed successfully.');
                 setTimeout(() => {
                     onSuccess();
                 }, 1000);
@@ -282,7 +329,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 const backendErrors =
                     response.data?.data?.errors ||
                     response.data?.errors ||
-                    [response.data.message || 'Failed to upload dealers'];
+                    [response.data.message || 'Failed to upload stock allocations'];
                 const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
                 setErrors(errList);
                 showGlobalError(errList, 'Upload Failed');
@@ -291,7 +338,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             const backendErrors =
                 error.response?.data?.data?.errors ||
                 error.response?.data?.errors ||
-                [error.response?.data?.message || error.message || 'Error uploading dealers'];
+                [error.response?.data?.message || error.message || 'Error uploading stock allocations'];
             const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
             setErrors(errList);
             showGlobalError(errList, 'Upload Error');
@@ -302,9 +349,9 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
 
     return (
         <div className="modal-overlay">
-            <div className="modal-content" style={{ maxWidth: '620px' }}>
+            <div className="modal-content" style={{ maxWidth: '680px' }}>
                 <div className="modal-header">
-                    <h3>Upload Dealers via Excel</h3>
+                    <h3>Bulk Device / SIM Stock Allocation via Excel</h3>
                     <button className="close-btn" onClick={onClose} disabled={loading}>
                         &times;
                     </button>
@@ -330,26 +377,35 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                             }}
                         >
                             <li>
-                                Required columns:{' '}
-                                <strong>Dealer Name | Mobile No | Location | Enrolled Date | Installation Status</strong>
+                                This upload is for <strong>bulk stock allocation to existing dealers</strong>. Dealers must already exist in Dealer Management.
                             </li>
                             <li>
-                                <strong>Notes</strong> is optional.
+                                Required header columns:{' '}
+                                <strong>Dealer Name | Allocation Type</strong> (values: <em>device / sim / both</em>).
                             </li>
                             <li>
-                                <strong>Software</strong> is optional and must match a supported software value when provided.
+                                If allocating devices: <strong>Device Date</strong> and <strong>IMEI No</strong> are required.
                             </li>
                             <li>
-                                Installation Status must be: <strong>Onsite / Offsite / Not Willing</strong>
+                                If allocating SIMs: <strong>SIM Date</strong> and <strong>SIM Number</strong> are required.
                             </li>
-                            <li>Dates must not be future dates.</li>
+                            <li>
+                                Optional columns: <strong>Device Amount | Device Notes | SIM Amount | SIM Notes | Software | Total Amount | Amount Paid | Payment Mode | Transaction ID</strong>.
+                            </li>
+                            <li>
+                                For <strong>Not Willing</strong> dealers, Device Amount and/or SIM Amount are mandatory and Total Amount must be &gt; 0.
+                            </li>
+                            <li>
+                                <strong>Payment Mode</strong> (Cash, UPI, Bank Transfer, Card, Other) is required if payment is made. <strong>Transaction ID</strong> is required for non-cash payments.
+                            </li>
+                            <li>If any row fails validation, the entire Excel upload is rejected without partial allocations.</li>
                         </ul>
                         <button
                             className="btn btn-outline"
                             onClick={downloadTemplate}
                             style={{ marginTop: '1rem', fontSize: '0.875rem' }}
                         >
-                            <Download size={14} /> Download Sample Template
+                            <Download size={14} /> Download Sample Allocation Template
                         </button>
                     </div>
 

@@ -3,6 +3,7 @@
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/validation.php';
+require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 
@@ -12,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
-authenticate();
+$currentUser = authenticate();
 requirePermission('customers.add');
 
 if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
@@ -1018,6 +1019,7 @@ foreach ($dataRows as $idx => $row) {
     }
 
     $validRows[] = [
+        '_row_number' => $rowNumber,
         // Customer
         'platform_id' => $platformId,
         'username' => $username,
@@ -1339,6 +1341,14 @@ try {
                 }
             }
         }
+
+        $customerSnapshot = customerAuditSnapshot($conn, $customerId);
+        $customerSnapshot['_audit'] = [
+            'source' => 'Excel Import',
+            'file' => $file['name'],
+            'row' => $row['_row_number'] ?? null
+        ];
+        writeAuditSnapshot($conn, $customerId, 'Customer', 'Create', null, $customerSnapshot, $currentUser);
     }
 
     $custStmt->close();

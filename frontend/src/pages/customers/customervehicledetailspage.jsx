@@ -109,6 +109,8 @@ const CustomerVehicleDetailsPage = () => {
         location.pathname.endsWith('/edit') ||
         location.pathname.includes('/edit/');
 
+    const [appendVehicle, setAppendVehicle] = useState(false);
+
 
     /*
     |--------------------------------------------------------------------------
@@ -122,9 +124,14 @@ const CustomerVehicleDetailsPage = () => {
     |--------------------------------------------------------------------------
     */
 
-    const isEditMode =
-        Boolean(vehicleRecordId) ||
-        routeLooksLikeEdit;
+    const addNewVehicleMode =
+        !routeLooksLikeEdit &&
+        (appendVehicle || new URLSearchParams(location.search).get('mode') === 'add');
+
+    const editVehicleMode =
+        !addNewVehicleMode && (Boolean(vehicleRecordId) || routeLooksLikeEdit);
+
+    const isEditMode = editVehicleMode;
 
 
     const isDeviceModelLocked =
@@ -146,7 +153,6 @@ const CustomerVehicleDetailsPage = () => {
         customerId
             ? `customer_creation_${customerId}`
             : 'customer_creation_new';
-
 
     /*
     |--------------------------------------------------------------------------
@@ -628,6 +634,25 @@ const CustomerVehicleDetailsPage = () => {
         const stored =
             getStoredCustomerData();
 
+        const requestedAddNewVehicle =
+            !routeLooksLikeEdit &&
+            (Boolean(stored.append_vehicle) || new URLSearchParams(location.search).get('mode') === 'add');
+
+        if (requestedAddNewVehicle) {
+            setAppendVehicle(true);
+            setVehicleRecordId(null);
+            setExistingVehicleImei('');
+            setExistingVehicleSim1('');
+            setExistingVehicleSim2('');
+            setLoadedVehicleFromApi(false);
+            setImeiLookupStatus('');
+            setImeiLookupMessage('');
+            setForm({ ...initialForm });
+            return;
+        }
+
+        setAppendVehicle(false);
+
 
         /*
         |--------------------------------------------------------------------------
@@ -899,6 +924,20 @@ const CustomerVehicleDetailsPage = () => {
                 setLoading(true);
 
                 setError('');
+
+                const storedCustomerData = getStoredCustomerData();
+                const openingAddNewVehicle =
+                    !routeLooksLikeEdit &&
+                    (Boolean(storedCustomerData.append_vehicle) || new URLSearchParams(location.search).get('mode') === 'add');
+
+                setAppendVehicle(openingAddNewVehicle);
+                if (openingAddNewVehicle) {
+                    setVehicleRecordId(null);
+                    setExistingVehicleImei('');
+                    setExistingVehicleSim1('');
+                    setExistingVehicleSim2('');
+                    setForm({ ...initialForm });
+                }
 
 
                 const masterData =
@@ -1654,6 +1693,8 @@ const CustomerVehicleDetailsPage = () => {
                     customer_id:
                         Number(customerId),
 
+                    append_vehicle: false,
+
                     vehicle_record_id:
                         savedRecordId ||
                         vehicleRecordId ||
@@ -1789,6 +1830,9 @@ const CustomerVehicleDetailsPage = () => {
 
                 customer_id:
                     Number(customerId),
+
+                append_vehicle:
+                    appendVehicle,
 
                 vehicle_no:
                     form.vehicle_no.trim(),

@@ -22,15 +22,14 @@ const DeviceAlertPage = () => {
     const { hasPermission } = useAuth();
     const [owners, setOwners] = useState([]);
     const [ownerOptions, setOwnerOptions] = useState([]);
+    
+    const [deviceModels, setDeviceModels] = useState([]);
+    const [simTypes, setSimTypes] = useState([]);
+
     const [filters, setFilters] = useState(emptyTableFilters);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-
-    const triggerError = (msg) => {
-        setError(msg);
-        showGlobalError(msg);
-    };
     const [success, setSuccess] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [editingConfigId, setEditingConfigId] = useState(null);
@@ -39,10 +38,18 @@ const DeviceAlertPage = () => {
     const [form, setForm] = useState({
         owner_type: 'dealer',
         owner_id: '',
+        asset_type: 'device',
+        device_model_id: '',
+        sim_type_id: '',
         minimum_device_count: '',
         minimum_sim_count: '',
         notes: '',
     });
+
+    const triggerError = (msg) => {
+        setError(msg);
+        showGlobalError(msg);
+    };
 
     const canEdit = hasPermission('device_alert.edit');
     const canDelete = hasPermission('device_alert.delete');
@@ -79,6 +86,19 @@ const DeviceAlertPage = () => {
             console.error('Failed to fetch owner list', err);
         }
     };
+    
+    const fetchModelsAndSims = async () => {
+        try {
+            const [modelsRes, simsRes] = await Promise.all([
+                api.get('/device_types/list.php'),
+                api.get('/sim_types/list.php')
+            ]);
+            setDeviceModels((modelsRes.data.data?.device_types || []).map(t => ({ value: String(t.id), label: t.device_type })));
+            setSimTypes((simsRes.data.data?.sim_types || []).map(t => ({ value: String(t.id), label: t.sim_type })));
+        } catch (err) {
+            console.error('Failed to fetch device models or sim types', err);
+        }
+    };
 
     const fetchAlerts = async () => {
         try {
@@ -99,6 +119,7 @@ const DeviceAlertPage = () => {
 
     useEffect(() => {
         fetchOwnerOptions();
+        fetchModelsAndSims();
         fetchAlerts();
     }, []);
 
@@ -131,6 +152,9 @@ const DeviceAlertPage = () => {
         setForm({
             owner_type: 'dealer',
             owner_id: '',
+            asset_type: 'device',
+            device_model_id: '',
+            sim_type_id: '',
             minimum_device_count: '',
             minimum_sim_count: '',
             notes: '',
@@ -143,8 +167,11 @@ const DeviceAlertPage = () => {
         setForm({
             owner_type: owner.owner_type,
             owner_id: String(owner.owner_id),
-            minimum_device_count: String(owner.minimum_device_count),
-            minimum_sim_count: String(owner.minimum_sim_count),
+            asset_type: owner.asset_type || 'device',
+            device_model_id: owner.device_model_id ? String(owner.device_model_id) : '',
+            sim_type_id: owner.sim_type_id ? String(owner.sim_type_id) : '',
+            minimum_device_count: owner.minimum_device_count !== null && owner.minimum_device_count !== undefined ? String(owner.minimum_device_count) : '',
+            minimum_sim_count: owner.minimum_sim_count !== null && owner.minimum_sim_count !== undefined ? String(owner.minimum_sim_count) : '',
             notes: owner.notes || '',
         });
         setError('');
@@ -179,23 +206,26 @@ const DeviceAlertPage = () => {
             return;
         }
 
-        if (!isWholeNumberString(deviceCountValue)) {
-            triggerError('Minimum device count must be a valid number.');
+        if (['device', 'both'].includes(form.asset_type) && !form.device_model_id) {
+            triggerError('Please select a device model.');
             setSuccess('');
             return;
         }
 
-        if (!isWholeNumberString(simCountValue)) {
-            triggerError('Minimum SIM count must be a valid number.');
+        if (['sim', 'both'].includes(form.asset_type) && !form.sim_type_id) {
+            triggerError('Please select a SIM type.');
             setSuccess('');
             return;
         }
 
-        const minimumDeviceCount = Number(deviceCountValue);
-        const minimumSimCount = Number(simCountValue);
+        if (['device', 'both'].includes(form.asset_type) && (!isWholeNumberString(deviceCountValue) || Number(deviceCountValue) <= 0)) {
+            triggerError('Minimum device count must be a positive number.');
+            setSuccess('');
+            return;
+        }
 
-        if (minimumDeviceCount < 0 || minimumSimCount < 0) {
-            triggerError('Minimum counts cannot be negative.');
+        if (['sim', 'both'].includes(form.asset_type) && (!isWholeNumberString(simCountValue) || Number(simCountValue) <= 0)) {
+            triggerError('Minimum SIM count must be a positive number.');
             setSuccess('');
             return;
         }
@@ -205,20 +235,20 @@ const DeviceAlertPage = () => {
             setError('');
             setSuccess('');
 
-            const payload = isEditing && editingConfigId
-                ? {
-                    id: Number(editingConfigId),
-                    minimum_device_count: minimumDeviceCount,
-                    minimum_sim_count: minimumSimCount,
-                    notes: form.notes,
-                }
-                : {
-                    owner_type: form.owner_type,
-                    owner_id: Number(form.owner_id),
-                    minimum_device_count: minimumDeviceCount,
-                    minimum_sim_count: minimumSimCount,
-                    notes: form.notes,
-                };
+            const payload = {
+                owner_type: form.owner_type,
+                owner_id: Number(form.owner_id),
+                asset_type: form.asset_type,
+                device_model_id: ['device', 'both'].includes(form.asset_type) ? Number(form.device_model_id) : null,
+                sim_type_id: ['sim', 'both'].includes(form.asset_type) ? Number(form.sim_type_id) : null,
+                minimum_device_count: ['device', 'both'].includes(form.asset_type) ? Number(deviceCountValue) : 0,
+                minimum_sim_count: ['sim', 'both'].includes(form.asset_type) ? Number(simCountValue) : 0,
+                notes: form.notes,
+            };
+            
+            if (isEditing && editingConfigId) {
+                payload.id = Number(editingConfigId);
+            }
 
             const response = await api.post('/device_alert/update.php', payload);
 
@@ -247,7 +277,7 @@ const DeviceAlertPage = () => {
     }, [owners]);
 
     const filteredOwners = filterTableRows(owners, filters, {
-        searchKeys: ['owner_name', 'notes']
+        searchKeys: ['owner_name', 'notes', 'device_model_name', 'sim_type_name']
     });
 
     const {
@@ -296,28 +326,65 @@ const DeviceAlertPage = () => {
                             </small>
                         )}
                     </div>
-
+                    
                     <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Minimum Device Count *</label>
-                        <input
-                            type="text"
+                        <label className="form-label">Asset Type *</label>
+                        <select
                             className="form-control"
-                            value={form.minimum_device_count}
-                            onChange={(e) => setForm({ ...form, minimum_device_count: e.target.value })}
-                            placeholder="e.g. 5"
-                        />
+                            value={form.asset_type}
+                            onChange={(e) => {
+                                const assetType = e.target.value;
+                                setForm({
+                                    ...form,
+                                    asset_type: assetType,
+                                    device_model_id: ['device', 'both'].includes(assetType) ? form.device_model_id : '',
+                                    sim_type_id: ['sim', 'both'].includes(assetType) ? form.sim_type_id : '',
+                                    minimum_device_count: ['device', 'both'].includes(assetType) ? form.minimum_device_count : '',
+                                    minimum_sim_count: ['sim', 'both'].includes(assetType) ? form.minimum_sim_count : '',
+                                });
+                            }}
+                        >
+                            <option value="device">Device</option>
+                            <option value="sim">SIM</option>
+                            <option value="both">Both</option>
+                        </select>
                     </div>
 
-                    <div className="form-group" style={{ margin: 0 }}>
-                        <label className="form-label">Minimum SIM Count *</label>
-                        <input
-                            type="text"
-                            className="form-control"
-                            value={form.minimum_sim_count}
-                            onChange={(e) => setForm({ ...form, minimum_sim_count: e.target.value })}
-                            placeholder="e.g. 5"
-                        />
-                    </div>
+                    {['device', 'both'].includes(form.asset_type) && (
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label className="form-label">Device Model *</label>
+                            <SearchableDropdown
+                                options={deviceModels}
+                                value={form.device_model_id}
+                                onChange={(value) => setForm({ ...form, device_model_id: value })}
+                                placeholder="Select device model..."
+                            />
+                        </div>
+                    )}
+                    {['sim', 'both'].includes(form.asset_type) && (
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label className="form-label">SIM Type *</label>
+                            <SearchableDropdown
+                                options={simTypes}
+                                value={form.sim_type_id}
+                                onChange={(value) => setForm({ ...form, sim_type_id: value })}
+                                placeholder="Select SIM type..."
+                            />
+                        </div>
+                    )}
+
+                    {['device', 'both'].includes(form.asset_type) && (
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label className="form-label">Minimum Device Count *</label>
+                            <input type="text" className="form-control" value={form.minimum_device_count} onChange={(e) => setForm({ ...form, minimum_device_count: e.target.value })} placeholder="e.g. 5" />
+                        </div>
+                    )}
+                    {['sim', 'both'].includes(form.asset_type) && (
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label className="form-label">Minimum SIM Count *</label>
+                            <input type="text" className="form-control" value={form.minimum_sim_count} onChange={(e) => setForm({ ...form, minimum_sim_count: e.target.value })} placeholder="e.g. 5" />
+                        </div>
+                    )}
                 </div>
 
                 <div className="form-group" style={{ marginTop: '1rem', marginBottom: '1rem' }}>
@@ -378,42 +445,51 @@ const DeviceAlertPage = () => {
                             <tr>
                                 <th>Owner</th>
                                 <th>Type</th>
+                                <th>Asset</th>
+                                <th>Device Model</th>
                                 <th>Min Device</th>
-                                <th>Available Device</th>
-                                <th>Device Status</th>
+                                <th>Device Available</th>
+                                <th>SIM Type</th>
                                 <th>Min SIM</th>
-                                <th>Available SIM</th>
-                                <th>SIM Status</th>
+                                <th>SIM Available</th>
+                                <th>Status</th>
                                 <th style={{ textAlign: 'right' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="9" className="text-center">Loading configured owners...</td>
+                                    <td colSpan="10" className="text-center">Loading configured owners...</td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="9" className="text-center empty-state">No records found for the selected filters.</td>
+                                    <td colSpan="10" className="text-center empty-state">No records found for the selected filters.</td>
                                 </tr>
                             ) : (
                                 paginatedItems.map((owner) => (
-                                    <tr key={`${owner.owner_type}-${owner.owner_id}`}>
+                                    <tr key={owner.id}>
                                         <td className="truncate-cell" title={owner.owner_name} style={{ fontWeight: 600 }}>{owner.owner_name}</td>
                                         <td>
                                             <span className={`badge ${owner.owner_type === 'dealer' ? 'badge-primary' : 'badge-info'}`}>
                                                 {owner.owner_type === 'dealer' ? 'Dealer' : 'Technician'}
                                             </span>
                                         </td>
-                                        <td>{owner.minimum_device_count}</td>
-                                        <td>{owner.available_device_count}</td>
+                                        <td>{owner.asset_type === 'device' ? 'Device' : owner.asset_type === 'sim' ? 'SIM' : 'Both'}</td>
+                                        <td>{owner.device_model_name || '-'}</td>
+                                        <td>{owner.asset_type !== 'sim' ? owner.minimum_device_count : '-'}</td>
+                                        <td>{owner.asset_type !== 'sim' ? owner.device_available_count : '-'}</td>
+                                        <td>{owner.sim_type_name || '-'}</td>
+                                        <td>{owner.asset_type !== 'device' ? owner.minimum_sim_count : '-'}</td>
+                                        <td>{owner.asset_type !== 'device' ? owner.sim_available_count : '-'}</td>
                                         <td>
-                                            <span className={`badge ${getStatusClass(owner.device_status)}`}>{owner.device_status}</span>
-                                        </td>
-                                        <td>{owner.minimum_sim_count}</td>
-                                        <td>{owner.available_sim_count}</td>
-                                        <td>
-                                            <span className={`badge ${getStatusClass(owner.sim_status)}`}>{owner.sim_status}</span>
+                                            {owner.asset_type === 'both' ? (
+                                                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                                    <span className={`badge ${getStatusClass(owner.device_status)}`}>Device: {owner.device_status}</span>
+                                                    <span className={`badge ${getStatusClass(owner.sim_status)}`}>SIM: {owner.sim_status}</span>
+                                                </div>
+                                            ) : (
+                                                <span className={`badge ${getStatusClass(owner.status)}`}>{owner.status}</span>
+                                            )}
                                         </td>
                                         <td>
                                             <div className="action-buttons" style={{ justifyContent: 'flex-end' }}>
@@ -465,7 +541,30 @@ const DeviceAlertPage = () => {
                     </p>
                 </Modal>
             )}
-            {viewingOwner && <RecordViewModal isOpen onClose={() => setViewingOwner(null)} title="Alert Configuration Details" record={viewingOwner} fetchRecord={async (row) => (await api.get('/device_alert/list.php')).data.data.owners.find((owner) => String(owner.owner_type) === String(row.owner_type) && String(owner.owner_id) === String(row.owner_id)) || row} fields={[{ label: 'Owner', key: 'owner_name' }, { label: 'Owner Type', key: 'owner_type' }, { label: 'Minimum Device Count', key: 'minimum_device_count' }, { label: 'Available Device Count', key: 'available_device_count' }, { label: 'Minimum SIM Count', key: 'minimum_sim_count' }, { label: 'Available SIM Count', key: 'available_sim_count' }, { label: 'Device Status', key: 'device_status' }, { label: 'SIM Status', key: 'sim_status' }, { label: 'Notes', key: 'notes' }]} />}
+            {viewingOwner && (
+                <RecordViewModal 
+                    isOpen 
+                    onClose={() => setViewingOwner(null)} 
+                    title="Alert Configuration Details" 
+                    record={viewingOwner} 
+                    fetchRecord={async (row) => (await api.get('/device_alert/list.php')).data.data.owners.find((owner) => String(owner.id) === String(row.id)) || row} 
+                    fields={[
+                        { label: 'Owner', key: 'owner_name' }, 
+                        { label: 'Owner Type', key: 'owner_type' }, 
+                        { label: 'Asset Type', key: 'asset_type' }, 
+                        { label: 'Device Model', key: 'device_model_name' }, 
+                        { label: 'SIM Type', key: 'sim_type_name' }, 
+                        { label: 'Minimum Device Count', key: 'minimum_device_count' }, 
+                        { label: 'Device Available Count', key: 'device_available_count' }, 
+                        { label: 'Minimum SIM Count', key: 'minimum_sim_count' }, 
+                        { label: 'SIM Available Count', key: 'sim_available_count' }, 
+                        { label: 'Status', key: 'status' }, 
+                        { label: 'Device Status', key: 'device_status' }, 
+                        { label: 'SIM Status', key: 'sim_status' }, 
+                        { label: 'Notes', key: 'notes' }
+                    ]} 
+                />
+            )}
         </div>
     );
 };

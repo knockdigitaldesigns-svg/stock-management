@@ -241,7 +241,13 @@ const PendingPayments = () => {
                             type="date"
                             className="form-control"
                             value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
+                            onChange={(e) => {
+                                if (dateTo && e.target.value > dateTo) {
+                                    alert('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                setDateFrom(e.target.value);
+                            }}
                         />
                     </div>
 
@@ -252,7 +258,13 @@ const PendingPayments = () => {
                             type="date"
                             className="form-control"
                             value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
+                            onChange={(e) => {
+                                if (dateFrom && e.target.value && e.target.value < dateFrom) {
+                                    alert('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                setDateTo(e.target.value);
+                            }}
                         />
                     </div>
 

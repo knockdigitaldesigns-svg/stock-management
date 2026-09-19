@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
-import { formatDate } from '../../../utils/date';
 import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
-    const getStatusLabel = (item) => item?.status_label || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
+    const getStatusLabel = (item) => item?.status_label || item?.sim_status || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
     const [formData, setFormData] = useState({
         technician_name: technician?.technician_name || '',
         mobile_no: technician?.mobile_no || '',
@@ -49,8 +48,9 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
             return triggerError('All required fields must be filled.');
         }
 
-        if (!/^[0-9+\s-]{10,15}$/.test(formData.mobile_no)) {
-            return triggerError('Mobile number is invalid.');
+        const digitsOnly = formData.mobile_no.replace(/\D/g, '');
+        if (digitsOnly.length !== 10) {
+            return triggerError('Mobile No must be exactly 10 digits.');
         }
 
         setLoading(true);
@@ -101,7 +101,7 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
 
                 <div className="form-group">
                     <label className="form-label">Mobile No *</label>
-                    <input type="text" className="form-control" value={formData.mobile_no} onChange={(e) => setFormData((prev) => ({ ...prev, mobile_no: e.target.value }))} maxLength={15} required />
+                    <input type="text" className="form-control" value={formData.mobile_no} onChange={(e) => { const val = e.target.value.replace(/\D/g, ''); setFormData((prev) => ({ ...prev, mobile_no: val })); }} maxLength={10} placeholder="Enter 10 digit mobile no" required />
                 </div>
 
                 <div className="form-group">
@@ -119,9 +119,9 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={technician?.payment_status || 'Not Paid'} readOnly /></div>
                 <hr />
                 <h4>Allocated Devices (Total: {stockSummary.total_device || 0}, Used: {stockSummary.used_device || 0}, Available: {stockSummary.available_device || 0})</h4>
-                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI Number</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{formatDate(item.allocation_date)}</td><td>{getStatusLabel(item)}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
+                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Software</th><th>Device Status</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.allocation_id || item.id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{item.software || '-'}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
                 <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
-                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM Number</th><th>SIM Type</th><th>SIM Validity</th><th>Allocation Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{item.sim_validity_months ? `${item.sim_validity_months} Months` : '-'}</td><td>{formatDate(item.allocation_date)}</td><td>{getStatusLabel(item)}</td><td>{item.notes || '-'}</td></tr>)}</tbody></table></div>}
+                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>SIM Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id || item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
             </form>
         </Modal>
     );

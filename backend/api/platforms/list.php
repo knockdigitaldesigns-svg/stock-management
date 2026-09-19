@@ -14,7 +14,9 @@ requireAnyPermission([
     'platforms.view',
     'customers.view',
     'dealers.view',
-    'technicians.view'
+    'technicians.view',
+    'stock.view',
+    'stock_transfer.view'
 ]);
 
 $conn = (new Database())->getConnection();

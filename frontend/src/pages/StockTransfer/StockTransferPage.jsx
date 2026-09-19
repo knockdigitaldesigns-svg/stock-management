@@ -1,12 +1,13 @@
-﻿import { useState, useCallback } from 'react';
-import { ArrowLeftRight } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { ArrowLeftRight, Eye, Edit, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
-import { useEffect } from 'react';
+import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
+import Modal from '../../components/Modal/Modal';
 
 const emptyFilters = () => ({
     search: '',
@@ -43,6 +44,54 @@ const StockTransferPage = () => {
     const [toOwnerId, setToOwnerId]       = useState('');
     const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [loadingOwners, setLoadingOwners] = useState(false);
+
+    // --------------------------------------------------
+    // ROW ACTIONS STATE
+    // --------------------------------------------------
+    const [viewTarget, setViewTarget]     = useState(null);
+    const [editTarget, setEditTarget]     = useState(null);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [editNotes, setEditNotes]       = useState('');
+
+    const handleDeleteTransfer = async () => {
+        if (!deleteTarget) return;
+        setSaving(true);
+        try {
+            const res = await api.post('/stock_transfer/delete.php', { id: deleteTarget.id });
+            if (res.data?.success) {
+                setDeleteTarget(null);
+                fetchTransfers();
+            } else {
+                showGlobalError(res.data?.message || 'Failed to delete transfer');
+            }
+        } catch (err) {
+            showGlobalError(err.response?.data?.message || 'Error deleting transfer');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editTarget || !editTarget.transfer_date) return;
+        setSaving(true);
+        try {
+            const res = await api.post('/stock_transfer/update.php', { 
+                id: editTarget.id,
+                transfer_date: editTarget.transfer_date,
+                notes: editNotes
+            });
+            if (res.data?.success) {
+                setEditTarget(null);
+                fetchTransfers();
+            } else {
+                showGlobalError(res.data?.message || 'Failed to update transfer');
+            }
+        } catch (err) {
+            showGlobalError(err.response?.data?.message || 'Error updating transfer');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     // --------------------------------------------------
     // FETCH TRANSFERS
@@ -302,7 +351,13 @@ const StockTransferPage = () => {
                             type="date"
                             className="form-control"
                             value={filters.dateFrom}
-                            onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))}
+                            onChange={e => {
+                                if (filters.dateTo && e.target.value > filters.dateTo) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                setFilters(f => ({ ...f, dateFrom: e.target.value }));
+                            }}
                         />
                     </div>
 
@@ -314,7 +369,13 @@ const StockTransferPage = () => {
                             type="date"
                             className="form-control"
                             value={filters.dateTo}
-                            onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))}
+                            onChange={e => {
+                                if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                setFilters(f => ({ ...f, dateTo: e.target.value }));
+                            }}
                         />
                     </div>
 
@@ -378,7 +439,17 @@ const StockTransferPage = () => {
                                                 {row.new_status || 'Allocated'}
                                             </span>
                                         </td>
-                                        <td>-</td>
+                                        <td>
+                                            <div className="actions-cell">
+                                                <button className="icon-btn view" title="View" onClick={() => setViewTarget(row)}><Eye size={16} /></button>
+                                                {hasPermission('stock_transfer.edit') && (
+                                                    <button className="icon-btn edit" title="Edit" onClick={() => { setEditTarget(row); setEditNotes(row.notes || ''); }}><Edit size={16} /></button>
+                                                )}
+                                                {hasPermission('stock_transfer.delete') && (
+                                                    <button className="icon-btn delete" title="Delete" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>
+                                                )}
+                                            </div>
+                                        </td>
                                     </tr>
                                 ))
                             )}
@@ -602,6 +673,85 @@ const StockTransferPage = () => {
                     </div>
                 </div>
             )}
+            {/* ================================================================
+                ACTION MODALS (VIEW, EDIT, DELETE)
+            ================================================================ */}
+            <RecordViewModal
+                isOpen={Boolean(viewTarget)}
+                onClose={() => setViewTarget(null)}
+                title="Transfer Details"
+                record={viewTarget}
+                fields={[
+                    { label: "Original Allocated Person", key: "from_owner_name" },
+                    { label: "Owner Type", key: "from_owner_type", format: (val) => val ? val.charAt(0).toUpperCase() + val.slice(1) : '-' },
+                    { label: "Device / IMEI No", key: "imei_no" },
+                    { label: "SIM No", key: "sim_no" },
+                    { label: "Transfer To", key: "to_owner_name" },
+                    { label: "Transfer Date", key: "transfer_date", format: (val) => val ? formatDate(val) : '-' },
+                    { label: "Status", key: "new_status", format: (val) => val || 'Allocated' },
+                    { label: "Transferred By", key: "transferred_by" },
+                    { label: "Notes", key: "notes" }
+                ]}
+            />
+
+            <Modal
+                isOpen={Boolean(deleteTarget)}
+                onClose={() => setDeleteTarget(null)}
+                title="Delete Stock Transfer"
+                maxWidth="400px"
+                footer={
+                    <>
+                        <button type="button" className="btn btn-outline" onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</button>
+                        <button type="button" className="btn btn-danger" onClick={handleDeleteTransfer} disabled={saving}>{saving ? 'Deleting...' : 'Delete'}</button>
+                    </>
+                }
+            >
+                <p>Are you sure you want to delete this stock transfer?</p>
+                {deleteTarget && (
+                    <div style={{ marginTop: '10px', fontSize: '14px', color: '#64748b' }}>
+                        <strong>{deleteTarget.imei_no !== '-' ? deleteTarget.imei_no : deleteTarget.sim_no}</strong> transferred to <strong>{deleteTarget.to_owner_name}</strong>
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                isOpen={Boolean(editTarget)}
+                onClose={() => setEditTarget(null)}
+                title="Edit Stock Transfer"
+                maxWidth="500px"
+                footer={
+                    <>
+                        <button type="button" className="btn btn-outline" onClick={() => setEditTarget(null)} disabled={saving}>Cancel</button>
+                        <button type="button" className="btn btn-primary" onClick={handleSaveEdit} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                    </>
+                }
+            >
+                {editTarget && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div className="form-group">
+                            <label className="form-label">Transfer Date *</label>
+                            <input
+                                type="date"
+                                className="form-control"
+                                value={editTarget.transfer_date || ''}
+                                onChange={e => setEditTarget({ ...editTarget, transfer_date: e.target.value })}
+                                disabled={saving}
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Notes</label>
+                            <textarea
+                                className="form-control"
+                                rows="3"
+                                placeholder="Enter notes..."
+                                value={editNotes}
+                                onChange={e => setEditNotes(e.target.value)}
+                                disabled={saving}
+                            />
+                        </div>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 };

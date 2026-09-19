@@ -112,6 +112,22 @@ const PaymentDetailsPart2Page = () => {
             setLoading(true);
             setError('');
 
+            const stored = JSON.parse(
+                sessionStorage.getItem(storageKey) || '{}'
+            );
+
+            if (stored.new_vehicle_flow || stored.append_vehicle) {
+                setIsEditMode(false);
+                const storedStep4 = stored.step4 || {};
+                setTotalSaleAmount(normalizeCurrency(storedStep4.totalSaleAmount));
+                setForm({
+                    ...initialForm,
+                    paymentMode: storedStep4.paymentMode || '',
+                    transactionId: storedStep4.transactionId || ''
+                });
+                return;
+            }
+
             const response = await api.get(
                 `/customers/details.php?customer_id=${encodeURIComponent(
                     customerId
@@ -135,10 +151,6 @@ const PaymentDetailsPart2Page = () => {
 
             const cashCollection =
                 response.data?.data?.cash_collection || {};
-
-            const stored = JSON.parse(
-                sessionStorage.getItem(storageKey) || '{}'
-            );
 
             const hasStoredStep4 =
                 stored.step4 &&
@@ -526,6 +538,11 @@ const PaymentDetailsPart2Page = () => {
             const paymentPayload = {
                 customer_id:
                     Number(customerId),
+
+                vehicle_id:
+                    stored.new_vehicle_flow
+                        ? Number(stored.vehicle_record_id || 0)
+                        : 0,
 
                 /*
                  * Explicitly identify Part 2.

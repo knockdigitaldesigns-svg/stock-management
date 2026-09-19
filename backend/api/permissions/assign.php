@@ -59,6 +59,7 @@ try {
     while ($oldRow = $oldResult->fetch_assoc()) $oldPermissions[] = $oldRow['permission_key'];
     $oldStmt->close();
     if ($oldPermissions !== $permissionKeys) {
+        writeAuditSnapshot($conn, $roleId, 'Role Permissions', 'Edit', ['role_id' => $roleId, 'permissions' => $oldPermissions], ['role_id' => $roleId, 'permissions' => $permissionKeys], $currentUser);
         writeAudit($conn, $roleId, 'Role Permissions', 'Edit', 'permissions', $oldPermissions, $permissionKeys, $currentUser);
     }
     $conn->query('DELETE FROM role_permissions WHERE role_id = ' . (int) $roleId);

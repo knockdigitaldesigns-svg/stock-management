@@ -18,8 +18,8 @@ if ($search !== '') { $where[] = '(c.username LIKE ? OR c.primary_mobile_no LIKE
 if (!empty($_GET['status'])) { $where[] = 'cr.sim_status = ?'; $params[] = $_GET['status']; $types .= 's'; }
 if (isset($_GET['validity']) && $_GET['validity'] !== '') { $where[] = 'cr.validity_months = ?'; $params[] = (int)$_GET['validity']; $types .= 'i'; }
 if (!empty($_GET['date'])) { $where[] = 'ci.installation_date = ?'; $params[] = $_GET['date']; $types .= 's'; }
-if (!empty($_GET['year'])) { $where[] = 'YEAR(ci.installation_date) = ?'; $params[] = (int)$_GET['year']; $types .= 'i'; }
-if (!empty($_GET['month'])) { $where[] = 'MONTH(ci.installation_date) = ?'; $params[] = (int)$_GET['month']; $types .= 'i'; }
+if (!empty($_GET['date_from'])) { $where[] = 'ci.installation_date >= ?'; $params[] = $_GET['date_from']; $types .= 's'; }
+if (!empty($_GET['date_to'])) { $where[] = 'ci.installation_date <= ?'; $params[] = $_GET['date_to']; $types .= 's'; }
 $condition = $where ? ' WHERE ' . implode(' AND ', $where) : '';
 $countSql = "SELECT COUNT(*) AS total FROM customer_renewals cr INNER JOIN customers c ON c.id = cr.customer_id LEFT JOIN customer_vehicle_details cv ON cv.id = (SELECT id FROM customer_vehicle_details WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1) LEFT JOIN device_types dt ON dt.id = cv.device_model_id LEFT JOIN customer_installations ci ON ci.id = (SELECT id FROM customer_installations WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1)" . $condition;
 $count = $conn->prepare($countSql); $countParams = $params; renewalBind($count, $types, $countParams); $count->execute(); $total = (int)$count->get_result()->fetch_assoc()['total']; $count->close();

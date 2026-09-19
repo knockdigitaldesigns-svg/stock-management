@@ -75,12 +75,16 @@ $tables = [
         id INT AUTO_INCREMENT PRIMARY KEY,
         owner_type ENUM('dealer', 'technician') NOT NULL,
         owner_id INT NOT NULL,
+        asset_type ENUM('device', 'sim', 'both') NOT NULL DEFAULT 'device',
+        device_model_id INT DEFAULT NULL,
+        sim_type_id INT DEFAULT NULL,
+        min_count INT NOT NULL DEFAULT 0,
         minimum_device_count INT NOT NULL DEFAULT 0,
         minimum_sim_count INT NOT NULL DEFAULT 0,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY unique_stock_alert_owner (owner_type, owner_id)
+        UNIQUE KEY unique_alert_config (owner_type, owner_id, asset_type, device_model_id, sim_type_id)
     )",
     "CREATE TABLE IF NOT EXISTS device_alert_settings (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -168,6 +172,10 @@ $tables = [
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_stock_allocations_owner (owner_type, owner_id),
+        INDEX idx_stock_allocations_owner_device (owner_type, owner_id, device_id),
+        INDEX idx_stock_allocations_owner_sim (owner_type, owner_id, sim_id),
+        INDEX idx_stock_allocations_owner_created (owner_type, owner_id, created_at),
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
         FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
     )",
@@ -204,6 +212,8 @@ $tables = [
         transaction_date DATE NOT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_stock_transactions_device_owner (device_id, from_owner_type, from_owner_id, transaction_type),
+        INDEX idx_stock_transactions_sim_owner (sim_id, from_owner_type, from_owner_id, transaction_type),
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
         FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
     )",
@@ -255,6 +265,38 @@ $tables = [
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
         FOREIGN KEY (payment_id) REFERENCES customer_payments(id) ON DELETE CASCADE,
         FOREIGN KEY (installation_id) REFERENCES customer_installations(id) ON DELETE CASCADE
+    )",
+    "CREATE TABLE IF NOT EXISTS cash_collection_settlements (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        recipient_type ENUM('Technician', 'Dealer') NOT NULL,
+        recipient_id INT NOT NULL,
+        settlement_amount DECIMAL(12,2) NOT NULL,
+        outstanding_before DECIMAL(12,2) NOT NULL,
+        outstanding_after DECIMAL(12,2) NOT NULL,
+        settlement_date DATE NOT NULL,
+        payment_mode VARCHAR(50) NOT NULL,
+        transaction_id VARCHAR(100) DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        settled_by_user_id INT DEFAULT NULL,
+        settled_by_name VARCHAR(150) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_cash_settlement_recipient (recipient_type, recipient_id),
+        INDEX idx_cash_settlement_created_at (created_at)
+    )",
+    "CREATE TABLE IF NOT EXISTS cash_collection_settlement_allocations (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        settlement_id BIGINT NOT NULL,
+        collection_id INT NOT NULL,
+        customer_id INT NOT NULL,
+        amount_allocated DECIMAL(12,2) NOT NULL,
+        outstanding_before DECIMAL(12,2) NOT NULL,
+        outstanding_after DECIMAL(12,2) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_cash_settlement_collection (settlement_id, collection_id),
+        INDEX idx_cash_allocation_collection (collection_id),
+        FOREIGN KEY (settlement_id) REFERENCES cash_collection_settlements(id) ON DELETE CASCADE,
+        FOREIGN KEY (collection_id) REFERENCES customer_cash_collections(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     )",
         "CREATE TABLE IF NOT EXISTS support_questions (
             id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -328,7 +370,11 @@ $columnChecks = [
     ['users', 'updated_at', "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at"],
     ['stock_alert_settings', 'owner_type', "ALTER TABLE stock_alert_settings ADD COLUMN owner_type ENUM('dealer', 'technician') NOT NULL AFTER id"],
     ['stock_alert_settings', 'owner_id', "ALTER TABLE stock_alert_settings ADD COLUMN owner_id INT NOT NULL AFTER owner_type"],
-    ['stock_alert_settings', 'minimum_device_count', "ALTER TABLE stock_alert_settings ADD COLUMN minimum_device_count INT NOT NULL DEFAULT 0 AFTER owner_id"],
+    ['stock_alert_settings', 'asset_type', "ALTER TABLE stock_alert_settings ADD COLUMN asset_type ENUM('device', 'sim', 'both') NOT NULL DEFAULT 'device' AFTER owner_id"],
+    ['stock_alert_settings', 'device_model_id', "ALTER TABLE stock_alert_settings ADD COLUMN device_model_id INT DEFAULT NULL AFTER asset_type"],
+    ['stock_alert_settings', 'sim_type_id', "ALTER TABLE stock_alert_settings ADD COLUMN sim_type_id INT DEFAULT NULL AFTER device_model_id"],
+    ['stock_alert_settings', 'min_count', "ALTER TABLE stock_alert_settings ADD COLUMN min_count INT NOT NULL DEFAULT 0 AFTER sim_type_id"],
+    ['stock_alert_settings', 'minimum_device_count', "ALTER TABLE stock_alert_settings ADD COLUMN minimum_device_count INT NOT NULL DEFAULT 0 AFTER min_count"],
     ['stock_alert_settings', 'minimum_sim_count', "ALTER TABLE stock_alert_settings ADD COLUMN minimum_sim_count INT NOT NULL DEFAULT 0 AFTER minimum_device_count"],
     ['sims', 'sim_type', "ALTER TABLE sims ADD COLUMN sim_type VARCHAR(20) DEFAULT NULL AFTER sim_no"],
     ['sims', 'sim_validity_id', "ALTER TABLE sims ADD COLUMN sim_validity_id INT DEFAULT NULL AFTER sim_type"],
@@ -350,6 +396,8 @@ $columnChecks = [
     ['stock_allocations', 'notes', "ALTER TABLE stock_allocations ADD COLUMN notes TEXT NULL AFTER payment_mode"],
     ['stock_transactions', 'notes', "ALTER TABLE stock_transactions ADD COLUMN notes TEXT NULL AFTER transaction_date"],
     ['stock_alert_settings', 'notes', "ALTER TABLE stock_alert_settings ADD COLUMN notes TEXT NULL AFTER minimum_sim_count"],
+    ['customer_installations', 'vehicle_id', "ALTER TABLE customer_installations ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
+    ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
 ];
 
@@ -367,9 +415,49 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
 $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available'");
 $conn->query("UPDATE stock_allocations sa JOIN sims s ON s.id = sa.sim_id SET sa.sim_given_date = COALESCE(sa.sim_given_date, sa.allocation_date), sa.sim_validity_id = COALESCE(sa.sim_validity_id, s.sim_validity_id), sa.sim_status = COALESCE(sa.sim_status, 'Available') WHERE sa.sim_id IS NOT NULL");
 
+$installationCustomerSupportIndex = $conn->query("SHOW INDEX FROM customer_installations WHERE Key_name = 'idx_customer_installation_customer'");
+if (!$installationCustomerSupportIndex || $installationCustomerSupportIndex->num_rows === 0) {
+    $conn->query("ALTER TABLE customer_installations ADD INDEX idx_customer_installation_customer (customer_id)");
+}
+foreach (['uq_customer_installation_customer', 'uq_customer_installation'] as $indexName) {
+    $installationCustomerIndex = $conn->query("SHOW INDEX FROM customer_installations WHERE Key_name = '{$indexName}'");
+    if ($installationCustomerIndex && $installationCustomerIndex->num_rows > 0) {
+        $conn->query("ALTER TABLE customer_installations DROP INDEX {$indexName}");
+    }
+}
+$installationVehicleIndex = $conn->query("SHOW INDEX FROM customer_installations WHERE Key_name = 'uq_customer_installation_vehicle'");
+if (!$installationVehicleIndex || $installationVehicleIndex->num_rows === 0) {
+    $conn->query("ALTER TABLE customer_installations ADD UNIQUE KEY uq_customer_installation_vehicle (vehicle_id)");
+}
+$paymentCustomerSupportIndex = $conn->query("SHOW INDEX FROM customer_payments WHERE Key_name = 'idx_customer_payment_customer'");
+if (!$paymentCustomerSupportIndex || $paymentCustomerSupportIndex->num_rows === 0) {
+    $conn->query("ALTER TABLE customer_payments ADD INDEX idx_customer_payment_customer (customer_id)");
+}
+foreach (['uq_customer_payment_customer', 'uq_customer_payment'] as $indexName) {
+    $paymentCustomerIndex = $conn->query("SHOW INDEX FROM customer_payments WHERE Key_name = '{$indexName}'");
+    if ($paymentCustomerIndex && $paymentCustomerIndex->num_rows > 0) {
+        $conn->query("ALTER TABLE customer_payments DROP INDEX {$indexName}");
+    }
+}
+$paymentVehicleIndex = $conn->query("SHOW INDEX FROM customer_payments WHERE Key_name = 'uq_customer_payment_vehicle'");
+if (!$paymentVehicleIndex || $paymentVehicleIndex->num_rows === 0) {
+    $conn->query("ALTER TABLE customer_payments ADD UNIQUE KEY uq_customer_payment_vehicle (vehicle_id)");
+}
+
+$customerMobileIndex = $conn->query("SHOW INDEX FROM customers WHERE Key_name = 'uq_customer_primary_mobile'");
+if ($customerMobileIndex && $customerMobileIndex->num_rows > 0) {
+    $conn->query("ALTER TABLE customers DROP INDEX uq_customer_primary_mobile");
+}
+
+$conn->query("ALTER TABLE stock_alert_settings MODIFY COLUMN asset_type ENUM('device', 'sim', 'both') NOT NULL DEFAULT 'device'");
+$conn->query("UPDATE stock_alert_settings SET minimum_device_count = CASE WHEN asset_type = 'device' AND minimum_device_count = 0 THEN min_count ELSE minimum_device_count END, minimum_sim_count = CASE WHEN asset_type = 'sim' AND minimum_sim_count = 0 THEN min_count ELSE minimum_sim_count END");
 $stockAlertIndex = $conn->query("SHOW INDEX FROM stock_alert_settings WHERE Key_name = 'unique_stock_alert_owner'");
-if (!$stockAlertIndex || $stockAlertIndex->num_rows === 0) {
-    $conn->query("CREATE UNIQUE INDEX unique_stock_alert_owner ON stock_alert_settings(owner_type, owner_id)");
+if ($stockAlertIndex && $stockAlertIndex->num_rows > 0) {
+    $conn->query("ALTER TABLE stock_alert_settings DROP INDEX unique_stock_alert_owner");
+}
+$stockAlertConfigIndex = $conn->query("SHOW INDEX FROM stock_alert_settings WHERE Key_name = 'unique_alert_config'");
+if (!$stockAlertConfigIndex || $stockAlertConfigIndex->num_rows === 0) {
+    $conn->query("CREATE UNIQUE INDEX unique_alert_config ON stock_alert_settings(owner_type, owner_id, asset_type, device_model_id, sim_type_id)");
 }
 
 $uniqueMobileMigrations = [

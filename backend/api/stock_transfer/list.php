@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
@@ -79,6 +79,7 @@ $sql = "
         st.previous_status,
         st.new_status,
         st.transferred_by_user_id,
+        st.notes,
         st.created_at,
         dev.imei_no,
         s.sim_no,

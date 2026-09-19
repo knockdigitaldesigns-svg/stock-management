@@ -107,11 +107,20 @@ $isInvalidRange = (strtotime($effStart) > strtotime($effEnd));
 $effStartEsc = $conn->real_escape_string($effStart);
 $effEndEsc = $conn->real_escape_string($effEnd);
 
-$deviceWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE purchase_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
-$simWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE purchase_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
-$dealerWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE enrolled_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
-$techWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE enrolled_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
-$allocWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE allocation_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+if (empty($reqStartDate) && empty($reqEndDate)) {
+    // Return all records if no explicit dates are supplied
+    $deviceWhere = "WHERE 1=1";
+    $simWhere = "WHERE 1=1";
+    $dealerWhere = "WHERE 1=1";
+    $techWhere = "WHERE 1=1";
+    $allocWhere = "WHERE 1=1";
+} else {
+    $deviceWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE purchase_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+    $simWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE purchase_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+    $dealerWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE enrolled_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+    $techWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE enrolled_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+    $allocWhere = $isInvalidRange ? "WHERE 1=0" : "WHERE allocation_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+}
 
 // ---------------------------------------------------------
 // 3. Fetch Metrics & Data
@@ -166,7 +175,11 @@ if ($techCount && $techCount->num_rows > 0) {
     $summary['total_technicians'] = (int) $techCount->fetch_assoc()['count'];
 }
 
-$pendingPayments = $conn->query("SELECT COUNT(*) as count FROM stock_allocations " . ($isInvalidRange ? "WHERE 1=0" : "WHERE payment_status != 'Paid' AND allocation_date BETWEEN '$effStartEsc' AND '$effEndEsc'"));
+$pendingPaymentsWhere = "WHERE payment_status != 'Paid'";
+if (!empty($reqStartDate) || !empty($reqEndDate)) {
+    $pendingPaymentsWhere .= $isInvalidRange ? " AND 1=0" : " AND allocation_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
+}
+$pendingPayments = $conn->query("SELECT COUNT(*) as count FROM stock_allocations $pendingPaymentsWhere");
 if ($pendingPayments && $pendingPayments->num_rows > 0) {
     $summary['pending_payments'] = (int) $pendingPayments->fetch_assoc()['count'];
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
@@ -13,22 +13,22 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
     const [errors, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
-    const [validities, setValidities] = useState([]);
+    // const [validities, setValidities] = useState([]);
 
-    useEffect(() => {
-        api.get('/sim_validities/list.php')
-            .then((response) => setValidities(response.data.data?.validities || []))
-            .catch(() => {
-                const msg = 'Unable to load SIM validities.';
-                setErrors([msg]);
-                showGlobalError(msg);
-            });
-    }, []);
+    // useEffect(() => {
+    //     api.get('/sim_validities/list.php')
+    //         .then((response) => setValidities(response.data.data?.validities || []))
+    //         .catch(() => {
+    //             const msg = 'Unable to load SIM validities.';
+    //             setErrors([msg]);
+    //             showGlobalError(msg);
+    //         });
+    // }, []);
 
     const downloadTemplate = () => {
         const ws = XLSX.utils.json_to_sheet([
-            { "Purchase Date": "01-10-2023", "SIM No": "9876543210", "SIM Type": "Voice", "SIM Validity": 12, "Notes": "" },
-            { "Purchase Date": "02-10-2023", "SIM No": "1234567890123", "SIM Type": "Non Voice", "SIM Validity": 24, "Notes": "" }
+            { "Purchase Date": "01-10-2023", "SIM No": "9876543210", "SIM Type": "Voice", "Notes": "" },
+            { "Purchase Date": "02-10-2023", "SIM No": "1234567890123", "SIM Type": "Non Voice", "Notes": "" }
         ]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Template");
@@ -78,8 +78,8 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     const purchaseDate = row["Purchase Date"];
                     const simNo = row["SIM No"]?.toString().replace(/\D/g, '');
                     const simType = row["SIM Type"]?.toString().trim();
-                    const validityMonths = row["SIM Validity"]?.toString().trim();
-                    const validity = validities.find((item) => String(item.months) === validityMonths);
+                    // const validityMonths = row["SIM Validity"]?.toString().trim();
+                    // const validity = validities.find((item) => String(item.months) === validityMonths);
                     const notes = row["Notes"]?.toString().trim() || '';
                     const parsedDate = parseDate(purchaseDate);
 
@@ -90,11 +90,11 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     else if (!simRegex.test(simNo)) validationErrors.push(`Row ${rowNum}: SIM No must contain exactly 10 or 13 digits.`);
                     else if (seenSims.has(simNo)) validationErrors.push(`Row ${rowNum}: Duplicate SIM No inside Excel (${simNo}).`);
                     if (!['Voice', 'Non Voice'].includes(simType)) validationErrors.push(`Row ${rowNum}: SIM Type must be Voice or Non Voice.`);
-                    if (!validity) validationErrors.push(`Row ${rowNum}: SIM validity ${validityMonths || ''} months does not exist.`);
+                    // if (!validity) validationErrors.push(`Row ${rowNum}: SIM validity ${validityMonths || ''} months does not exist.`);
                     
                     if (simNo) seenSims.add(simNo);
 
-                    if (purchaseDate && simNo && simRegex.test(simNo) && validity && ['Voice', 'Non Voice'].includes(simType)) {
+                    if (purchaseDate && simNo && simRegex.test(simNo) && ['Voice', 'Non Voice'].includes(simType)) {
                         let normalizedDate = parsedDate;
                         if (purchaseDate.includes('/')) {
                             const [m, d, y] = purchaseDate.split('/');
@@ -105,7 +105,7 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                             purchase_date: normalizedDate,
                             sim_no: simNo,
                             sim_type: simType,
-                            sim_validity_id: validity.id,
+                            // sim_validity_id: validity.id,
                             notes
                         });
                     }
@@ -154,7 +154,7 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     <div className="info-box" style={{ backgroundColor: '#f8fafc', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem' }}>
                         <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>Instructions:</p>
                         <ul style={{ margin: '0', paddingLeft: '1.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                            <li>Columns: <strong>Purchase Date | SIM No | SIM Type | SIM Validity | Notes</strong> (Notes is optional)</li>
+                            <li>Columns: <strong>Purchase Date | SIM No | SIM Type | Notes</strong> (Notes is optional)</li>
                             <li>SIM No must be exactly 10 OR 13 digits and unique.</li>
                         </ul>
                         <button 

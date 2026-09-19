@@ -5,7 +5,12 @@ require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse(false, 'Method not allowed', [], [], 405);
-$currentUser = authenticate();
+requireAnyPermission([
+    'dealers.edit',
+    'technicians.edit',
+    'stock.update'
+]);
+$currentUser = getCurrentUserFromToken();
 $data = json_decode(file_get_contents('php://input'), true);
 $id = (int)($data['allocation_id'] ?? 0);
 $totalAmount = $data['total_amount'] ?? null;

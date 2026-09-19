@@ -85,7 +85,7 @@ $stmt->close();
 $conn->begin_transaction();
 
 try {
-    writeDeleteSnapshot($conn, $customerId, 'Customer', $oldCustomer, $currentUser);
+    writeDeleteSnapshot($conn, $customerId, 'Customer', customerAuditSnapshot($conn, $customerId), $currentUser);
     $vehicleStmt = $conn->prepare('SELECT device_id, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE customer_id = ? FOR UPDATE');
     $vehicleStmt->bind_param('i', $customerId);
     $vehicleStmt->execute();

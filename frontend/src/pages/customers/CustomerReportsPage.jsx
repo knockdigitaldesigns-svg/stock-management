@@ -10,8 +10,8 @@ import { showGlobalError } from '../../context/ErrorContext';
 const emptyFilters = () => ({
     search: '',
     location: '',
-    month: '',
-    year: '',
+    dateFrom: '',
+    dateTo: '',
     installationPerson: '',
     leadClosure: '',
     payment: '',
@@ -154,7 +154,10 @@ const CustomerReportsPage = () => {
         try {
             const params = new URLSearchParams();
             Object.entries(filters).forEach(([key, value]) => {
-                if (value !== '') params.set(key === 'installationPerson' ? 'installation_person' : key, value);
+                if (value !== '') {
+                    const paramKey = key === 'installationPerson' ? 'installation_person' : key === 'dateFrom' ? 'date_from' : key === 'dateTo' ? 'date_to' : key;
+                    params.set(paramKey, value);
+                }
             });
             const response = await api.get(`/customers/reports.php?${params.toString()}`, { skipGlobalError: true });
             if (!response.data?.success) {
@@ -234,8 +237,26 @@ const CustomerReportsPage = () => {
                         </div>
                     </div>
                     <SearchableDropdown label="Location" value={filters.location} options={[{ value: '', label: 'All' }, ...options.locations.map(location => ({ value: location, label: location }))]} onChange={value => updateFilter('location', value)} />
-                    <SearchableDropdown label="Month" value={filters.month} options={[{ value: '', label: 'All' }, ...options.months.map(month => ({ value: month.value, label: month.label }))]} onChange={value => updateFilter('month', value)} />
-                    <SearchableDropdown label="Year" value={filters.year} options={[{ value: '', label: 'All' }, ...options.years.map(year => ({ value: year, label: year }))]} onChange={value => updateFilter('year', value)} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <label className="form-label" style={{ marginBottom: 0 }}>Date From</label>
+                        <input type="date" className="form-control" value={filters.dateFrom} onChange={e => {
+                            if (filters.dateTo && e.target.value > filters.dateTo) {
+                                showGlobalError('From Date cannot be later than To Date.');
+                                return;
+                            }
+                            updateFilter('dateFrom', e.target.value);
+                        }} style={{ height: '38px' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <label className="form-label" style={{ marginBottom: 0 }}>Date To</label>
+                        <input type="date" className="form-control" value={filters.dateTo} onChange={e => {
+                            if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                                showGlobalError('From Date cannot be later than To Date.');
+                                return;
+                            }
+                            updateFilter('dateTo', e.target.value);
+                        }} style={{ height: '38px' }} />
+                    </div>
                     <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />
                     <SearchableDropdown label="Lead Closure" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosures.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
                     <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, { value: 'paid', label: 'Paid' }, { value: 'partially_paid', label: 'Partially Paid' }, { value: 'not_paid', label: 'Not Paid' }]} onChange={value => updateFilter('payment', value)} />

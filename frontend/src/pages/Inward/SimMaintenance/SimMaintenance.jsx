@@ -23,7 +23,7 @@ const SimMaintenance = () => {
     const [editingSim, setEditingSim] = useState(null);
     const [viewingSim, setViewingSim] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
-    const [validities, setValidities] = useState([]);
+    
 
     const fetchSims = async () => {
         setLoading(true);
@@ -39,18 +39,18 @@ const SimMaintenance = () => {
         }
     };
 
-    const fetchValidities = async () => {
-        try {
-            const res = await api.get('/sim_validities/list.php').catch(() => ({ data: { success: true, data: { validities: [] } } }));
-            const rawValidities = res.data?.data?.validities || [];
-            const list = rawValidities
-                .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
-                .map((v) => `${v.months} Months`);
-            setValidities(list);
-        } catch (err) {
-            console.error('Failed to load SIM validities', err);
-        }
-    };
+    // const fetchValidities = async () => {
+    //     try {
+    //         const res = await api.get('/sim_validities/list.php').catch(() => ({ data: { success: true, data: { validities: [] } } }));
+    //         const rawValidities = res.data?.data?.validities || [];
+    //         const list = rawValidities
+    //             .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
+    //             .map((v) => `${v.months} Months`);
+    //         setValidities(list);
+    //     } catch (err) {
+    //         console.error('Failed to load SIM validities', err);
+    //     }
+    // };
 
     const handleDeleteSim = async () => {
         if (!deleteTarget) return;
@@ -70,7 +70,7 @@ const SimMaintenance = () => {
 
     useEffect(() => {
         fetchSims();
-        fetchValidities();
+        // fetchValidities();
     }, []);
 
     const filteredSims = filterTableRows(sims, filters, { dateKeys: ['purchase_date'], searchKeys: ['sim_no', 'sim_type', 'notes'] });
@@ -109,18 +109,16 @@ const SimMaintenance = () => {
 
             <div className="card">
                 <TableFilterBar
-                    filters={filters}
-                    onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
-                    items={sims}
-                    dateKeys={['purchase_date']}
-                    showSimType
-                    showSimValidity
-                    simValidityOptions={validities}
-                    showStatus
-                    statusOptions={['Available', 'Allocated', 'Used']}
-                    searchPlaceholder="Search by SIM number, type, or notes..."
-                />
+    filters={filters}
+    onChange={setFilters}
+    onReset={() => setFilters(emptyTableFilters())}
+    items={sims}
+    dateKeys={['purchase_date']}
+    showSimType
+    showStatus
+    statusOptions={['Available', 'Allocated', 'Used']}
+    searchPlaceholder="Search by SIM number, type, or notes..."
+/>
 
                 <div className="table-container">
                     <table>
@@ -129,7 +127,7 @@ const SimMaintenance = () => {
                                 <th>Purchase Date</th>
                                 <th>SIM No</th>
                                 <th>SIM Type</th>
-                                <th>SIM Validity</th>
+                                {/* <th>SIM Validity</th> */}
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -137,11 +135,11 @@ const SimMaintenance = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="6" className="text-center">Loading SIMs...</td>
+                                    <td colSpan="5" className="text-center">Loading SIMs...</td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="text-center empty-state">
+                                    <td colSpan="5" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
@@ -151,7 +149,6 @@ const SimMaintenance = () => {
                                         <td>{formatDate(sim.purchase_date)}</td>
                                         <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
                                         <td>{sim.sim_type || '-'}</td>
-                                        <td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td>
                                         <td>{getStatusBadge(sim.status)}</td>
                                         <td>
                                             <div className="action-buttons">
@@ -208,7 +205,7 @@ const SimMaintenance = () => {
                 />
             )}
 
-            {viewingSim && <RecordViewModal isOpen onClose={() => setViewingSim(null)} title="SIM Details" record={viewingSim} fetchRecord={async (row) => (await api.get('/sims/list.php')).data.data.sims.find((sim) => String(sim.id) === String(row.id)) || row} fields={[{ label: 'SIM No', key: 'sim_no' }, { label: 'SIM Type', key: 'sim_type' }, { label: 'SIM Validity', key: 'sim_validity_months', format: (value) => value ? `${value} Months` : '-' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
+            {viewingSim && <RecordViewModal isOpen onClose={() => setViewingSim(null)} title="SIM Details" record={viewingSim} fetchRecord={async (row) => (await api.get('/sims/list.php')).data.data.sims.find((sim) => String(sim.id) === String(row.id)) || row} fields={[{ label: 'SIM No', key: 'sim_no' }, { label: 'SIM Type', key: 'sim_type' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
 
             {deleteTarget && (
                 <Modal

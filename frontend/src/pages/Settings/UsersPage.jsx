@@ -8,6 +8,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import useModalScrollLock from '../../hooks/useModalScrollLock';
+import Modal from '../../components/Modal/Modal';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
 
@@ -23,7 +24,24 @@ const UsersPage = () => {
     const [editingUser, setEditingUser] = useState(null);
     const [error, setError] = useState('');
     const [employeeNameError, setEmployeeNameError] = useState('');
+    const [deleteUserTarget, setDeleteUserTarget] = useState(null);
+    const [mobileError, setMobileError] = useState('');
+    const validateMobile = (value) => {
+    const mobile = String(value || '').trim();
 
+    if (!mobile) {
+        setMobileError('Mobile number is required.');
+        return false;
+    }
+
+    if (!/^[6-9][0-9]{9}$/.test(mobile)) {
+        setMobileError('Enter a valid 10-digit mobile number.');
+        return false;
+    }
+
+    setMobileError('');
+    return true;
+};
     const triggerError = (msg) => {
         setError(msg);
         showGlobalError(msg);
@@ -77,50 +95,141 @@ const UsersPage = () => {
     } = usePagination(filteredUsers, 10, [filters]);
 
     const handleSubmit = async () => {
-        setError('');
-        if (!validateEmployeeName(form.employee_name)) return;
-        if (!form.employee_name || !form.mobile_no || !form.role_id || (!editingUser && !form.password)) {
-            triggerError('Employee name, mobile number, role and password are required');
-            return;
-        }
-        if (form.password.length < 8) {
-            triggerError('Password must be at least 8 characters');
-            return;
-        }
-        if (form.password !== form.confirm_password) {
-            triggerError('Passwords do not match');
+    setError('');
+    setMobileError('');
+
+    if (!validateEmployeeName(form.employee_name)) return;
+
+    if (!validateMobile(form.mobile_no)) return;
+
+    if (!form.employee_name.trim() || !form.role_id) {
+        triggerError(
+            'Employee name, mobile number and role are required.'
+        );
+        return;
+    }
+
+    // Password validation ONLY for Add User
+    if (!editingUser) {
+        if (!form.password) {
+            triggerError('Password is required.');
             return;
         }
 
-        try {
-            const response = await api.post(editingUser ? '/users/update.php' : '/users/create.php', {
-                ...(editingUser ? { id: editingUser.id } : {}),
-                employee_name: form.employee_name,
-                mobile_no: form.mobile_no,
-                role_id: Number(form.role_id),
-                ...(form.password ? { password: form.password } : {}),
-                status: form.status
+        if (form.password.length < 8) {
+            triggerError('Password must be at least 8 characters.');
+            return;
+        }
+
+        if (form.password !== form.confirm_password) {
+            triggerError('Passwords do not match.');
+            return;
+        }
+    }
+
+    try {
+        const payload = {
+            ...(editingUser ? { id: editingUser.id } : {}),
+            employee_name: form.employee_name.trim(),
+            mobile_no: form.mobile_no.trim(),
+            role_id: Number(form.role_id),
+            status: form.status
+        };
+
+        // Send password ONLY when creating a user
+        if (!editingUser) {
+            payload.password = form.password;
+        }
+
+        const response = await api.post(
+            editingUser
+                ? '/users/update.php'
+                : '/users/create.php',
+            payload
+        );
+
+        if (response.data.success) {
+            setShowModal(false);
+            setEditingUser(null);
+
+            setForm({
+                employee_name: '',
+                mobile_no: '',
+                role_id: '',
+                password: '',
+                confirm_password: '',
+                status: 'active'
             });
 
-            if (response.data.success) {
-                setShowModal(false);
-                setEditingUser(null);
-                setForm({ employee_name: '', mobile_no: '', role_id: '', password: '', confirm_password: '', status: 'active' });
-                fetchUsers();
-            } else {
-                triggerError(response.data.message || 'Unable to create user');
-            }
-        } catch (err) {
-            const message = err.response?.data?.message || (editingUser ? 'Unable to update user' : 'Unable to create user');
-            if (err.response?.status === 409 || message.toLowerCase().includes('username') || message.toLowerCase().includes('employee')) {
-                setEmployeeNameError(message);
-                showGlobalError(message);
-            } else {
-                triggerError(message);
-            }
-        }
-    };
+            setEmployeeNameError('');
+            setMobileError('');
+            setError('');
 
+            await fetchUsers();
+        } else {
+            triggerError(
+                response.data.message ||
+                (editingUser
+                    ? 'Unable to update user.'
+                    : 'Unable to create user.')
+            );
+        }
+    } catch (err) {
+        const message =
+            err.response?.data?.message ||
+            (editingUser
+                ? 'Unable to update user.'
+                : 'Unable to create user.');
+
+        if (
+            err.response?.status === 409 ||
+            message.toLowerCase().includes('username') ||
+            message.toLowerCase().includes('employee')
+        ) {
+            setEmployeeNameError(message);
+            showGlobalError(message);
+        } else if (
+            message.toLowerCase().includes('mobile')
+        ) {
+            setMobileError(message);
+            showGlobalError(message);
+        } else {
+            triggerError(message);
+        }
+    }
+};
+const requestDeleteUser = (user) => {
+    setDeleteUserTarget(user);
+};
+
+const deleteUser = async () => {
+    if (!deleteUserTarget) return;
+
+    const user = deleteUserTarget;
+
+    try {
+        const response = await api.post('/users/delete.php', {
+            id: user.id
+        });
+
+        if (!response.data.success) {
+            showGlobalError(
+                response.data.message ||
+                'Unable to delete user.'
+            );
+            return;
+        }
+
+        setDeleteUserTarget(null);
+
+        await fetchUsers();
+    } catch (err) {
+        showGlobalError(
+            err.response?.data?.message ||
+            'Unable to delete user.'
+        );
+    }
+};
     return (
         <div className="page-container">
             <div className="page-header">
@@ -165,7 +274,17 @@ const UsersPage = () => {
                                         <div className="action-buttons">
                                             <button className="icon-btn view" type="button" aria-label="View user" title="View" onClick={() => setViewingUser(user)}><Eye size={16} /></button>
                                             <Can permission="users.edit"><button className="icon-btn edit" type="button" aria-label="Edit user" onClick={() => { setEditingUser(user); setForm({ employee_name: user.employee_name || '', mobile_no: user.mobile_no || '', role_id: String(user.role_id || ''), password: '', confirm_password: '', status: user.status || 'active' }); setEmployeeNameError(''); setError(''); setShowModal(true); }}><Pencil size={16} /></button></Can>
-                                            <Can permission="users.delete"><button className="icon-btn delete" type="button" aria-label="Delete user"><Trash2 size={16} /></button></Can>
+                                            <Can permission="users.delete">
+    <button
+        className="icon-btn delete"
+        type="button"
+        aria-label="Delete user"
+        title="Delete"
+        onClick={() => requestDeleteUser(user)}
+    >
+        <Trash2 size={16} />
+    </button>
+</Can>
                                         </div>
                                     </td>
                                 </tr>
@@ -200,7 +319,30 @@ const UsersPage = () => {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Mobile No *</label>
-                                <input className="form-control" value={form.mobile_no} onChange={(e) => setForm({ ...form, mobile_no: e.target.value })} />
+                                <input
+    type="tel"
+    inputMode="numeric"
+    maxLength={10}
+    className="form-control"
+    value={form.mobile_no}
+    onChange={(e) => {
+        const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+
+        setForm({
+            ...form,
+            mobile_no: value
+        });
+
+        setMobileError('');
+    }}
+    onBlur={(e) => validateMobile(e.target.value)}
+/>
+
+{mobileError && (
+    <div className="text-danger" style={{ marginTop: '4px' }}>
+        {mobileError}
+    </div>
+)}
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Role *</label>
@@ -211,14 +353,43 @@ const UsersPage = () => {
                                     placeholder="Select Role"
                                 />
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Password{editingUser ? '' : ' *'}</label>
-                                <input type="password" className="form-control" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!editingUser} />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Confirm Password{editingUser ? '' : ' *'}</label>
-                                <input type="password" className="form-control" value={form.confirm_password} onChange={(e) => setForm({ ...form, confirm_password: e.target.value })} required={!editingUser} />
-                            </div>
+                            {!editingUser && (
+    <>
+        <div className="form-group">
+            <label className="form-label">Password *</label>
+
+            <input
+                type="password"
+                className="form-control"
+                value={form.password}
+                onChange={(e) =>
+                    setForm({
+                        ...form,
+                        password: e.target.value
+                    })
+                }
+            />
+        </div>
+
+        <div className="form-group">
+            <label className="form-label">
+                Confirm Password *
+            </label>
+
+            <input
+                type="password"
+                className="form-control"
+                value={form.confirm_password}
+                onChange={(e) =>
+                    setForm({
+                        ...form,
+                        confirm_password: e.target.value
+                    })
+                }
+            />
+        </div>
+    </>
+)}
                             <div className="form-group">
                                 <label className="form-label">Status</label>
                                 <select className="form-control" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -234,6 +405,48 @@ const UsersPage = () => {
                     </div>
                 </div>
             )}
+            <Modal
+    isOpen={Boolean(deleteUserTarget)}
+    onClose={() => setDeleteUserTarget(null)}
+    title="Delete User"
+    maxWidth="420px"
+>
+    <div style={{ padding: '0.25rem 0' }}>
+        <p style={{ margin: 0, lineHeight: 1.6 }}>
+            Are you sure you want to delete{' '}
+            <strong>
+                {deleteUserTarget?.employee_name ||
+                    deleteUserTarget?.username}
+            </strong>
+            ?
+        </p>
+    </div>
+
+    <div
+        style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px',
+            marginTop: '1.25rem'
+        }}
+    >
+        <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => setDeleteUserTarget(null)}
+        >
+            Cancel
+        </button>
+
+        <button
+            type="button"
+            className="btn btn-danger"
+            onClick={deleteUser}
+        >
+            Delete
+        </button>
+    </div>
+</Modal>
             {viewingUser && <RecordViewModal isOpen onClose={() => setViewingUser(null)} title="User Details" record={viewingUser} fetchRecord={async (row) => (await api.get('/users/list.php')).data.data.users.find((user) => String(user.id) === String(row.id)) || row} fields={[{ label: 'Employee Name', key: 'employee_name' }, { label: 'Username', key: 'username' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Role', key: 'role_name', format: (value, row) => value || row.role }, { label: 'Status', key: 'status' }, { label: 'Created Date', key: 'created_at' }]} />}
         </div>
     );

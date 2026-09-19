@@ -36,6 +36,7 @@ if (!$data) {
 $customerId = isset($data->customer_id)
     ? (int) $data->customer_id
     : 0;
+$vehicleId = isset($data->vehicle_id) ? (int) $data->vehicle_id : 0;
 
 $installationPersonType = trim(
     (string) (
@@ -60,6 +61,9 @@ $installationDate = trim(
         $data->installation_date ?? ''
     )
 );
+$persistedInstallationPersonType = $installationPersonType === 'Technician'
+    ? 'Technician'
+    : 'Dealer';
 
 
 /*
@@ -207,6 +211,108 @@ if (!$conn) {
 try {
 
     $conn->begin_transaction();
+
+    if ($vehicleId > 0) {
+        $vehicleCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE id = ? AND customer_id = ? LIMIT 1');
+        $vehicleCheck->bind_param('ii', $vehicleId, $customerId);
+        $vehicleCheck->execute();
+        if ($vehicleCheck->get_result()->num_rows === 0) {
+            $vehicleCheck->close();
+            throw new Exception('Selected customer vehicle was not found.');
+        }
+        $vehicleCheck->close();
+    }
+
+    $vehicleLookup = $vehicleId > 0
+        ? 'id = ? AND customer_id = ?'
+        : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1';
+    $vehicleStmt = $conn->prepare(
+        "SELECT device_id, sim_id_1 FROM customer_vehicle_details WHERE {$vehicleLookup} FOR UPDATE"
+    );
+    if ($vehicleId > 0) {
+        $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
+    } else {
+        $vehicleStmt->bind_param('i', $customerId);
+    }
+    $vehicleStmt->execute();
+    $vehicle = $vehicleStmt->get_result()->fetch_assoc();
+    $vehicleStmt->close();
+    if (!$vehicle || empty($vehicle['device_id']) || empty($vehicle['sim_id_1'])) {
+        throw new Exception('Device and SIM are required before saving installation details.');
+    }
+
+    $resolveOwner = static function ($conn, string $assetColumn, int $assetId): ?array {
+        $stmt = $conn->prepare(
+            "SELECT owner_type, owner_id
+             FROM stock_allocations
+             WHERE {$assetColumn} = ?
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+             FOR UPDATE"
+        );
+        $stmt->bind_param('i', $assetId);
+        $stmt->execute();
+        $owner = $stmt->get_result()->fetch_assoc() ?: null;
+        $stmt->close();
+        if (!$owner) {
+            return null;
+        }
+        if (!in_array(strtolower((string) $owner['owner_type']), ['dealer', 'technician'], true) || (int) $owner['owner_id'] <= 0) {
+            return ['invalid' => true];
+        }
+        $ownerTable = strtolower((string) $owner['owner_type']) === 'dealer' ? 'dealers' : 'technicians';
+        $ownerCheck = $conn->prepare("SELECT id FROM {$ownerTable} WHERE id = ? LIMIT 1");
+        $ownerId = (int) $owner['owner_id'];
+        $ownerCheck->bind_param('i', $ownerId);
+        $ownerCheck->execute();
+        $exists = $ownerCheck->get_result()->num_rows > 0;
+        $ownerCheck->close();
+        if (!$exists) {
+            return ['invalid' => true];
+        }
+        if ($ownerId <= 0) {
+            return null;
+        }
+        return [
+            'type' => strtolower((string) $owner['owner_type']),
+            'id' => $ownerId
+        ];
+    };
+
+    $deviceOwner = $resolveOwner($conn, 'device_id', (int) $vehicle['device_id']);
+    $simOwner = $resolveOwner($conn, 'sim_id', (int) $vehicle['sim_id_1']);
+    if (($deviceOwner && !empty($deviceOwner['invalid'])) || ($simOwner && !empty($simOwner['invalid']))) {
+        throw new Exception(
+            ($deviceOwner && !empty($deviceOwner['invalid']))
+                ? 'The current Device owner relationship is invalid.'
+                : 'The current SIM owner relationship is invalid.'
+        );
+    }
+    if ($deviceOwner && $simOwner && ($deviceOwner['type'] !== $simOwner['type'] || $deviceOwner['id'] !== $simOwner['id'])) {
+        throw new Exception('Device and SIM are allocated to different persons. Please transfer the device/SIM to the same owner before proceeding.');
+    }
+
+    $currentOwner = $deviceOwner ?: $simOwner;
+    if (!$currentOwner) {
+        $currentOwner = null;
+    }
+    $expectedType = $currentOwner && $currentOwner['type'] === 'technician'
+        ? 'Technician'
+        : 'Dealer';
+    $expectedPersonType = $currentOwner && $expectedType === 'Dealer'
+        ? (function () use ($conn, $currentOwner) {
+            $stmt = $conn->prepare('SELECT installation_status FROM dealers WHERE id = ? LIMIT 1');
+            $ownerId = $currentOwner['id'];
+            $stmt->bind_param('i', $ownerId);
+            $stmt->execute();
+            $status = $stmt->get_result()->fetch_assoc()['installation_status'] ?? '';
+            $stmt->close();
+            return strcasecmp(trim((string) $status), 'Offsite') === 0 ? 'Offsite Dealer' : 'Onsite Dealer';
+        })()
+        : 'Technician';
+    if ($currentOwner && ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))) {
+        throw new Exception('Installation person must match the current Device and SIM owner.');
+    }
 
 
     /*
@@ -472,17 +578,18 @@ try {
     |--------------------------------------------------------------------------
     */
 
+    $installationWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
     $checkStmt = $conn->prepare(
-        'SELECT
+        "SELECT
             id,
             installation_person_type,
             installation_person_id,
             lead_closure_id,
             installation_date
          FROM customer_installations
-         WHERE customer_id = ?
+         WHERE {$installationWhere}
          LIMIT 1
-         FOR UPDATE'
+         FOR UPDATE"
     );
 
     if (!$checkStmt) {
@@ -491,10 +598,8 @@ try {
         );
     }
 
-    $checkStmt->bind_param(
-        'i',
-        $customerId
-    );
+    $checkTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
+    $checkStmt->bind_param('i', $checkTargetId);
 
     if (!$checkStmt->execute()) {
         $checkStmt->close();
@@ -531,7 +636,7 @@ try {
             (int) $existingInstallation['id'];
 
         writeChangedFields($conn, $installationId, 'Customer Installation', $existingInstallation, [
-            'installation_person_type' => $installationPersonType,
+            'installation_person_type' => $persistedInstallationPersonType,
             'installation_person_id' => $installationPersonId,
             'lead_closure_id' => $leadClosureId,
             'installation_date' => $installationDate
@@ -555,7 +660,7 @@ try {
 
         $updateStmt->bind_param(
             'siisi',
-            $installationPersonType,
+            $persistedInstallationPersonType,
             $installationPersonId,
             $leadClosureId,
             $installationDate,
@@ -767,7 +872,7 @@ try {
                 'installation_id' =>
                     $installationId,
                 'installation_person_type' =>
-                    $installationPersonType,
+                    $persistedInstallationPersonType,
                 'installation_person_id' =>
                     $installationPersonId,
                 'action' =>
@@ -784,13 +889,14 @@ try {
     */
 
     $insertStmt = $conn->prepare(
-        'INSERT INTO customer_installations (
+            'INSERT INTO customer_installations (
             customer_id,
+            vehicle_id,
             installation_person_type,
             installation_person_id,
             lead_closure_id,
             installation_date
-         ) VALUES (?, ?, ?, ?, ?)'
+         ) VALUES (?, ?, ?, ?, ?, ?)'
     );
 
     if (!$insertStmt) {
@@ -800,9 +906,10 @@ try {
     }
 
     $insertStmt->bind_param(
-        'isiis',
+        'iisiis',
         $customerId,
-        $installationPersonType,
+        $vehicleId,
+        $persistedInstallationPersonType,
         $installationPersonId,
         $leadClosureId,
         $installationDate
@@ -823,7 +930,8 @@ try {
 
     writeCreatedFields($conn, $installationId, 'Customer Installation', [
         'customer_id' => $customerId,
-        'installation_person_type' => $installationPersonType,
+        'vehicle_id' => $vehicleId ?: null,
+        'installation_person_type' => $persistedInstallationPersonType,
         'installation_person_id' => $installationPersonId,
         'lead_closure_id' => $leadClosureId,
         'installation_date' => $installationDate

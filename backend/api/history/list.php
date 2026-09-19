@@ -52,10 +52,17 @@ function historyDisplayValue($value, string $field, array $lookups, ?string $own
 
 function historyDisplaySnapshot(array $snapshot, array $lookups): array
 {
+    if (array_is_list($snapshot)) {
+        return array_map(static fn($item) => is_array($item) ? historyDisplaySnapshot($item, $lookups) : $item, $snapshot);
+    }
     $ownerType = $snapshot['owner_type'] ?? $snapshot['installation_person_type'] ?? null;
     $display = [];
     foreach ($snapshot as $field => $value) {
         if ($field === 'id') continue;
+        if (is_array($value)) {
+            $display[$field] = historyDisplaySnapshot($value, $lookups);
+            continue;
+        }
         if (str_ends_with($field, '_id')) {
             $displayField = [
                 'owner_id' => 'owner',
@@ -161,8 +168,10 @@ while ($row = $result->fetch_assoc()) {
     $row['old_display_value'] = historyDisplayValue($row['old_value'], $row['field_changed'], $lookups, $ownerType);
     $row['new_display_value'] = historyDisplayValue($row['new_value'], $row['field_changed'], $lookups, $ownerType);
     if ($row['field_changed'] === 'record_snapshot') {
-        $snapshot = json_decode((string) $row['old_value'], true);
-        $row['old_display_snapshot'] = is_array($snapshot) ? historyDisplaySnapshot($snapshot, $lookups) : null;
+        $oldSnapshot = json_decode((string) $row['old_value'], true);
+        $newSnapshot = json_decode((string) $row['new_value'], true);
+        $row['old_display_snapshot'] = is_array($oldSnapshot) ? historyDisplaySnapshot($oldSnapshot, $lookups) : null;
+        $row['new_display_snapshot'] = is_array($newSnapshot) ? historyDisplaySnapshot($newSnapshot, $lookups) : null;
     }
     $groups[$key]['records'][] = $row;
 }

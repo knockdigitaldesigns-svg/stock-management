@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
-import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
+// import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
 import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditSimModal = ({ sim, onClose, onSuccess }) => {
@@ -10,23 +10,23 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
         purchase_date: sim?.purchase_date || '',
         sim_no: sim?.sim_no || '',
         sim_type: sim?.sim_type || '',
-        sim_validity_id: sim?.sim_validity_id || '',
+        // sim_validity_id: sim?.sim_validity_id || '',
         notes: sim?.notes || ''
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [validities, setValidities] = useState([]);
+    // const [validities, setValidities] = useState([]);
 
     const triggerError = (msg) => {
         setError(msg);
         showGlobalError(msg);
     };
 
-    useEffect(() => {
-        api.get('/sim_validities/list.php')
-            .then((response) => setValidities(response.data.data?.validities || []))
-            .catch(() => triggerError('Unable to load SIM validities.'));
-    }, []);
+    // useEffect(() => {
+    //     api.get('/sim_validities/list.php')
+    //         .then((response) => setValidities(response.data.data?.validities || []))
+    //         .catch(() => triggerError('Unable to load SIM validities.'));
+    // }, []);
 
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -35,7 +35,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
         if (!formData.purchase_date) return triggerError('Purchase date is required.');
         if (!/^(?:[0-9]{10}|[0-9]{13})$/.test(formData.sim_no)) return triggerError('SIM must be exactly 10 or 13 digits.');
         if (!['Voice', 'Non Voice'].includes(formData.sim_type)) return triggerError('SIM type is required.');
-        if (!formData.sim_validity_id) return triggerError('SIM validity is required.');
+        // if (!formData.sim_validity_id) return triggerError('SIM validity is required.');
 
         setLoading(true);
         try {
@@ -44,7 +44,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
                 purchase_date: formData.purchase_date,
                 sim_no: formData.sim_no,
                 sim_type: formData.sim_type,
-                sim_validity_id: Number(formData.sim_validity_id),
+                // sim_validity_id: Number(formData.sim_validity_id),
                 notes: formData.notes
             });
 
@@ -98,7 +98,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
                         <option value="Non Voice">Non Voice</option>
                     </select>
                 </div>
-                <div className="form-group">
+                {/* <div className="form-group">
                     <label className="form-label">SIM Validity *</label>
                     <SearchableDropdown
                         options={validities.map((v) => ({ value: String(v.id), label: `${v.months} Months` }))}
@@ -106,7 +106,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
                         onChange={(val) => setFormData((prev) => ({ ...prev, sim_validity_id: val }))}
                         placeholder="Select Validity"
                     />
-                </div>
+                </div> */}
 
                 <div className="form-group">
                     <label className="form-label">SIM No *</label>

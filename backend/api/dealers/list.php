@@ -9,7 +9,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
-authenticate();
+requireAnyPermission([
+    'dealers.view',
+    'stock.view',
+    'stock_transfer.view',
+    'customers.view',
+    'outward_reports.view'
+]);
 
 $db = new Database();
 $conn = $db->getConnection();
@@ -129,6 +135,7 @@ $sql = "
         d.enrolled_date, 
         d.installation_status,
         d.software,
+        d.threshold_amount,
         d.notes,
         (SELECT sa.sim_given_date FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL ORDER BY sa.created_at DESC, sa.id DESC LIMIT 1) as sim_given_date,
         (SELECT sa.sim_given_date FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL ORDER BY sa.created_at DESC, sa.id DESC LIMIT 1) as given_date,
@@ -157,8 +164,8 @@ $sql = "
             WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) > 0 THEN 'Partially Paid'
             ELSE 'Not Paid'
         END as payment_status,
-        COALESCE((SELECT minimum_device_count FROM stock_alert_settings WHERE owner_type='dealer' AND owner_id=d.id LIMIT 1), 0) as minimum_device_count,
-        COALESCE((SELECT minimum_sim_count FROM stock_alert_settings WHERE owner_type='dealer' AND owner_id=d.id LIMIT 1), 0) as minimum_sim_count,
+        COALESCE((SELECT sas.minimum_device_count FROM stock_alert_settings sas WHERE sas.owner_type='dealer' AND sas.owner_id=d.id LIMIT 1), 0) as minimum_device_count,
+        COALESCE((SELECT sas.minimum_sim_count FROM stock_alert_settings sas WHERE sas.owner_type='dealer' AND sas.owner_id=d.id LIMIT 1), 0) as minimum_sim_count,
         (SELECT GROUP_CONCAT(DISTINCT dt.device_type SEPARATOR '||')
          FROM stock_allocations sa
          JOIN devices dev ON dev.id = sa.device_id
@@ -199,6 +206,7 @@ while ($result && ($row = $result->fetch_assoc())) {
 }
 
 $simsByDealer = [];
+$softwareByDealer = [];
 if (!empty($dealerIds)) {
     $dealerIdList = implode(',', array_map('intval', $dealerIds));
     $simDetailsSql = "
@@ -232,6 +240,14 @@ if (!empty($dealerIds)) {
             ];
         }
     }
+
+    $swRes = $conn->query("SELECT dealer_id, software FROM dealer_software WHERE dealer_id IN ({$dealerIdList}) ORDER BY id ASC");
+    if ($swRes) {
+        while ($swRow = $swRes->fetch_assoc()) {
+            $dId = (int) $swRow['dealer_id'];
+            $softwareByDealer[$dId][] = $swRow['software'];
+        }
+    }
 }
 
 $dealers = [];
@@ -251,9 +267,23 @@ foreach ($dealerRows as $row) {
             $row['device_alert_status'] = 'SAFE';
         }
 
+        $assignedSw = $softwareByDealer[(int)$row['id']] ?? [];
+        if (!empty($assignedSw)) {
+            $row['software_list'] = $assignedSw;
+            $row['software'] = implode(', ', $assignedSw);
+        } else {
+            $swList = !empty($row['software']) ? array_values(array_filter(array_map('trim', explode(',', $row['software'])))) : [];
+            $row['software_list'] = $swList;
+        }
+
         $platformsList = [];
         if (!empty($row['software'])) {
-            $platformsList[] = trim($row['software']);
+            foreach (explode(',', $row['software']) as $p) {
+                $p = trim($p);
+                if ($p !== '' && !in_array($p, $platformsList, true)) {
+                    $platformsList[] = $p;
+                }
+            }
         }
         if (!empty($row['allocated_platforms'])) {
             foreach (explode('||', $row['allocated_platforms']) as $p) {

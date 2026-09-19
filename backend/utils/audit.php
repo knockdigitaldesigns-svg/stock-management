@@ -25,6 +25,43 @@ function auditValue($value): ?string
     return (string) $value;
 }
 
+function auditSanitize(array $data): array
+{
+    foreach (['password', 'password_hash', 'token', 'jwt', 'access_token', 'refresh_token'] as $sensitive) {
+        unset($data[$sensitive]);
+    }
+    return $data;
+}
+
+function customerAuditSnapshot(mysqli $conn, int $customerId): array
+{
+    $snapshot = [];
+    $stmt = $conn->prepare('SELECT c.*, p.platform_name FROM customers c LEFT JOIN platforms p ON p.id = c.platform_id WHERE c.id = ? LIMIT 1');
+    $stmt->bind_param('i', $customerId);
+    $stmt->execute();
+    $snapshot['customer'] = $stmt->get_result()->fetch_assoc() ?: [];
+    $stmt->close();
+
+    $fetch = static function (mysqli $conn, string $sql, int $customerId): array {
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('i', $customerId);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $rows;
+    };
+    $snapshot['vehicles'] = $fetch($conn, 'SELECT cv.*, vt.vehicle_type, dt.device_type AS device_model FROM customer_vehicle_details cv LEFT JOIN vehicle_types vt ON vt.id = cv.vehicle_type_id LEFT JOIN device_types dt ON dt.id = cv.device_model_id WHERE cv.customer_id = ? ORDER BY cv.id', $customerId);
+    $snapshot['installations'] = $fetch($conn, 'SELECT ci.*, COALESCE(t.technician_name, d.dealer_name) AS installation_person, lc.lead_closure_name FROM customer_installations ci LEFT JOIN technicians t ON t.id = ci.installation_person_id AND ci.installation_person_type = "Technician" LEFT JOIN dealers d ON d.id = ci.installation_person_id AND ci.installation_person_type = "Dealer" LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id WHERE ci.customer_id = ? ORDER BY ci.id', $customerId);
+    $snapshot['payments'] = $fetch($conn, 'SELECT * FROM customer_payments WHERE customer_id = ? ORDER BY id', $customerId);
+    $snapshot['cash_collections'] = $fetch($conn, 'SELECT * FROM customer_cash_collections WHERE customer_id = ? ORDER BY id', $customerId);
+    return auditSanitize($snapshot);
+}
+
+function writeAuditSnapshot(mysqli $conn, int $recordId, string $module, string $action, ?array $old, ?array $new, array $user): void
+{
+    writeAudit($conn, $recordId, $module, $action, 'record_snapshot', $old, $new, $user);
+}
+
 function writeAudit(mysqli $conn, int $recordId, string $module, string $action, ?string $field, $oldValue, $newValue, array $user): void
 {
     $actor = auditActor($user);
@@ -57,6 +94,7 @@ function writeAudit(mysqli $conn, int $recordId, string $module, string $action,
 
 function writeChangedFields(mysqli $conn, int $recordId, string $module, array $old, array $new, array $user): void
 {
+    writeAuditSnapshot($conn, $recordId, $module, 'Edit', auditSanitize($old), auditSanitize($new), $user);
     foreach ($new as $field => $newValue) {
         $oldValue = $old[$field] ?? null;
         if ((string) ($oldValue ?? '') === (string) ($newValue ?? '')) {
@@ -68,11 +106,12 @@ function writeChangedFields(mysqli $conn, int $recordId, string $module, array $
 
 function writeDeleteSnapshot(mysqli $conn, int $recordId, string $module, array $old, array $user): void
 {
-    writeAudit($conn, $recordId, $module, 'Delete', 'record_snapshot', $old, null, $user);
+    writeAuditSnapshot($conn, $recordId, $module, 'Delete', auditSanitize($old), null, $user);
 }
 
 function writeCreatedFields(mysqli $conn, int $recordId, string $module, array $created, array $user): void
 {
+    writeAuditSnapshot($conn, $recordId, $module, 'Create', null, auditSanitize($created), $user);
     foreach ($created as $field => $value) {
         writeAudit($conn, $recordId, $module, 'Create', $field, null, $value, $user);
     }

@@ -54,6 +54,7 @@ $simNo1 = trim((string) ($data->sim_no_1 ?? ''));
 $simNo2 = trim((string) ($data->sim_no_2 ?? ''));
 $validityId = isset($data->validity_id) ? (int) $data->validity_id : 0;
 $validityMonthsParam = isset($data->validity_months) ? (int) $data->validity_months : 0;
+$appendVehicle = filter_var($data->append_vehicle ?? false, FILTER_VALIDATE_BOOLEAN);
 
 /*
 |--------------------------------------------------------------------------
@@ -588,7 +589,7 @@ try {
 
     $cleanSimNo2 = $simNo2 !== '' ? $simNo2 : null;
 
-    if ($existingRow) {
+    if ($existingRow && !$appendVehicle) {
         $vehicleDetailsId = (int) $existingRow['id'];
         writeChangedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', $existingRow, [
             'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId, 'device_id' => $deviceId,

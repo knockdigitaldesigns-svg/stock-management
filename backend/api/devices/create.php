@@ -78,12 +78,13 @@ try {
             if ($stmt->errno === 1062) throw new Exception("Row $rowNum: IMEI number already exists.");
             throw new Exception("Row $rowNum: Database error - " . $stmt->error);
         }
-        writeCreatedFields($conn, $conn->insert_id, 'Device', [
-            'purchase_date' => $device->purchase_date,
-            'device_model_id' => $deviceModelId,
-            'imei_no' => $device->imei_no,
-            'notes' => $notes
-        ], $currentUser);
+        $deviceId = (int) $conn->insert_id;
+        $snapshotStmt = $conn->prepare('SELECT d.*, dt.device_type AS device_model FROM devices d LEFT JOIN device_types dt ON dt.id = d.device_model_id WHERE d.id = ? LIMIT 1');
+        $snapshotStmt->bind_param('i', $deviceId);
+        $snapshotStmt->execute();
+        $snapshot = $snapshotStmt->get_result()->fetch_assoc() ?: [];
+        $snapshotStmt->close();
+        writeAuditSnapshot($conn, $deviceId, 'Device', 'Create', null, $snapshot, $currentUser);
     }
     
     $conn->commit();
