@@ -43,8 +43,8 @@ if (!empty($dbErrors)) {
 }
 
 $conn->begin_transaction();
-$stmt = $conn->prepare("INSERT INTO technicians (technician_name, mobile_no, location, enrolled_date, notes) VALUES (?, ?, ?, ?, ?)");
-$stmt->bind_param("sssss", $validData['technician_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['notes']);
+$stmt = $conn->prepare("INSERT INTO technicians (technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, notes) VALUES (?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("ssssss", $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['notes']);
 
 if ($stmt->execute()) {
     $technicianId = $conn->insert_id;

@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/date.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/payment_modes.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $_SERVER['REQUEST_METHOD'] !== 'PUT') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -38,7 +39,7 @@ if ($paid < 0) sendResponse(false, 'Amount Paid cannot be negative.', [], [], 40
 if ($paid > $total) sendResponse(false, 'Amount Paid cannot exceed Total Amount.', [], [], 400);
 $pending = max(0, $total - $paid);
 $status = $total <= 0 ? 'Not Paid' : ($pending <= 0 ? 'Paid' : ($paid > 0 ? 'Partially Paid' : 'Not Paid'));
-$validModes = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+$validModes = getPaymentModes();
 $paymentMode = in_array($paymentMode, $validModes, true) ? $paymentMode : null;
 if ($paymentMode !== null && $paymentMode !== 'Cash' && $transactionId === '') sendResponse(false, 'Transaction ID is required for the selected Payment Mode.', [], [], 400);
 if ($paymentMode === 'Cash') $transactionId = '';

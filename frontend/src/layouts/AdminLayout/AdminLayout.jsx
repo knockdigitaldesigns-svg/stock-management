@@ -206,7 +206,7 @@ const showCustomerManagement =
 
                 {/* Sidebar Header */}
                 <div className="sidebar-header">
-                    <h2>StockAdmin</h2>
+                    <h2>EagleTrazer</h2>
                 </div>
 
                 <nav className="sidebar-nav">

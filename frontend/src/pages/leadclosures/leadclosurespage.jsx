@@ -8,6 +8,7 @@ import usePagination from '../../hooks/usePagination';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { formatDate } from '../../utils/date';
 
 const LeadClosuresPage = () => {
     const { hasPermission } = useAuth();
@@ -371,40 +372,25 @@ const LeadClosuresPage = () => {
 
             {/* FILTERS */}
             <div className="card">
-                <div
-                    className="filters-container"
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        flexWrap: 'wrap',
-                        padding: '16px',
-                    }}
-                >
+                <div className="table-filter-bar">
                     <input
                         type="text"
-                        className="form-control"
                         placeholder="Search Lead Closure"
                         value={search}
                         onChange={(event) => {
                             setSearch(event.target.value);
                             setPage(1);
                         }}
-                        style={{
-                            width: '260px',
-                        }}
+                        className="form-control table-filter-search"
                     />
 
                     <select
-                        className="form-control"
                         value={statusFilter}
                         onChange={(event) => {
                             setStatusFilter(event.target.value);
                             setPage(1);
                         }}
-                        style={{
-                            width: '170px',
-                        }}
+                        className="form-control"
                     >
                         <option value="">
                             All Statuses
@@ -435,6 +421,7 @@ const LeadClosuresPage = () => {
                                 <th>Mobile No</th>
                                 <th>Location</th>
                                 <th>Status</th>
+                                <th>Created Date</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -443,7 +430,7 @@ const LeadClosuresPage = () => {
                             {loading ? (
                                 <tr>
                                     <td
-                                        colSpan="5"
+                                        colSpan="6"
                                         className="text-center"
                                     >
                                         Loading lead closures...
@@ -452,7 +439,7 @@ const LeadClosuresPage = () => {
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan="5"
+                                        colSpan="6"
                                         className="text-center empty-state"
                                     >
                                         No lead closure
@@ -479,13 +466,15 @@ const LeadClosuresPage = () => {
                                             <span
                                                 className={
                                                     item.status === 'Active'
-                                                        ? 'status-badge active'
-                                                        : 'status-badge inactive'
+                                                        ? 'badge badge-success'
+                                                        : 'badge badge-danger'
                                                 }
                                             >
                                                 {item.status}
                                             </span>
                                         </td>
+
+                                        <td>{formatDate(item.created_at)}</td>
 
                                         <td>
                                             <div className="action-buttons">

@@ -66,7 +66,6 @@ const InwardReports = () => {
                 "Purchase Date": formatDate(s.purchase_date),
                 "SIM No": s.sim_no,
                 "SIM Type": s.sim_type || '-',
-                "SIM Validity": s.sim_validity_months ? `${s.sim_validity_months} Months` : '-',
                 "Notes": s.notes || '-',
                 "Status": "Available"
             }));
@@ -75,7 +74,6 @@ const InwardReports = () => {
                 { header: "Purchase Date", key: "Purchase Date" },
                 { header: "SIM No", key: "SIM No" },
                 { header: "SIM Type", key: "SIM Type" },
-                { header: "SIM Validity", key: "SIM Validity" },
                 { header: "Notes", key: "Notes" },
                 { header: "Status", key: "Status" }
             ];
@@ -139,7 +137,6 @@ const InwardReports = () => {
                 { header: "Purchase Date", key: "purchase_date" },
                 { header: "SIM No", key: "sim_no" },
                 { header: "SIM Type", key: "sim_type" },
-                { header: "SIM Validity", key: "sim_validity_months" },
                 { header: "Notes", key: "notes" },
                 { header: "Status", key: "status" }
             ];
@@ -148,7 +145,6 @@ const InwardReports = () => {
                 purchase_date: formatDate(s.purchase_date),
                 sim_no: s.sim_no,
                 sim_type: s.sim_type || '-',
-                sim_validity_months: s.sim_validity_months ? `${s.sim_validity_months} Months` : '-',
                 notes: s.notes || '-',
                 status: 'Available'
             }));
@@ -307,7 +303,6 @@ const InwardReports = () => {
                             items={activeTab === 'sim' ? simList : deviceList}
                             dateKeys={['purchase_date']}
                             showSimType={activeTab === 'sim'}
-                            showSimValidity={activeTab === 'sim'}
                             showDeviceModel={activeTab === 'device'}
                             searchPlaceholder={activeTab === 'sim' ? 'Search SIM number, type, or notes...' : 'Search IMEI, model, or notes...'}
                         />
@@ -320,7 +315,6 @@ const InwardReports = () => {
                                             <>
                                                 <th>SIM No</th>
                                                 <th>SIM Type</th>
-                                                <th>SIM Validity</th>
                                             </>
                                         ) : (
                                             <>
@@ -334,14 +328,13 @@ const InwardReports = () => {
                                 </thead>
                                 <tbody>
                                     {activeTab === 'sim' && simPagination.paginatedItems.length === 0 && (
-                                        <tr><td colSpan="6" className="text-center empty-state">No records found for the selected filters.</td></tr>
+                                        <tr><td colSpan="5" className="text-center empty-state">No records found for the selected filters.</td></tr>
                                     )}
                                     {activeTab === 'sim' && simPagination.paginatedItems.map(sim => (
                                         <tr key={sim.id}>
                                             <td>{formatDate(sim.purchase_date)}</td>
                                             <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
                                             <td>{sim.sim_type || '-'}</td>
-                                            <td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td>
                                             <td className="truncate-cell" title={sim.notes}>{sim.notes || '-'}</td>
                                             <td><span className="badge badge-success">Available</span></td>
                                         </tr>

@@ -3,6 +3,7 @@ import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import SearchableDropdown from '../../components/SearchableDropdown/SearchableDropdown';
 import { softwareDropdownOptions } from '../../constants/software';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
 
@@ -67,7 +68,7 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
             <div><strong>{allocation.device_id ? 'Device' : 'SIM'}:</strong> {allocation.imei_no || allocation.sim_no || '-'} {allocation.device_model ? `(${allocation.device_model})` : allocation.sim_type ? `(${allocation.sim_type})` : ''}</div>
             <div className="form-group"><label className="form-label">Software</label><SearchableDropdown options={softwareDropdownOptions} value={form.software} onChange={(value) => update('software', value)} placeholder="Select software" /></div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.75rem' }}><div className="form-group"><label className="form-label">Total Amount</label><input type="number" min="0" step="0.01" className="form-control" value={form.total_amount} readOnly /></div><div className="form-group"><label className="form-label">Amount Paid</label><input type="number" min="0" step="0.01" className="form-control" value={form.amount_paid} onChange={(event) => update('amount_paid', event.target.value)} /></div><div className="form-group"><label className="form-label">Pending Amount</label><input className="form-control" value={pending.toFixed(2)} readOnly /></div><div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={status} readOnly /></div></div>
-            <div className="form-group"><label className="form-label">Payment Mode</label><select className="form-control" value={form.payment_mode} onChange={(event) => update('payment_mode', event.target.value)}><option value="">Select payment mode</option><option>Cash</option><option>UPI</option><option>Bank Transfer</option><option>Card</option><option>Other</option></select></div>
+            <div className="form-group"><label className="form-label">Payment Mode</label><select className="form-control" value={form.payment_mode} onChange={(event) => update('payment_mode', event.target.value)}><option value="">Select payment mode</option>{PAYMENT_MODES.map((mode) => <option key={mode}>{mode}</option>)}</select></div>
             <div className="form-group"><label className="form-label">Transaction ID{transactionRequired ? ' *' : ''}</label><input className="form-control" value={form.transaction_id} onChange={(event) => update('transaction_id', event.target.value)} placeholder={transactionRequired ? 'Enter transaction ID' : 'Not required for Cash'} /></div>
             <div className="form-group"><label className="form-label">Notes</label><textarea className="form-control" rows="3" value={form.notes} onChange={(event) => update('notes', event.target.value)} /></div>
             <small>Original allocation date: {formatDate(allocation.allocation_date)}</small>

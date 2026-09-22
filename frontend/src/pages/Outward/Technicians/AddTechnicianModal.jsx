@@ -10,6 +10,7 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
     const [formData, setFormData] = useState({
         technician_name: '',
         mobile_no: '',
+        alternate_mobile_no: '',
         location: '',
         enrolled_date: '',
         notes: ''
@@ -37,8 +38,13 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
         }
 
         const digitsOnly = formData.mobile_no.replace(/\D/g, '');
-        if (digitsOnly.length !== 10) {
-            triggerError('Mobile No must be exactly 10 digits.');
+        if (digitsOnly.length !== 10 || digitsOnly !== formData.mobile_no) {
+            triggerError('Mobile number must contain exactly 10 digits.');
+            return;
+        }
+
+        if (formData.alternate_mobile_no && (formData.alternate_mobile_no.length !== 10 || !/^\d{10}$/.test(formData.alternate_mobile_no))) {
+            triggerError('Alternate mobile number must contain exactly 10 digits.');
             return;
         }
 
@@ -97,6 +103,22 @@ const AddTechnicianModal = ({ onClose, onSuccess }) => {
                                 maxLength={10}
                                 placeholder="Enter 10 digit mobile no"
                                 required
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Alternate Mobile No</label>
+                            <input
+                                type="text"
+                                name="alternate_mobile_no"
+                                className="form-control"
+                                value={formData.alternate_mobile_no}
+                                onChange={(e) => {
+                                    const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                    setFormData(prev => ({ ...prev, alternate_mobile_no: val }));
+                                }}
+                                maxLength={10}
+                                placeholder="Enter 10 digit mobile no"
                             />
                         </div>
 

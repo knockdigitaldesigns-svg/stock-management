@@ -3,14 +3,14 @@
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background-color: var(--sidebar-bg); /* Dark premium background */
+    background-color: var(--deep-navy);
 }
 
 .login-card {
     background-color: var(--card-bg);
     padding: 2.5rem;
     border-radius: 1rem;
-    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    box-shadow: var(--shadow-lg);
     width: 100%;
     max-width: 400px;
 }
@@ -46,7 +46,7 @@
 }
 
 .alert-danger {
-    background-color: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #f87171;
+    background-color: #fff1f2;
+    color: #b91c1c;
+    border: 1px solid #fecdd3;
 }

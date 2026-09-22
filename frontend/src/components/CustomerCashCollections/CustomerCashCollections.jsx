@@ -3,6 +3,7 @@ import api from '../../services/api';
 import Modal from '../Modal/Modal';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 
 const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dateTime = (value) => value ? new Date(value.replace(' ', 'T')).toLocaleString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
@@ -224,11 +225,7 @@ const CustomerCashCollections = ({ ownerId, recipientType, onSaved }) => {
                                 onChange={(e) => setPaymentMode(e.target.value)}
                                 disabled={saving || totalPending <= 0}
                             >
-                                <option value="Cash">Cash</option>
-                                <option value="UPI">UPI</option>
-                                <option value="Card">Card</option>
-                                <option value="Bank Transfer">Bank Transfer</option>
-                                <option value="Other">Other</option>
+                                {PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
                             </select>
                         </div>
 
@@ -421,11 +418,7 @@ const CustomerCashCollections = ({ ownerId, recipientType, onSaved }) => {
                                 value={singleMode}
                                 onChange={(event) => setSingleMode(event.target.value)}
                             >
-                                <option value="Cash">Cash</option>
-                                <option value="UPI">UPI</option>
-                                <option value="Card">Card</option>
-                                <option value="Bank Transfer">Bank Transfer</option>
-                                <option value="Other">Other</option>
+                                {PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
                             </select>
                         </div>
                         <div className="form-group">

@@ -6,6 +6,7 @@ require_once '../../utils/validation.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
+require_once '../../utils/payment_modes.php';
 
 handlePreflight();
 
@@ -990,7 +991,7 @@ foreach ($dataRows as $idx => $row) {
         }
 
         if ($paymentMode !== '') {
-            $allowedModes = ['Cash', 'UPI', 'Card', 'Bank Transfer'];
+            $allowedModes = getPaymentModes();
             $matchedMode = null;
             foreach ($allowedModes as $m) {
                 if (strtolower($m) === strtolower($paymentMode)) {

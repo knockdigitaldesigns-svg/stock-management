@@ -240,7 +240,7 @@ const Dealers = () => {
                                         <td>₹{Number(dealer.pending_amount || 0).toFixed(2)}</td>
                                         <td><button type="button" className="btn btn-outline" onClick={() => setPaymentDealer(dealer)}>Payment</button></td>
                                         <td>
-                                            <div className="action-buttons">
+                                            <div className="action-buttons dealer-actions">
                                                 <button className="icon-btn view" type="button" aria-label="View dealer" title="View" onClick={() => setViewingDealer(dealer)}><Eye size={16} /></button>
                                                 <button className="btn btn-outline" type="button" onClick={() => setCashDealer(dealer)}>Cash</button>
                                                 <button className="icon-btn edit" type="button" aria-label="Edit dealer" onClick={() => setEditingDealer(dealer)}><Edit size={16} /></button>

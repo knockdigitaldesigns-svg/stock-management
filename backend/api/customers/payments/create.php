@@ -4,6 +4,7 @@ require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
 require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
+require_once '../../../utils/payment_modes.php';
 
 handlePreflight();
 
@@ -157,12 +158,7 @@ if (
 |--------------------------------------------------------------------------
 */
 
-$allowedPaymentModes = [
-    'Cash',
-    'UPI',
-    'Card',
-    'Bank Transfer'
-];
+$allowedPaymentModes = getPaymentModes();
 
 if (
     $paymentMode !== '' &&

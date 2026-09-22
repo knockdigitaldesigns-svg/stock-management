@@ -40,12 +40,17 @@ const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an
             });
         };
 
+        const handleScroll = (e) => {
+            if (dropdownRef.current && dropdownRef.current.contains(e.target)) return;
+            setIsOpen(false);
+        };
+
         updateMenuPosition();
         window.addEventListener('resize', updateMenuPosition);
-        window.addEventListener('scroll', updateMenuPosition, true);
+        window.addEventListener('scroll', handleScroll, true);
         return () => {
             window.removeEventListener('resize', updateMenuPosition);
-            window.removeEventListener('scroll', updateMenuPosition, true);
+            window.removeEventListener('scroll', handleScroll, true);
         };
     }, [isOpen]);
 

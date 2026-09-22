@@ -155,7 +155,7 @@ const CustomerReportsPage = () => {
             const params = new URLSearchParams();
             Object.entries(filters).forEach(([key, value]) => {
                 if (value !== '') {
-                    const paramKey = key === 'installationPerson' ? 'installation_person' : key === 'dateFrom' ? 'date_from' : key === 'dateTo' ? 'date_to' : key;
+                    const paramKey = key === 'installationPerson' ? 'installation_person' : key === 'dateFrom' ? 'date_from' : key === 'dateTo' ? 'date_to' : key === 'deviceType' ? 'device_type' : key === 'leadClosure' ? 'lead_closure' : key;
                     params.set(paramKey, value);
                 }
             });

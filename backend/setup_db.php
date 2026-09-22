@@ -134,6 +134,7 @@ $tables = [
         id INT AUTO_INCREMENT PRIMARY KEY,
         dealer_name VARCHAR(100) NOT NULL,
         mobile_no VARCHAR(15) NOT NULL,
+        alternate_mobile_no VARCHAR(10) DEFAULT NULL,
         location VARCHAR(255) NOT NULL,
         enrolled_date DATE NOT NULL,
         installation_status ENUM('Onsite', 'Offsite', 'Not Willing') NOT NULL,
@@ -146,6 +147,7 @@ $tables = [
         id INT AUTO_INCREMENT PRIMARY KEY,
         technician_name VARCHAR(100) NOT NULL,
         mobile_no VARCHAR(15) NOT NULL,
+        alternate_mobile_no VARCHAR(10) DEFAULT NULL,
         location VARCHAR(255) NOT NULL,
         enrolled_date DATE NOT NULL,
         notes TEXT NULL,
@@ -167,7 +169,7 @@ $tables = [
         pending_amount DECIMAL(10,2) DEFAULT 0.00,
         software VARCHAR(50) DEFAULT NULL,
         payment_status ENUM('Paid', 'Partially Paid', 'Not Paid') DEFAULT 'Not Paid',
-        payment_mode ENUM('Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL,
+        payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL,
         transaction_id VARCHAR(100) DEFAULT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -383,6 +385,7 @@ $columnChecks = [
     ['sims', 'notes', "ALTER TABLE sims ADD COLUMN notes TEXT NULL AFTER sim_validity_id"],
     ['dealers', 'notes', "ALTER TABLE dealers ADD COLUMN notes TEXT NULL AFTER installation_status"],
     ['dealers', 'software', "ALTER TABLE dealers ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER installation_status"],
+    ['dealers', 'alternate_mobile_no', "ALTER TABLE dealers ADD COLUMN alternate_mobile_no VARCHAR(10) DEFAULT NULL AFTER mobile_no"],
     ['stock_allocations', 'amount_paid', "ALTER TABLE stock_allocations ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 AFTER total_amount"],
     ['stock_allocations', 'transaction_id', "ALTER TABLE stock_allocations ADD COLUMN transaction_id VARCHAR(100) DEFAULT NULL AFTER payment_mode"],
     ['stock_allocations', 'software', "ALTER TABLE stock_allocations ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER pending_amount"],
@@ -393,6 +396,7 @@ $columnChecks = [
     ['stock_allocations', 'sim_deactivation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_deactivation_date DATE DEFAULT NULL AFTER sim_expiry_date"],
     ['stock_allocations', 'sim_status', "ALTER TABLE stock_allocations ADD COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available' AFTER sim_deactivation_date"],
     ['technicians', 'notes', "ALTER TABLE technicians ADD COLUMN notes TEXT NULL AFTER enrolled_date"],
+    ['technicians', 'alternate_mobile_no', "ALTER TABLE technicians ADD COLUMN alternate_mobile_no VARCHAR(10) DEFAULT NULL AFTER mobile_no"],
     ['stock_allocations', 'notes', "ALTER TABLE stock_allocations ADD COLUMN notes TEXT NULL AFTER payment_mode"],
     ['stock_transactions', 'notes', "ALTER TABLE stock_transactions ADD COLUMN notes TEXT NULL AFTER transaction_date"],
     ['stock_alert_settings', 'notes', "ALTER TABLE stock_alert_settings ADD COLUMN notes TEXT NULL AFTER minimum_sim_count"],
@@ -413,6 +417,7 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
 }
 
 $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available'");
+$conn->query("ALTER TABLE stock_allocations MODIFY COLUMN payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL");
 $conn->query("UPDATE stock_allocations sa JOIN sims s ON s.id = sa.sim_id SET sa.sim_given_date = COALESCE(sa.sim_given_date, sa.allocation_date), sa.sim_validity_id = COALESCE(sa.sim_validity_id, s.sim_validity_id), sa.sim_status = COALESCE(sa.sim_status, 'Available') WHERE sa.sim_id IS NOT NULL");
 
 $installationCustomerSupportIndex = $conn->query("SHOW INDEX FROM customer_installations WHERE Key_name = 'idx_customer_installation_customer'");

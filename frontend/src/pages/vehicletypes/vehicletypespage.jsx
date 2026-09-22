@@ -8,6 +8,7 @@ import usePagination from '../../hooks/usePagination';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { formatDate } from '../../utils/date';
 
 const VehicleTypesPage = () => {
     const { hasPermission } = useAuth();
@@ -354,35 +355,22 @@ const VehicleTypesPage = () => {
                 {/* =========================
                     FILTERS
                 ========================== */}
-                <div
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        padding: '20px',
-                        flexWrap: 'wrap'
-                    }}
-                >
+                <div className="table-filter-bar">
 
                     {/* SEARCH */}
                     <input
                         type="text"
-                        className="form-control"
                         placeholder="Search vehicle type..."
                         value={search}
                         onChange={(e) => {
                             setSearch(e.target.value);
                             setPage(1);
                         }}
-                        style={{
-                            width: '260px',
-                            flex: '0 0 260px'
-                        }}
+                        className="form-control table-filter-search"
                     />
 
                     {/* STATUS */}
                     <select
-                        className="form-control"
                         value={statusFilter}
                         onChange={(e) => {
                             setStatusFilter(
@@ -390,10 +378,7 @@ const VehicleTypesPage = () => {
                             );
                             setPage(1);
                         }}
-                        style={{
-                            width: '170px',
-                            flex: '0 0 170px'
-                        }}
+                        className="form-control"
                     >
                         <option value="">
                             All Statuses
@@ -437,6 +422,10 @@ const VehicleTypesPage = () => {
                                 </th>
 
                                 <th>
+                                    Created Date
+                                </th>
+
+                                <th>
                                     Actions
                                 </th>
                             </tr>
@@ -448,7 +437,7 @@ const VehicleTypesPage = () => {
 
                                 <tr>
                                     <td
-                                        colSpan="3"
+                                        colSpan="4"
                                         className="text-center"
                                     >
                                         Loading vehicle types...
@@ -459,7 +448,7 @@ const VehicleTypesPage = () => {
 
                                 <tr>
                                     <td
-                                        colSpan="3"
+                                        colSpan="4"
                                         className="text-center empty-state"
                                     >
                                         No vehicle types found.
@@ -494,14 +483,18 @@ const VehicleTypesPage = () => {
                                                     className={
                                                         item.status ===
                                                         'Active'
-                                                            ? 'status-badge status-active'
-                                                            : 'status-badge status-inactive'
+                                                            ? 'badge badge-success'
+                                                            : 'badge badge-danger'
                                                     }
                                                 >
                                                     {
                                                         item.status
                                                     }
                                                 </span>
+                                            </td>
+
+                                            <td>
+                                                {formatDate(item.created_at)}
                                             </td>
 
                                             {/* ACTIONS */}

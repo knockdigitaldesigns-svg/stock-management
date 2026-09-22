@@ -5,6 +5,7 @@ import SearchableDropdown from '../SearchableDropdown/SearchableDropdown';
 import Modal from '../Modal/Modal';
 import DateInput from '../DateInput';
 import { softwareDropdownOptions } from '../../constants/software';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { showGlobalError } from '../../context/ErrorContext';
 
 const getDealerAssignedSoftware = (dealer) => {
@@ -29,13 +30,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         { value: 'sim', label: 'SIMs' },
         { value: 'both', label: 'Both Devices & SIMs' }
     ];
-    const paymentModeOptions = [
-        { value: 'Cash', label: 'Cash' },
-        { value: 'UPI', label: 'UPI' },
-        { value: 'Bank Transfer', label: 'Bank Transfer' },
-        { value: 'Card', label: 'Card' },
-        { value: 'Other', label: 'Other' }
-    ];
+    const paymentModeOptions = PAYMENT_MODES.map((mode) => ({ value: mode, label: mode }));
 
     const [selectedOwner, setSelectedOwner] = useState('');
     const [allocationType, setAllocationType] = useState('device');

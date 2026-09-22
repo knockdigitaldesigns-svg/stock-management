@@ -1,9 +1,12 @@
 <?php
 require_once __DIR__ . '/common.php';
+require_once __DIR__ . '/../../utils/payment_modes.php';
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse(false, 'Method not allowed', [], [], 405);
 $payload = json_decode(file_get_contents('php://input'), true) ?: [];
 $action = trim((string)($payload['action_type'] ?? ''));
+$paymentMode = trim((string)($payload['payment_mode'] ?? ''));
+if ($paymentMode !== '' && !in_array($paymentMode, getPaymentModes(), true)) throw new Exception('Invalid payment mode.');
 $permission = in_array($action, ['Renew SIM', 'Reactivate SIM'], true) ? 'customer_renewals.renew' : 'customer_renewals.edit';
 requirePermission($permission);
 $token = getCurrentUserFromToken();

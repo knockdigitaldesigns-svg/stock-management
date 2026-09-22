@@ -24,7 +24,8 @@ $result = $conn->query(
         lead_closure_name,
         mobile_no,
         location,
-        status
+        status,
+        created_at
      FROM lead_closures
      ORDER BY lead_closure_name ASC'
 );

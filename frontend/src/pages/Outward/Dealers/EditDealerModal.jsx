@@ -15,6 +15,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     const [formData, setFormData] = useState({
         dealer_name: dealer?.dealer_name || '',
         mobile_no: dealer?.mobile_no || '',
+        alternate_mobile_no: dealer?.alternate_mobile_no || '',
         location: dealer?.location || '',
         enrolled_date: dealer?.enrolled_date || '',
         installation_status: dealer?.installation_status || 'Onsite',
@@ -37,6 +38,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     const handleMobileChange = (e) => {
         const val = e.target.value.replace(/\D/g, '').slice(0, 10);
         setFormData(prev => ({ ...prev, mobile_no: val }));
+    };
+
+    const handleAlternateMobileChange = (e) => {
+        const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+        setFormData(prev => ({ ...prev, alternate_mobile_no: val }));
     };
 
     const toggleSoftware = (opt) => {
@@ -74,7 +80,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
         }
 
         if (formData.mobile_no.length !== 10) {
-            return triggerError('Mobile Number must be exactly 10 digits.');
+            return triggerError('Mobile number must contain exactly 10 digits.');
+        }
+
+        if (formData.alternate_mobile_no && formData.alternate_mobile_no.length !== 10) {
+            return triggerError('Alternate mobile number must contain exactly 10 digits.');
         }
 
         if (formData.threshold_amount !== '' && formData.threshold_amount !== null && formData.threshold_amount !== undefined) {
@@ -135,6 +145,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
                 <div className="form-group">
                     <label className="form-label">Mobile No * (10 digits)</label>
                     <input type="text" className="form-control" value={formData.mobile_no} onChange={handleMobileChange} maxLength={10} placeholder="Enter 10 digit mobile number" required />
+                </div>
+
+                <div className="form-group">
+                    <label className="form-label">Alternate Mobile No</label>
+                    <input type="text" className="form-control" value={formData.alternate_mobile_no} onChange={handleAlternateMobileChange} maxLength={10} placeholder="Enter 10 digit mobile number" />
                 </div>
 
                 <div className="form-group">

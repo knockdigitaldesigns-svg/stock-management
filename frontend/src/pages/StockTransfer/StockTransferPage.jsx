@@ -287,8 +287,8 @@ const StockTransferPage = () => {
             </div>
 
             {/* ---- FILTERS ---- */}
-            <div className="card" style={{ marginBottom: '16px', padding: '16px' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
+            <div className="card stock-transfer-filter-card">
+                <div className="table-filter-bar stock-transfer-filters">
                     <div>
                         <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
                             Original Owner
@@ -427,15 +427,7 @@ const StockTransferPage = () => {
                                         <td>{row.to_owner_name || '-'}</td>
                                         <td>{row.transfer_date ? formatDate(row.transfer_date) : '-'}</td>
                                         <td>
-                                            <span style={{
-                                                display: 'inline-block',
-                                                padding: '2px 10px',
-                                                borderRadius: '12px',
-                                                fontSize: '12px',
-                                                fontWeight: 600,
-                                                background: '#e0f2fe',
-                                                color: '#0369a1'
-                                            }}>
+                                            <span className="badge badge-info">
                                                 {row.new_status || 'Allocated'}
                                             </span>
                                         </td>

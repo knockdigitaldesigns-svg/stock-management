@@ -28,7 +28,8 @@ $result = $conn->query(
     'SELECT
         id,
         sale_amount,
-        status
+        status,
+        created_at
      FROM sale_amounts
      ORDER BY sale_amount ASC'
 );

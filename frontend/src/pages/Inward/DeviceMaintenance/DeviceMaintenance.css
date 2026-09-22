@@ -1,35 +1,3 @@
-.page-container {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-}
-
-.page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.page-header h2 {
-    margin: 0;
-    font-size: 1.5rem;
-}
-
-.header-actions {
-    display: flex;
-    gap: 1rem;
-}
-
-.btn-outline {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-}
-
-.btn-outline:hover {
-    background: #f1f5f9;
-}
-
 .table-controls {
     margin-bottom: 1rem;
     display: flex;
@@ -54,24 +22,12 @@
     gap: 0.5rem;
 }
 
-.icon-btn {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 0.25rem;
-    border-radius: 0.25rem;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
 .icon-btn.edit {
     color: var(--primary-color);
 }
 
 .icon-btn.edit:hover {
-    background-color: #eff6ff;
+    background-color: #eaf2ff;
 }
 
 .icon-btn.delete {
@@ -80,65 +36,6 @@
 
 .icon-btn.delete:hover {
     background-color: #fee2e2;
-}
-
-/* Modal Styles */
-.modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-.modal-content {
-    background-color: var(--card-bg);
-    border-radius: 0.75rem;
-    width: 90%;
-    max-width: 800px;
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
-}
-
-.modal-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-}
-
-.close-btn {
-    background: transparent;
-    border: none;
-    font-size: 1.5rem;
-    line-height: 1;
-    cursor: pointer;
-    color: var(--text-secondary);
-}
-
-.modal-body {
-    padding: 1.5rem;
-    overflow-y: auto;
-}
-
-.modal-footer {
-    padding: 1.5rem;
-    border-top: 1px solid var(--border-color);
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem;
 }
 
 .device-row {

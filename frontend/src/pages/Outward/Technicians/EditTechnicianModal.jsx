@@ -9,6 +9,7 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
     const [formData, setFormData] = useState({
         technician_name: technician?.technician_name || '',
         mobile_no: technician?.mobile_no || '',
+        alternate_mobile_no: technician?.alternate_mobile_no || '',
         location: technician?.location || '',
         enrolled_date: technician?.enrolled_date || '',
         notes: technician?.notes || ''
@@ -49,8 +50,12 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
         }
 
         const digitsOnly = formData.mobile_no.replace(/\D/g, '');
-        if (digitsOnly.length !== 10) {
-            return triggerError('Mobile No must be exactly 10 digits.');
+        if (digitsOnly.length !== 10 || digitsOnly !== formData.mobile_no) {
+            return triggerError('Mobile number must contain exactly 10 digits.');
+        }
+
+        if (formData.alternate_mobile_no && (formData.alternate_mobile_no.length !== 10 || !/^\d{10}$/.test(formData.alternate_mobile_no))) {
+            return triggerError('Alternate mobile number must contain exactly 10 digits.');
         }
 
         setLoading(true);
@@ -101,7 +106,12 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
 
                 <div className="form-group">
                     <label className="form-label">Mobile No *</label>
-                    <input type="text" className="form-control" value={formData.mobile_no} onChange={(e) => { const val = e.target.value.replace(/\D/g, ''); setFormData((prev) => ({ ...prev, mobile_no: val })); }} maxLength={10} placeholder="Enter 10 digit mobile no" required />
+                    <input type="text" className="form-control" value={formData.mobile_no} onChange={(e) => { const val = e.target.value.replace(/\D/g, '').slice(0, 10); setFormData((prev) => ({ ...prev, mobile_no: val })); }} maxLength={10} placeholder="Enter 10 digit mobile no" required />
+                </div>
+
+                <div className="form-group">
+                    <label className="form-label">Alternate Mobile No</label>
+                    <input type="text" className="form-control" value={formData.alternate_mobile_no} onChange={(e) => { const val = e.target.value.replace(/\D/g, '').slice(0, 10); setFormData((prev) => ({ ...prev, alternate_mobile_no: val })); }} maxLength={10} placeholder="Enter 10 digit mobile no" />
                 </div>
 
                 <div className="form-group">

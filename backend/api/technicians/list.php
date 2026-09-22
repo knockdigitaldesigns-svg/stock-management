@@ -24,6 +24,7 @@ $sql = "
         t.id, 
         t.technician_name, 
         t.mobile_no, 
+        t.alternate_mobile_no,
         t.location, 
         t.enrolled_date, 
         t.notes,

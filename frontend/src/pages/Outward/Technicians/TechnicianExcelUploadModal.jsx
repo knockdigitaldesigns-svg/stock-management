@@ -139,7 +139,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
 
         const rawRows = XLSX.utils.sheet_to_json(worksheet, {
             defval: '',
-            raw: false
+            raw: true
         });
 
         if (!rawRows || rawRows.length === 0) {
@@ -175,9 +175,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
             ).trim();
             const mobileNo = String(row[headerMap[normalizeHeader('Mobile No')]] || '').trim();
             const location = String(row[headerMap[normalizeHeader('Location')]] || '').trim();
-            const enrolledDateRaw = String(
-                row[headerMap[normalizeHeader('Enrolled Date')]] || ''
-            ).trim();
+            const enrolledDateRaw = row[headerMap[normalizeHeader('Enrolled Date')]];
 
             if (!technicianName) {
                 clientErrors.push(`Row ${rowNum}: Technician Name is required.`);
@@ -198,7 +196,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
                 clientErrors.push(`Row ${rowNum}: Location is required.`);
             }
 
-            if (!enrolledDateRaw) {
+            if (enrolledDateRaw === null || enrolledDateRaw === undefined || enrolledDateRaw === '') {
                 clientErrors.push(`Row ${rowNum}: Enrolled Date is required.`);
             } else {
                 const parsed = parseDate(enrolledDateRaw);

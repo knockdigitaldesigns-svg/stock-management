@@ -43,8 +43,8 @@ if (!empty($dbErrors)) {
 }
 
 $conn->begin_transaction();
-$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-$stmt->bind_param("ssssssds", $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes']);
+$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("sssssssds", $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes']);
 
 if ($stmt->execute()) {
     $dealerId = $conn->insert_id;

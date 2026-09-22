@@ -55,10 +55,10 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
         reader.onload = async (e) => {
             try {
                 const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false });
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
 
                 if (jsonData.length === 0) {
                     const msg = "Excel file is empty.";
@@ -83,7 +83,8 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     const notes = row["Notes"]?.toString().trim() || '';
                     const parsedDate = parseDate(purchaseDate);
 
-                    if (!purchaseDate) validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
+                    if (purchaseDate === null || purchaseDate === undefined || purchaseDate === '') validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
+                    else if (!parsedDate) validationErrors.push(`Row ${rowNum}: Purchase Date is invalid.`);
                     else if (isFutureDate(parsedDate)) validationErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
                     
                     if (!simNo) validationErrors.push(`Row ${rowNum}: SIM No is required.`);
@@ -94,15 +95,9 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     
                     if (simNo) seenSims.add(simNo);
 
-                    if (purchaseDate && simNo && simRegex.test(simNo) && ['Voice', 'Non Voice'].includes(simType)) {
-                        let normalizedDate = parsedDate;
-                        if (purchaseDate.includes('/')) {
-                            const [m, d, y] = purchaseDate.split('/');
-                            normalizedDate = parseDate(`${d}-${m}-${y}`);
-                        }
-
+                    if (parsedDate && simNo && simRegex.test(simNo) && ['Voice', 'Non Voice'].includes(simType)) {
                         validSims.push({
-                            purchase_date: normalizedDate,
+                            purchase_date: parsedDate,
                             sim_no: simNo,
                             sim_type: simType,
                             // sim_validity_id: validity.id,

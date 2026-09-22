@@ -368,14 +368,14 @@ const deleteRole = async () => {
                 </div>
             </div>
 
-            <div className="card" style={{ padding: 0 }}>
-                <div className="tab-row" style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0' }}>
+            <div className="card settings-tabs-card">
+                <div className="tab-row settings-tab-row">
                     <button className={`btn ${tab === 'roles' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab('roles')}>Roles</button>
                     <button className={`btn ${tab === 'permissions' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab('permissions')}>Permissions</button>
                 </div>
 
                 {tab === 'roles' && (
-                    <div style={{ padding: '1.5rem' }}>
+                    <div className="settings-tab-panel">
                         <TableFilterBar filters={filters} onChange={setFilters} onReset={() => setFilters(emptyTableFilters())} items={roles} dateKeys={['created_at']} searchPlaceholder="Search roles..." />
 
                         <div className="table-container">
@@ -450,7 +450,7 @@ const deleteRole = async () => {
                 )}
 
                 {tab === 'permissions' && (
-                    <div style={{ padding: '1.5rem' }}>
+                    <div className="settings-tab-panel">
                         <div className="form-group" style={{ maxWidth: '320px' }}>
                             <label className="form-label">Select Role</label>
                             <SearchableDropdown

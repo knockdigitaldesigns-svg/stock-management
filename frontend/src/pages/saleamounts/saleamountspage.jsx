@@ -8,6 +8,7 @@ import usePagination from '../../hooks/usePagination';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { formatDate } from '../../utils/date';
 
 const SaleAmountsPage = () => {
     const { hasPermission } = useAuth();
@@ -447,22 +448,12 @@ const SaleAmountsPage = () => {
 
                 {/* FILTERS */}
 
-                <div
-                    className="filters-container"
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        flexWrap: 'wrap',
-                        padding: '16px',
-                    }}
-                >
+                <div className="table-filter-bar">
 
                     {/* SEARCH */}
 
                     <input
                         type="text"
-                        className="form-control"
                         placeholder="Search Sale Amount"
                         value={search}
                         onChange={(event) => {
@@ -471,15 +462,12 @@ const SaleAmountsPage = () => {
                             );
                             setPage(1);
                         }}
-                        style={{
-                            width: '260px',
-                        }}
+                        className="form-control table-filter-search"
                     />
 
                     {/* STATUS */}
 
                     <select
-                        className="form-control"
                         value={statusFilter}
                         onChange={(event) => {
                             setStatusFilter(
@@ -487,9 +475,7 @@ const SaleAmountsPage = () => {
                             );
                             setPage(1);
                         }}
-                        style={{
-                            width: '170px',
-                        }}
+                        className="form-control"
                     >
 
                         <option value="">
@@ -541,6 +527,10 @@ const SaleAmountsPage = () => {
                                 </th>
 
                                 <th>
+                                    Created Date
+                                </th>
+
+                                <th>
                                     Actions
                                 </th>
 
@@ -555,7 +545,7 @@ const SaleAmountsPage = () => {
                                 <tr>
 
                                     <td
-                                        colSpan="3"
+                                        colSpan="4"
                                         className="text-center"
                                     >
                                         Loading sale amounts...
@@ -568,7 +558,7 @@ const SaleAmountsPage = () => {
                                 <tr>
 
                                     <td
-                                        colSpan="3"
+                                        colSpan="4"
                                         className="text-center empty-state"
                                     >
                                         No sale amount
@@ -604,18 +594,17 @@ const SaleAmountsPage = () => {
                                             <td>
 
                                                 <span
-                                                    className={
-                                                        item.status ===
-                                                        'Active'
-                                                            ? 'status-badge active'
-                                                            : 'status-badge inactive'
-                                                    }
+                                                    className={`badge ${item.status === 'Active' ? 'badge-success' : 'badge-danger'}`}
                                                 >
                                                     {
                                                         item.status
                                                     }
                                                 </span>
 
+                                            </td>
+
+                                            <td>
+                                                {formatDate(item.created_at)}
                                             </td>
 
                                             <td>

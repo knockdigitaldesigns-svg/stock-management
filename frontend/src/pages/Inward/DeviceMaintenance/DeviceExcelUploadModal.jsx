@@ -45,10 +45,10 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
         reader.onload = async (e) => {
             try {
                 const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: false });
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
 
                 if (jsonData.length === 0) {
                     const msg = "Excel file is empty.";
@@ -76,7 +76,8 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                     const notes = row["Notes"]?.toString().trim() || '';
                     const parsedDate = parseDate(purchaseDate);
 
-                    if (!purchaseDate) validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
+                    if (purchaseDate === null || purchaseDate === undefined || purchaseDate === '') validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
+                    else if (!parsedDate) validationErrors.push(`Row ${rowNum}: Purchase Date is invalid.`);
                     else if (isFutureDate(parsedDate)) validationErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
                     if (!deviceModelName) validationErrors.push(`Row ${rowNum}: Device Model is required.`);
                     else if (!modelMap[deviceModelName.toLowerCase()]) validationErrors.push(`Row ${rowNum}: Device model '${deviceModelName}' does not exist in Device Types.`);
@@ -85,15 +86,9 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                     
                     if (imeiNo) seenImeis.add(imeiNo);
 
-                    if (purchaseDate && deviceModelName && modelMap[deviceModelName.toLowerCase()] && imeiNo && imeiRegex.test(imeiNo)) {
-                        let normalizedDate = parsedDate;
-                        if (purchaseDate.includes('/')) {
-                            const [m, d, y] = purchaseDate.split('/');
-                            normalizedDate = parseDate(`${d}-${m}-${y}`);
-                        }
-
+                    if (parsedDate && deviceModelName && modelMap[deviceModelName.toLowerCase()] && imeiNo && imeiRegex.test(imeiNo)) {
                         validDevices.push({
-                            purchase_date: normalizedDate,
+                            purchase_date: parsedDate,
                             device_model_id: modelMap[deviceModelName.toLowerCase()],
                             imei_no: imeiNo,
                             notes

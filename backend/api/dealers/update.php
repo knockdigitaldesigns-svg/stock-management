@@ -43,7 +43,7 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
-$oldStmt = $conn->prepare('SELECT dealer_name, mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes FROM dealers WHERE id = ? LIMIT 1');
+$oldStmt = $conn->prepare('SELECT dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes FROM dealers WHERE id = ? LIMIT 1');
 $oldStmt->bind_param('i', $id);
 $oldStmt->execute();
 $oldDealer = $oldStmt->get_result()->fetch_assoc();
@@ -56,6 +56,7 @@ if (!$oldDealer) {
 $newDealer = [
     'dealer_name' => $validData['dealer_name'],
     'mobile_no' => $validData['mobile_no'],
+    'alternate_mobile_no' => $validData['alternate_mobile_no'],
     'location' => $validData['location'],
     'enrolled_date' => $validData['enrolled_date'],
     'installation_status' => $validData['installation_status'],
@@ -67,8 +68,8 @@ $conn->begin_transaction();
 try {
     writeChangedFields($conn, $id, 'Dealer', $oldDealer, $newDealer, $currentUser);
 
-    $stmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, software = ?, threshold_amount = ?, notes = ? WHERE id = ?');
-    $stmt->bind_param('ssssssdsi', $validData['dealer_name'], $validData['mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes'], $id);
+    $stmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, software = ?, threshold_amount = ?, notes = ? WHERE id = ?');
+    $stmt->bind_param('sssssssdsi', $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes'], $id);
 
     if ($stmt->execute()) {
         $stmt->close();

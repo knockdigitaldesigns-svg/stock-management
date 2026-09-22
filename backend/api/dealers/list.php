@@ -131,6 +131,7 @@ $sql = "
         d.id, 
         d.dealer_name, 
         d.mobile_no, 
+        d.alternate_mobile_no,
         d.location, 
         d.enrolled_date, 
         d.installation_status,
