@@ -28,7 +28,7 @@ $sql = "
         sa.allocation_date
     FROM stock_allocations sa
     JOIN sims s ON sa.sim_id = s.id
-    LEFT JOIN sim_validities v ON v.id = s.sim_validity_id
+    LEFT JOIN sim_validities v ON v.id = COALESCE(sa.sim_validity_id, s.sim_validity_id)
     JOIN dealers d ON sa.owner_type = 'dealer' AND sa.owner_id = d.id
 ";
 

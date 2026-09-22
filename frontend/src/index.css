@@ -380,6 +380,11 @@ th {
   white-space: nowrap;
 }
 
+.stock-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
 .stock-transfer-filter-card {
   padding: 0;
   overflow: visible;

@@ -531,7 +531,6 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                     <select className="form-control" value={usedFor} onChange={(e) => setUsedFor(e.target.value)}>
                         <option value="">Select...</option>
                         <option value="ET">Used for ET</option>
-                        <option value="TECHNICIAN">Used for Technician</option>
                         <option value="DEALER">Used for Dealer</option>
                     </select>
                 </div>

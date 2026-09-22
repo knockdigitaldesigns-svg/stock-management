@@ -6,367 +6,125 @@ import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
 import { showGlobalError } from '../../../context/ErrorContext';
 
-export const TECHNICIAN_COLUMNS = [
-    { key: 'technician_name', header: 'Technician Name', required: true },
-    { key: 'mobile_no', header: 'Mobile No', required: true },
-    { key: 'location', header: 'Location', required: true },
-    { key: 'enrolled_date', header: 'Enrolled Date', required: true },
-    { key: 'notes', header: 'Notes', required: false }
+export const TECHNICIAN_ALLOCATION_COLUMNS = [
+    'Technician Name', 'Allocation Type', 'Device Date', 'IMEI No',
+    'Device Notes', 'SIM Date', 'SIM Number', 'SIM Notes', 'Software'
 ];
 
-const normalizeHeader = (str) =>
-    String(str || '')
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, ' ');
+const normalizeHeader = (value) => String(value || '').toLowerCase().trim().replace(/\s+/g, ' ');
 
 const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
-
     const [file, setFile] = useState(null);
     const [errors, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
 
-    const triggerErrors = (errs) => {
-        const errList = Array.isArray(errs) ? errs : [errs];
-        setErrors(errList);
-        showGlobalError(errList, 'Excel Upload Validation Error');
+    const triggerErrors = (messages) => {
+        const list = Array.isArray(messages) ? messages : [messages];
+        setErrors(list);
+        showGlobalError(list, 'Excel Upload Validation Error');
     };
 
     const downloadTemplate = () => {
-        const headers = TECHNICIAN_COLUMNS.map((c) => c.header);
-        const sampleData = [
-            {
-                'Technician Name': 'Arun Kumar',
-                'Mobile No': '9876501001',
-                'Location': 'Coimbatore',
-                'Enrolled Date': '01-08-2026',
-                'Notes': 'Technician for West Zone'
-            },
-            {
-                'Technician Name': 'Vignesh R',
-                'Mobile No': '9876501002',
-                'Location': 'Madurai',
-                'Enrolled Date': '02-08-2026',
-                'Notes': 'Field installation technician'
-            },
-            {
-                'Technician Name': 'Sathish M',
-                'Mobile No': '9876501003',
-                'Location': 'Chennai',
-                'Enrolled Date': '04-08-2026',
-                'Notes': 'Handles GPS installations'
-            }
+        const rows = [
+            { 'Technician Name': 'Vignesh R', 'Allocation Type': 'device', 'Device Date': '22-09-2026', 'IMEI No': '123456789012345', 'Device Notes': 'Basic Device', 'SIM Date': '', 'SIM Number': '', 'SIM Notes': '', Software: 'Eagle India' },
+            { 'Technician Name': 'Vignesh R', 'Allocation Type': 'sim', 'Device Date': '', 'IMEI No': '', 'Device Notes': '', 'SIM Date': '22-09-2026', 'SIM Number': '9876543210', 'SIM Notes': 'Voice SIM', Software: 'Eagle India' },
+            { 'Technician Name': 'Vignesh R', 'Allocation Type': 'both', 'Device Date': '22-09-2026', 'IMEI No': '123456789012345', 'Device Notes': 'Basic Device', 'SIM Date': '22-09-2026', 'SIM Number': '9876543210', 'SIM Notes': 'Voice SIM', Software: 'Eagle India' }
         ];
-
-        const ws = XLSX.utils.json_to_sheet(sampleData, { header: headers });
+        const ws = XLSX.utils.json_to_sheet(rows, { header: TECHNICIAN_ALLOCATION_COLUMNS });
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Technicians');
-        XLSX.writeFile(wb, 'Technician_Upload_Template.xlsx');
+        XLSX.utils.book_append_sheet(wb, ws, 'Technician Allocations');
+        XLSX.writeFile(wb, 'Technician_Stock_Allocation_Template.xlsx');
     };
 
-    const handleFileChange = (e) => {
-        const selectedFile = e.target.files[0];
-        if (!selectedFile) return;
-
-        if (!selectedFile.name.toLowerCase().endsWith('.xlsx')) {
-            setFile(null);
-            triggerErrors(['Only .xlsx files are allowed.']);
-            setSuccessMsg('');
-            return;
-        }
-
-        if (selectedFile.size === 0) {
-            setFile(null);
-            triggerErrors(['Excel file is empty.']);
-            setSuccessMsg('');
-            return;
-        }
-
-        setFile(selectedFile);
-        setErrors([]);
-        setSuccessMsg('');
+    const handleFileChange = (event) => {
+        const selected = event.target.files[0];
+        if (!selected) return;
+        if (!selected.name.toLowerCase().endsWith('.xlsx')) return triggerErrors(['Only .xlsx files are allowed.']);
+        if (!selected.size) return triggerErrors(['Excel file is empty.']);
+        setFile(selected); setErrors([]); setSuccessMsg('');
     };
 
     const processExcel = async () => {
-        if (!file) {
-            triggerErrors(['Please select an Excel file.']);
-            return;
-        }
-
-        if (!file.name.toLowerCase().endsWith('.xlsx')) {
-            triggerErrors(['Only .xlsx files are allowed.']);
-            return;
-        }
-
-        if (file.size === 0) {
-            triggerErrors(['Excel file is empty.']);
-            return;
-        }
-
-        setLoading(true);
-        setErrors([]);
-        setSuccessMsg('');
-
-        let workbook;
+        if (!file) return triggerErrors(['Please select an Excel file.']);
+        setLoading(true); setErrors([]); setSuccessMsg('');
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            workbook = XLSX.read(arrayBuffer, {
-                type: 'array',
-                cellDates: true
+            const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const headerRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
+            const headerRow = headerRows[0] || [];
+            const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: true });
+            if (!rows.length) return triggerErrors(['Excel file is empty.']);
+            const headers = headerRow.map(normalizeHeader).filter(Boolean);
+            const missing = TECHNICIAN_ALLOCATION_COLUMNS.filter((header) => !headers.includes(normalizeHeader(header)));
+            if (missing.length) return triggerErrors([`Required column '${missing[0]}' is missing.`]);
+
+            const validationErrors = [];
+            const seen = new Set();
+            rows.forEach((row, index) => {
+                const rowNum = index + 2;
+                const value = (header) => row[Object.keys(row).find((key) => normalizeHeader(key) === normalizeHeader(header))];
+                const technician = String(value('Technician Name') || '').trim();
+                const type = String(value('Allocation Type') || '').trim().toLowerCase();
+                const deviceDate = value('Device Date');
+                const simDate = value('SIM Date');
+                const imei = String(value('IMEI No') || '').replace(/\D/g, '');
+                const simNo = String(value('SIM Number') || '').trim();
+                if (!technician) validationErrors.push(`Row ${rowNum}: Technician Name is required.`);
+                if (!['device', 'sim', 'both'].includes(type)) validationErrors.push(`Row ${rowNum}: Allocation Type must be device, sim, or both.`);
+                if (type === 'device' || type === 'both') {
+                    const parsed = parseDate(deviceDate);
+                    if (deviceDate === '' || deviceDate === undefined) validationErrors.push(`Row ${rowNum}: Device Date is required.`);
+                    else if (!parsed || isFutureDate(parsed)) validationErrors.push(`Row ${rowNum}: Invalid or future Device Date.`);
+                    if (!/^\d{15}$/.test(imei)) validationErrors.push(`Row ${rowNum}: IMEI No must contain exactly 15 digits.`);
+                }
+                if (type === 'sim' || type === 'both') {
+                    const parsed = parseDate(simDate);
+                    if (simDate === '' || simDate === undefined) validationErrors.push(`Row ${rowNum}: SIM Date is required.`);
+                    else if (!parsed || isFutureDate(parsed)) validationErrors.push(`Row ${rowNum}: Invalid or future SIM Date.`);
+                    if (!simNo) validationErrors.push(`Row ${rowNum}: SIM Number is required.`);
+                }
+                [imei ? `device:${imei}` : '', simNo ? `sim:${simNo}` : ''].filter(Boolean).forEach((key) => {
+                    if (seen.has(key)) validationErrors.push(`Row ${rowNum}: Duplicate stock item in uploaded Excel.`);
+                    seen.add(key);
+                });
             });
-        } catch (err) {
-            triggerErrors(['Invalid or corrupted Excel file.']);
-            setLoading(false);
-            return;
-        }
+            if (validationErrors.length) return triggerErrors([...new Set(validationErrors)]);
 
-        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-            triggerErrors(['Excel workbook contains no worksheets.']);
-            setLoading(false);
-            return;
-        }
-
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-
-        if (!worksheet) {
-            triggerErrors(['Unable to read the first Excel worksheet.']);
-            setLoading(false);
-            return;
-        }
-
-        const rawRows = XLSX.utils.sheet_to_json(worksheet, {
-            defval: '',
-            raw: true
-        });
-
-        if (!rawRows || rawRows.length === 0) {
-            triggerErrors(['Excel file is empty.']);
-            setLoading(false);
-            return;
-        }
-
-        const rawKeys = Object.keys(rawRows[0] || {});
-        const headerMap = {};
-        rawKeys.forEach((k) => {
-            headerMap[normalizeHeader(k)] = k;
-        });
-
-        const missingRequired = TECHNICIAN_COLUMNS.filter(
-            (c) => c.required && !headerMap[normalizeHeader(c.header)]
-        );
-        if (missingRequired.length > 0) {
-            triggerErrors([`Required column '${missingRequired[0].header}' is missing.`]);
-            setLoading(false);
-            return;
-        }
-
-        const clientErrors = [];
-        const seenNames = new Set();
-        const seenMobiles = new Set();
-
-        rawRows.forEach((row, idx) => {
-            const rowNum = idx + 2;
-
-            const technicianName = String(
-                row[headerMap[normalizeHeader('Technician Name')]] || ''
-            ).trim();
-            const mobileNo = String(row[headerMap[normalizeHeader('Mobile No')]] || '').trim();
-            const location = String(row[headerMap[normalizeHeader('Location')]] || '').trim();
-            const enrolledDateRaw = row[headerMap[normalizeHeader('Enrolled Date')]];
-
-            if (!technicianName) {
-                clientErrors.push(`Row ${rowNum}: Technician Name is required.`);
-            }
-
-            const normalizedMobile = mobileNo.replace(/\D/g, '');
-            if (!mobileNo) {
-                clientErrors.push(`Row ${rowNum}: Mobile No is required.`);
-            } else if (
-                !/^[0-9+\-\s()]{10,15}$/.test(mobileNo) ||
-                normalizedMobile.length < 10 ||
-                normalizedMobile.length > 15
-            ) {
-                clientErrors.push(`Row ${rowNum}: Mobile No is invalid.`);
-            }
-
-            if (!location) {
-                clientErrors.push(`Row ${rowNum}: Location is required.`);
-            }
-
-            if (enrolledDateRaw === null || enrolledDateRaw === undefined || enrolledDateRaw === '') {
-                clientErrors.push(`Row ${rowNum}: Enrolled Date is required.`);
-            } else {
-                const parsed = parseDate(enrolledDateRaw);
-                if (!parsed) {
-                    clientErrors.push(`Row ${rowNum}: Invalid Enrolled Date.`);
-                } else if (isFutureDate(parsed)) {
-                    clientErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
-                }
-            }
-
-            const normName = technicianName.toLowerCase().replace(/\s+/g, ' ');
-            if (normName) {
-                if (seenNames.has(normName)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate Technician Name in uploaded Excel.`);
-                }
-                seenNames.add(normName);
-            }
-
-            if (normalizedMobile) {
-                if (seenMobiles.has(normalizedMobile)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate Mobile No in uploaded Excel.`);
-                }
-                seenMobiles.add(normalizedMobile);
-            }
-        });
-
-        if (clientErrors.length > 0) {
-            triggerErrors(Array.from(new Set(clientErrors)));
-            setLoading(false);
-            return;
-        }
-
-        try {
             const formData = new FormData();
             formData.append('file', file);
-            const response = await api.post('/technicians/import.php', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
-
-            if (response.data.success) {
-                setSuccessMsg(response.data.message || 'Technicians uploaded successfully.');
-                setTimeout(() => {
-                    onSuccess();
-                }, 1000);
-            } else {
-                const backendErrors =
-                    response.data?.data?.errors ||
-                    response.data?.errors ||
-                    [response.data.message || 'Failed to upload technicians'];
-                triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
-            }
+            const response = await api.post('/technicians/import.php', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            if (!response.data.success) throw new Error(response.data.message || 'Failed to upload allocations.');
+            setSuccessMsg(response.data.message || 'Stock allocation completed successfully.');
+            setTimeout(onSuccess, 1000);
         } catch (error) {
-            const backendErrors =
-                error.response?.data?.data?.errors ||
-                error.response?.data?.errors ||
-                [error.response?.data?.message || error.message || 'Error uploading technicians'];
-            triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
-        } finally {
-            setLoading(false);
-        }
+            const data = error.response?.data;
+            triggerErrors(data?.data?.errors || data?.errors || [data?.message || error.message || 'Error uploading allocations.']);
+        } finally { setLoading(false); }
     };
 
     return (
         <div className="modal-overlay">
             <div className="modal-content" style={{ maxWidth: '620px' }}>
-                <div className="modal-header">
-                    <h3>Upload Technicians via Excel</h3>
-                    <button className="close-btn" onClick={onClose} disabled={loading}>
-                        &times;
-                    </button>
-                </div>
-
+                <div className="modal-header"><h3>Bulk Device / SIM Stock Allocation via Excel</h3><button className="close-btn" onClick={onClose} disabled={loading}>&times;</button></div>
                 <div className="modal-body">
-                    <div
-                        className="info-box"
-                        style={{
-                            backgroundColor: '#f8fafc',
-                            padding: '1rem',
-                            borderRadius: '0.5rem',
-                            marginBottom: '1.5rem'
-                        }}
-                    >
-                        <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>Instructions:</p>
-                        <ul
-                            style={{
-                                margin: '0',
-                                paddingLeft: '1.5rem',
-                                fontSize: '0.875rem',
-                                color: 'var(--text-secondary)'
-                            }}
-                        >
-                            <li>
-                                Required columns:{' '}
-                                <strong>Technician Name | Mobile No | Location | Enrolled Date</strong>
-                            </li>
-                            <li>
-                                <strong>Notes</strong> is optional.
-                            </li>
-                            <li>Dates must not be future dates.</li>
+                    <div className="info-box" style={{ backgroundColor: '#f8fafc', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem' }}>
+                        <p style={{ margin: '0 0 0.5rem', fontWeight: 500 }}>Instructions:</p>
+                        <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                            <li>Existing technicians only; technicians are not created by this upload.</li>
+                            <li>Allocation Type must be <strong>device</strong>, <strong>sim</strong>, or <strong>both</strong>.</li>
+                            <li>Device rows require Device Date + IMEI No. SIM rows require SIM Date + SIM Number.</li>
+                            <li>Use one common <strong>Software</strong> column. No payment fields are used.</li>
+                            <li>Any validation failure rejects the entire upload.</li>
                         </ul>
-                        <button
-                            className="btn btn-outline"
-                            onClick={downloadTemplate}
-                            style={{ marginTop: '1rem', fontSize: '0.875rem' }}
-                        >
-                            <Download size={14} /> Download Sample Template
-                        </button>
+                        <button className="btn btn-outline" onClick={downloadTemplate} style={{ marginTop: '1rem', fontSize: '0.875rem' }}><Download size={14} /> Download Sample Allocation Template</button>
                     </div>
-
-                    <div className="form-group">
-                        <label className="form-label">Select Excel File (.xlsx)</label>
-                        <input
-                            type="file"
-                            accept=".xlsx"
-                            className="form-control"
-                            onChange={handleFileChange}
-                            disabled={loading}
-                        />
-                    </div>
-
-                    {errors.length > 0 && (
-                        <div
-                            className="alert alert-danger"
-                            style={{ maxHeight: '240px', overflowY: 'auto' }}
-                        >
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    marginBottom: '0.5rem'
-                                }}
-                            >
-                                <AlertCircle size={16} /> <strong>Validation Errors:</strong>
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem' }}>
-                                {errors.map((err, i) => (
-                                    <li key={i}>{err}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-
-                    {successMsg && (
-                        <div
-                            className="alert badge-success"
-                            style={{
-                                padding: '1rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem'
-                            }}
-                        >
-                            <CheckCircle size={16} /> {successMsg}
-                        </div>
-                    )}
+                    <div className="form-group"><label className="form-label">Select Excel File (.xlsx)</label><input type="file" accept=".xlsx" className="form-control" onChange={handleFileChange} disabled={loading} /></div>
+                    {errors.length > 0 && <div className="alert alert-danger" style={{ maxHeight: 240, overflowY: 'auto' }}><div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}><AlertCircle size={16} /><strong>Validation Errors:</strong></div><ul style={{ margin: 0, paddingLeft: '1.5rem' }}>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
+                    {successMsg && <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CheckCircle size={16} /> {successMsg}</div>}
                 </div>
-
-                <div className="modal-footer">
-                    <button className="btn btn-outline" onClick={onClose} disabled={loading}>
-                        Cancel
-                    </button>
-                    <button
-                        className="btn btn-primary"
-                        onClick={processExcel}
-                        disabled={!file || loading}
-                    >
-                        {loading ? 'Processing...' : 'Upload Data'}
-                    </button>
-                </div>
+                <div className="modal-footer"><button className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button><button className="btn btn-primary" onClick={processExcel} disabled={!file || loading}>{loading ? 'Processing...' : 'Upload Data'}</button></div>
             </div>
         </div>
     );

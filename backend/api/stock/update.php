@@ -63,8 +63,6 @@ if ($totalAmount !== null) {
 $usedForMap = [
     'used for et' => 'ET',
     'et' => 'ET',
-    'used for technician' => 'TECHNICIAN',
-    'technician' => 'TECHNICIAN',
     'used for dealer' => 'DEALER',
     'dealer' => 'DEALER'
 ];
@@ -77,7 +75,7 @@ foreach ($usedForMap as $key => $value) {
     }
 }
 
-if (!in_array($normalizedUsedFor, ['ET', 'TECHNICIAN', 'DEALER'], true)) {
+if (!in_array($normalizedUsedFor, ['ET', 'DEALER'], true)) {
     sendResponse(false, "Invalid used_for value", [], [], 400);
 }
 

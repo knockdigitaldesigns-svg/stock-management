@@ -54,9 +54,26 @@ if (($search = trim((string)($_GET['search'] ?? ''))) !== '') {
 }
 
 if (($platform = trim((string)($_GET['platform'] ?? ''))) !== '') {
-    $whereConditions[] = "LOWER(TRIM(COALESCE(d.software, ''))) = ?";
+    $whereConditions[] = "(
+        LOWER(TRIM(COALESCE(d.software, ''))) = ?
+        OR EXISTS (
+            SELECT 1
+            FROM dealer_software ds_filter
+            WHERE ds_filter.dealer_id = d.id
+              AND LOWER(TRIM(ds_filter.software)) = ?
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM stock_allocations sa_filter
+            WHERE sa_filter.owner_type = 'dealer'
+              AND sa_filter.owner_id = d.id
+              AND LOWER(TRIM(COALESCE(sa_filter.software, ''))) = ?
+        )
+    )";
     $params[] = strtolower($platform);
-    $types .= 's';
+    $params[] = strtolower($platform);
+    $params[] = strtolower($platform);
+    $types .= 'sss';
 }
 
 if (($deviceModel = trim((string)($_GET['device_model'] ?? ''))) !== '') {
