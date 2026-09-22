@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../services/api';
 import Modal from '../Modal/Modal';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 
 const money = (value) => `₹${Number(value || 0).toFixed(2)}`;
 const getPaymentStatus = (total, paid) => {
@@ -10,7 +11,7 @@ const getPaymentStatus = (total, paid) => {
     if (amountPaid >= totalAmount) return 'Paid';
     return amountPaid > 0 ? 'Partially Paid' : 'Not Paid';
 };
-const paymentModeOptions = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+const paymentModeOptions = PAYMENT_MODES;
 const PaymentModal = ({ dealer, onClose, onSuccess }) => {
     const [allocations, setAllocations] = useState([]); const [selected, setSelected] = useState('');
     const [totalPrice, setTotalPrice] = useState('0'); const [amountPaid, setAmountPaid] = useState('0'); const [paymentMode, setPaymentMode] = useState(''); const [transactionId, setTransactionId] = useState(''); const [status, setStatus] = useState('Not Paid'); const [error, setError] = useState(''); const [saving, setSaving] = useState(false);

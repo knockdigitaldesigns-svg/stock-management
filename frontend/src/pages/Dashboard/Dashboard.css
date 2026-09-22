@@ -336,7 +336,7 @@
 }
 
 .calendar-day:not(.empty):hover {
-    background-color: #e0e7ff;
+    background-color: #eaf2ff;
 }
 
 .calendar-day.selected-start {
@@ -356,8 +356,8 @@
 }
 
 .calendar-day.in-range {
-    background-color: #dbeafe;
-    color: #1e40af;
+    background-color: #e6f8fc;
+    color: #0e7490;
     border-radius: 0;
 }
 
@@ -402,16 +402,16 @@
     gap: 0.75rem;
     padding: 1rem 1.5rem;
     border-top: 1px solid var(--border-color);
-    background-color: #f8fafc;
+    background-color: #f3f7fc;
 }
 
 .btn-secondary {
-    background-color: #e2e8f0;
-    color: #334155;
+    background-color: #e6f8fc;
+    color: var(--secondary-blue);
 }
 
 .btn-secondary:hover {
-    background-color: #cbd5e1;
+    background-color: #d5f3f8;
 }
 
 @media (max-width: 1024px) {

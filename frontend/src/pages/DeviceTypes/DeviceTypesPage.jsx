@@ -148,8 +148,8 @@ const DeviceTypesPage = () => {
                         <thead>
                             <tr>
                                 <th>Device Type</th>
-                                <th>Created Date</th>
                                 <th>Status</th>
+                                <th>Created Date</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>

@@ -4,7 +4,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(15, 23, 42, 0.65);
+    background-color: rgba(11, 18, 40, 0.68);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -76,14 +76,14 @@
     padding: 1.25rem 1.5rem;
     overflow-y: auto;
     max-height: 60vh;
-    color: #1e293b;
+    color: var(--brand-navy);
 }
 
 .global-error-text {
     margin: 0;
     font-size: 0.9375rem;
     line-height: 1.5;
-    color: #334155;
+    color: var(--text-secondary);
     word-break: break-word;
     white-space: pre-line;
 }
@@ -92,7 +92,7 @@
     margin: 0;
     padding-left: 1.25rem;
     font-size: 0.9375rem;
-    color: #334155;
+    color: var(--text-secondary);
 }
 
 .global-error-list li {

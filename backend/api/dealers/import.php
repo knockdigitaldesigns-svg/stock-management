@@ -7,6 +7,7 @@ require_once '../../utils/dealer_threshold.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
+require_once '../../utils/payment_modes.php';
 
 handlePreflight();
 
@@ -59,7 +60,7 @@ $validRows = [];
 $seenImeis = [];
 $seenSimNos = [];
 $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
-$allowedPaymentModes = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+$allowedPaymentModes = getPaymentModes();
 
 foreach ($rows as $index => $row) {
     $rowNumber = $index + 2;

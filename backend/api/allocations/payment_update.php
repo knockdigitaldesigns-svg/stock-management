@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/payment_modes.php';
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse(false, 'Method not allowed', [], [], 405);
 requireAnyPermission([
@@ -19,7 +20,7 @@ $paymentMode = trim((string)($data['payment_mode'] ?? ''));
 $transactionId = trim((string)($data['transaction_id'] ?? ''));
 $status = trim((string)($data['payment_status'] ?? ''));
 if ($id <= 0 || !is_numeric($totalAmount) || !is_numeric($paid)) sendResponse(false, 'Allocation, total price and paid amount are required.', [], [], 400);
-$validModes = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+$validModes = getPaymentModes();
 if ($paymentMode !== '' && !in_array($paymentMode, $validModes, true)) sendResponse(false, 'Invalid payment mode.', [], [], 400);
 $paymentMode = $paymentMode !== '' ? $paymentMode : null;
 if ($paymentMode !== null && $paymentMode !== 'Cash' && $transactionId === '') sendResponse(false, 'Transaction ID is required for the selected Payment Mode.', [], [], 400);

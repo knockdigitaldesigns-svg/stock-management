@@ -186,7 +186,7 @@ const DealerSimActivation = () => {
                                         <div className="action-buttons">
                                             <Can permission="dealers.edit">
                                                 <button
-                                                    className="btn-icon btn-edit"
+                                                    className="icon-btn edit"
                                                     onClick={() => setEditingSim(sim)}
                                                     title="Edit SIM Activation"
                                                 >

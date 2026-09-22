@@ -10,6 +10,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 
 const initialForm = {
     totalSaleAmount: '',
@@ -43,12 +44,7 @@ const extractList = (response, keys = []) => {
     return [];
 };
 
-const paymentModeOptions = [
-    'Cash',
-    'UPI',
-    'Card',
-    'Bank Transfer'
-];
+const paymentModeOptions = PAYMENT_MODES;
 
 const PaymentDetailsPart1Page = () => {
     const navigate = useNavigate();

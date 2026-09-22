@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/dealer_threshold.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/payment_modes.php';
 
 handlePreflight();
 
@@ -57,7 +58,7 @@ try {
     $pending_amount = max(0, $total_amount - $amount_paid);
     $payment_status = $total_amount <= 0 ? 'Not Paid' : ($pending_amount <= 0 ? 'Paid' : ($amount_paid > 0 ? 'Partially Paid' : 'Not Paid'));
     $payment_mode = $payment_mode_raw !== '' ? $payment_mode_raw : null;
-    $allowedPaymentModes = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Other'];
+    $allowedPaymentModes = getPaymentModes();
     if ($payment_mode !== null && !in_array($payment_mode, $allowedPaymentModes, true)) throw new Exception('Invalid payment mode.');
     $amount_paid_entered = $amount_paid_raw !== null && trim((string) $amount_paid_raw) !== '';
     if ($amount_paid_entered && $payment_mode_raw === '') throw new Exception('Payment Mode is required when Amount Paid is entered.');

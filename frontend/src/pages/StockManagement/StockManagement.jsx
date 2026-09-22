@@ -191,7 +191,7 @@ const StockManagement = () => {
                                                 </span>
                                             </td>
                                             <td>
-                                                <div className="action-buttons">
+                                                <div className="action-buttons stock-actions">
                                                     <button type="button" className="icon-btn view" aria-label="View stock allocation" title="View" onClick={() => setViewingAllocation(row)}><Eye size={16} /></button>
                                                     <button type="button" className="icon-btn edit" aria-label="Edit stock allocation" title="Edit" onClick={() => setEditingAllocationId(row.allocation_id)}><Edit size={16} /></button>
                                                     <button type="button" className="icon-btn delete" aria-label="Delete allocated stock" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>

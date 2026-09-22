@@ -17,7 +17,8 @@ function validateDealerFields($input, $rowNumber = null) {
     $errors = [];
 
     $dealerName = trim((string) ($input['dealer_name'] ?? $input['Dealer Name'] ?? ''));
-    $rawMobile = trim((string) ($input['mobile_no'] ?? $input['Mobile No'] ?? ''));
+    $rawMobile = (string) ($input['mobile_no'] ?? $input['Mobile No'] ?? '');
+    $rawAlternateMobile = (string) ($input['alternate_mobile_no'] ?? $input['Alternate Mobile No'] ?? '');
     $location = trim((string) ($input['location'] ?? $input['Location'] ?? ''));
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $installationStatus = trim((string) ($input['installation_status'] ?? $input['Installation Status'] ?? ''));
@@ -29,11 +30,13 @@ function validateDealerFields($input, $rowNumber = null) {
     }
 
     // 2. Mobile No (EXACTLY 10 numeric digits)
-    $cleanMobile = preg_replace('/\D+/', '', $rawMobile);
     if ($rawMobile === '') {
         $errors[] = "{$prefix}Mobile No is required.";
-    } elseif (strlen($cleanMobile) !== 10 || !preg_match('/^[0-9]{10}$/', $cleanMobile)) {
-        $errors[] = "{$prefix}Mobile No must be exactly 10 digits.";
+    } elseif (!preg_match('/^[0-9]{10}$/', $rawMobile)) {
+        $errors[] = "{$prefix}Mobile number must contain exactly 10 digits.";
+    }
+    if ($rawAlternateMobile !== '' && !preg_match('/^[0-9]{10}$/', $rawAlternateMobile)) {
+        $errors[] = "{$prefix}Alternate mobile number must contain exactly 10 digits.";
     }
 
     // 3. Location
@@ -101,8 +104,9 @@ function validateDealerFields($input, $rowNumber = null) {
         'errors' => $errors,
         'data' => [
             'dealer_name' => $dealerName,
-            'mobile_no' => $cleanMobile,
+            'mobile_no' => $rawMobile,
             'raw_mobile' => $rawMobile,
+            'alternate_mobile_no' => $rawAlternateMobile !== '' ? $rawAlternateMobile : null,
             'location' => $location,
             'enrolled_date' => $isoDate,
             'installation_status' => $normalizedStatus,

@@ -11,6 +11,7 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
     const [formData, setFormData] = useState({
         dealer_name: '',
         mobile_no: '',
+        alternate_mobile_no: '',
         location: '',
         enrolled_date: '',
         installation_status: 'Onsite',
@@ -37,6 +38,11 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         setFormData(prev => ({ ...prev, mobile_no: val }));
     };
 
+    const handleAlternateMobileChange = (e) => {
+        const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+        setFormData(prev => ({ ...prev, alternate_mobile_no: val }));
+    };
+
     const toggleSoftware = (opt) => {
         setFormData(prev => {
             const current = prev.software || [];
@@ -57,7 +63,12 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         }
 
         if (formData.mobile_no.length !== 10) {
-            triggerError('Mobile Number must be exactly 10 digits.');
+            triggerError('Mobile number must contain exactly 10 digits.');
+            return;
+        }
+
+        if (formData.alternate_mobile_no && formData.alternate_mobile_no.length !== 10) {
+            triggerError('Alternate mobile number must contain exactly 10 digits.');
             return;
         }
 
@@ -127,6 +138,19 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                                 maxLength={10}
                                 placeholder="Enter 10 digit mobile number"
                                 required
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Alternate Mobile No</label>
+                            <input
+                                type="text"
+                                name="alternate_mobile_no"
+                                className="form-control"
+                                value={formData.alternate_mobile_no}
+                                onChange={handleAlternateMobileChange}
+                                maxLength={10}
+                                placeholder="Enter 10 digit mobile number"
                             />
                         </div>
 

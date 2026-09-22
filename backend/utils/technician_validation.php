@@ -7,7 +7,8 @@ function validateTechnicianFields($input, $rowNumber = null) {
     $errors = [];
 
     $technicianName = trim((string) ($input['technician_name'] ?? $input['Technician Name'] ?? ''));
-    $mobileNo = trim((string) ($input['mobile_no'] ?? $input['Mobile No'] ?? ''));
+    $mobileNo = (string) ($input['mobile_no'] ?? $input['Mobile No'] ?? '');
+    $alternateMobileNo = (string) ($input['alternate_mobile_no'] ?? $input['Alternate Mobile No'] ?? '');
     $location = trim((string) ($input['location'] ?? $input['Location'] ?? ''));
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $notes = trim((string) ($input['notes'] ?? $input['Notes'] ?? ''));
@@ -18,11 +19,13 @@ function validateTechnicianFields($input, $rowNumber = null) {
     }
 
     // 2. Mobile No — must be exactly 10 digits
-    $normalizedMobile = normalizeMobile($mobileNo);
     if ($mobileNo === '') {
         $errors[] = "{$prefix}Mobile No is required.";
-    } elseif (strlen($normalizedMobile) !== 10 || !preg_match('/^\d{10}$/', $normalizedMobile)) {
-        $errors[] = "{$prefix}Mobile No must be exactly 10 digits.";
+    } elseif (!preg_match('/^[0-9]{10}$/', $mobileNo)) {
+        $errors[] = "{$prefix}Mobile number must contain exactly 10 digits.";
+    }
+    if ($alternateMobileNo !== '' && !preg_match('/^[0-9]{10}$/', $alternateMobileNo)) {
+        $errors[] = "{$prefix}Alternate mobile number must contain exactly 10 digits.";
     }
 
     // 3. Location
@@ -50,8 +53,9 @@ function validateTechnicianFields($input, $rowNumber = null) {
         'errors' => $errors,
         'data' => [
             'technician_name' => $technicianName,
-            'mobile_no' => $normalizedMobile,
+            'mobile_no' => $mobileNo,
             'raw_mobile' => $mobileNo,
+            'alternate_mobile_no' => $alternateMobileNo !== '' ? $alternateMobileNo : null,
             'location' => $location,
             'enrolled_date' => $isoDate,
             'notes' => $notes

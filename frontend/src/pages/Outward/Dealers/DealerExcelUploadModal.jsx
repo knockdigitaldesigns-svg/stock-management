@@ -5,6 +5,7 @@ import api from '../../../services/api';
 import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
 import { showGlobalError } from '../../../context/ErrorContext';
+import { PAYMENT_MODES } from '../../../constants/paymentModes';
 
 export const BULK_ALLOCATION_COLUMNS = [
     { key: 'dealer_name', header: 'Dealer Name', required: true },
@@ -189,7 +190,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
 
         const rawRows = XLSX.utils.sheet_to_json(worksheet, {
             defval: '',
-            raw: false
+            raw: true
         });
 
         if (!rawRows || rawRows.length === 0) {
@@ -220,7 +221,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         const clientErrors = [];
         const seenImeis = new Set();
         const seenSims = new Set();
-        const validModes = ['cash', 'upi', 'bank transfer', 'card', 'other'];
+        const validModes = PAYMENT_MODES.map((mode) => mode.toLowerCase());
 
         rawRows.forEach((row, idx) => {
             const rowNum = idx + 2;
@@ -240,7 +241,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             const hasSim = allocType === 'sim' || allocType === 'both';
 
             if (hasDevice) {
-                const devDate = String(row[headerMap[normalizeHeader('Device Date')]] || '').trim();
+                const devDate = row[headerMap[normalizeHeader('Device Date')]];
                 const imeiNo = String(row[headerMap[normalizeHeader('IMEI No')]] || '').trim();
 
                 if (!imeiNo) {
@@ -251,7 +252,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                     seenImeis.add(imeiNo);
                 }
 
-                if (!devDate) {
+                if (devDate === null || devDate === undefined || devDate === '') {
                     clientErrors.push(`Row ${rowNum}: Device Date is required.`);
                 } else {
                     const parsed = parseDate(devDate);
@@ -264,7 +265,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             }
 
             if (hasSim) {
-                const simDate = String(row[headerMap[normalizeHeader('SIM Date')]] || '').trim();
+                const simDate = row[headerMap[normalizeHeader('SIM Date')]];
                 const simNo = String(row[headerMap[normalizeHeader('SIM Number')]] || '').trim();
 
                 if (!simNo) {
@@ -275,7 +276,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                     seenSims.add(simNo);
                 }
 
-                if (!simDate) {
+                if (simDate === null || simDate === undefined || simDate === '') {
                     clientErrors.push(`Row ${rowNum}: SIM Date is required.`);
                 } else {
                     const parsed = parseDate(simDate);

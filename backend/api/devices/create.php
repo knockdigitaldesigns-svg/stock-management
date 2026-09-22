@@ -38,9 +38,11 @@ try {
 
     foreach ($data->devices as $index => $device) {
         $rowNum = $index + 1;
-        
-        if (empty($device->purchase_date)) throw new Exception("Row $rowNum: Purchase date is required.");
-        if (isFutureDate($device->purchase_date)) throw new Exception("Row $rowNum: Future dates are not allowed.");
+
+        $purchaseDate = parseAndNormalizeDate($device->purchase_date ?? '');
+        if ($purchaseDate === '') throw new Exception("Row $rowNum: Purchase date is required.");
+        if ($purchaseDate === false) throw new Exception("Row $rowNum: Purchase date is invalid.");
+        if (isFutureDate($purchaseDate)) throw new Exception("Row $rowNum: Future dates are not allowed.");
         if (empty($device->device_model_id)) throw new Exception("Row $rowNum: Device model is required.");
         if (empty($device->imei_no)) throw new Exception("Row $rowNum: IMEI number is required.");
         
@@ -73,7 +75,7 @@ try {
         $checkStmt->close();
         
         $notes = trim((string) ($device->notes ?? ''));
-        $stmt->bind_param("siss", $device->purchase_date, $deviceModelId, $device->imei_no, $notes);
+        $stmt->bind_param("siss", $purchaseDate, $deviceModelId, $device->imei_no, $notes);
         if (!$stmt->execute()) {
             if ($stmt->errno === 1062) throw new Exception("Row $rowNum: IMEI number already exists.");
             throw new Exception("Row $rowNum: Database error - " . $stmt->error);

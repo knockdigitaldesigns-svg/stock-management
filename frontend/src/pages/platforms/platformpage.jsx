@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Plus, Eye, Edit, Trash2 } from 'lucide-react';
-
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { formatDate } from '../../utils/date';
 import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
+import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
 
@@ -16,6 +17,7 @@ const PlatformPage = () => {
     // DATA
     // =========================
     const [platforms, setPlatforms] = useState([]);
+    const [filters, setFilters] = useState(emptyTableFilters);
     const [loading, setLoading] = useState(true);
 
     // =========================
@@ -34,26 +36,16 @@ const PlatformPage = () => {
     const [viewingPlatform, setViewingPlatform] = useState(null);
 
     // =========================
-    // FILTERS
-    // =========================
-    const [search, setSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState('');
-
-    // =========================
     // MESSAGES
     // =========================
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
 
     const triggerError = (msg) => {
         setError(msg);
         showGlobalError(msg);
     };
-
-    // =========================
-    // SAVING
-    // =========================
-    const [saving, setSaving] = useState(false);
 
     // =========================
     // FETCH PLATFORMS
@@ -66,20 +58,12 @@ const PlatformPage = () => {
             const response = await api.get('/platforms/list.php');
 
             if (response.data.success) {
-                setPlatforms(
-                    response.data.data?.platforms || []
-                );
+                setPlatforms(response.data.data?.platforms || []);
             } else {
-                triggerError(
-                    response.data.message ||
-                    'Unable to load platforms.'
-                );
+                triggerError(response.data.message || 'Unable to load platforms.');
             }
         } catch (err) {
-            triggerError(
-                err.response?.data?.message ||
-                'Unable to load platforms.'
-            );
+            triggerError(err.response?.data?.message || 'Unable to load platforms.');
         } finally {
             setLoading(false);
         }
@@ -95,15 +79,8 @@ const PlatformPage = () => {
     const openModal = (platform = null) => {
         setModal(platform);
         setShowModal(true);
-
-        setValue(
-            platform?.platform_name || ''
-        );
-
-        setStatus(
-            platform?.status || 'Active'
-        );
-
+        setValue(platform?.platform_name || '');
+        setStatus(platform?.status || 'Active');
         setError('');
         setMessage('');
     };
@@ -116,10 +93,8 @@ const PlatformPage = () => {
 
         setShowModal(false);
         setModal(null);
-
         setValue('');
         setStatus('Active');
-
         setError('');
     };
 
@@ -144,48 +119,29 @@ const PlatformPage = () => {
 
         try {
             const response = modal
-                ? await api.post(
-                    '/platforms/update.php',
-                    {
-                        id: modal.id,
-                        platform_name: platformName,
-                        status: status
-                    }
-                )
-                : await api.post(
-                    '/platforms/create.php',
-                    {
-                        platform_name: platformName,
-                        status: status
-                    }
-                );
+                ? await api.post('/platforms/update.php', {
+                    id: modal.id,
+                    platform_name: platformName,
+                    status: status
+                })
+                : await api.post('/platforms/create.php', {
+                    platform_name: platformName,
+                    status: status
+                });
 
             if (!response.data.success) {
-                triggerError(
-                    response.data.message ||
-                    'Unable to save platform.'
-                );
+                triggerError(response.data.message || 'Unable to save platform.');
                 return;
             }
 
             setShowModal(false);
             setModal(null);
-
             setValue('');
             setStatus('Active');
-
-            setMessage(
-                response.data.message ||
-                'Platform saved successfully.'
-            );
-
+            setMessage(response.data.message || 'Platform saved successfully.');
             await fetchPlatforms();
-
         } catch (err) {
-            triggerError(
-                err.response?.data?.message ||
-                'Unable to save platform.'
-            );
+            triggerError(err.response?.data?.message || 'Unable to save platform.');
         } finally {
             setSaving(false);
         }
@@ -200,61 +156,29 @@ const PlatformPage = () => {
         setError('');
 
         try {
-            const response = await api.post(
-                '/platforms/delete.php',
-                {
-                    id: deleteTarget.id
-                }
-            );
+            const response = await api.post('/platforms/delete.php', {
+                id: deleteTarget.id
+            });
 
             if (!response.data.success) {
-                triggerError(
-                    response.data.message ||
-                    'Unable to delete platform.'
-                );
+                triggerError(response.data.message || 'Unable to delete platform.');
                 return;
             }
 
             setDeleteTarget(null);
-
-            setMessage(
-                response.data.message ||
-                'Platform deleted successfully.'
-            );
-
+            setMessage(response.data.message || 'Platform deleted successfully.');
             await fetchPlatforms();
-
         } catch (err) {
-            triggerError(
-                err.response?.data?.message ||
-                'Unable to delete platform.'
-            );
+            triggerError(err.response?.data?.message || 'Unable to delete platform.');
         }
     };
 
     // =========================
     // FILTER DATA
     // =========================
-    const filtered = platforms.filter((platform) => {
-        const platformName =
-            platform.platform_name || '';
-
-        const platformStatus =
-            platform.status || '';
-
-        const matchesSearch =
-            platformName
-                .toLowerCase()
-                .includes(search.toLowerCase());
-
-        const matchesStatus =
-            !statusFilter ||
-            platformStatus === statusFilter;
-
-        return (
-            matchesSearch &&
-            matchesStatus
-        );
+    const filtered = filterTableRows(platforms, filters, {
+        dateKeys: ['created_at'],
+        searchKeys: ['platform_name']
     });
 
     // =========================
@@ -267,292 +191,163 @@ const PlatformPage = () => {
         setPageSize,
         totalItems,
         paginatedItems
-    } = usePagination(
-        filtered,
-        10,
-        [search, statusFilter]
-    );
-
-    // =========================
-    // RESET FILTERS
-    // =========================
-    const resetFilters = () => {
-        setSearch('');
-        setStatusFilter('');
-        setPage(1);
-    };
+    } = usePagination(filtered, 10, [filters]);
 
     // =========================
     // RENDER
     // =========================
     return (
         <div className="page-container">
-
             {/* =========================
                 PAGE HEADER
             ========================== */}
             <div className="page-header">
-
                 <h2>Platform</h2>
-
                 <div className="header-actions">
-
                     {hasPermission('platforms.add') && (
                         <button
                             className="btn btn-primary"
                             type="button"
                             onClick={() => openModal()}
                         >
-                            <Plus size={16} />
-                            Add Platform
+                            <Plus size={16} /> Add Platform
                         </button>
                     )}
-
                 </div>
             </div>
 
             {/* =========================
                 SUCCESS MESSAGE
             ========================== */}
-            {message && (
-                <div className="alert alert-success">
-                    {message}
-                </div>
-            )}
+            {message && <div className="alert alert-success">{message}</div>}
 
             {/* =========================
                 ERROR MESSAGE
             ========================== */}
-            {error && !modal && (
-                <div className="alert alert-danger">
-                    {error}
-                </div>
-            )}
+            {error && !modal && <div className="alert alert-danger">{error}</div>}
 
             {/* =========================
                 PLATFORM TABLE CARD
             ========================== */}
             <div className="card">
-
                 {/* =========================
                     FILTERS
                 ========================== */}
-                <div
-    style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '20px',
-        flexWrap: 'wrap'
-    }}
->
-    {/* SEARCH */}
-    <input
-        type="text"
-        className="form-control"
-        placeholder="Search platform..."
-        value={search}
-        onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-        }}
-        style={{
-            width: '260px',
-            flex: '0 0 260px'
-        }}
-    />
-
-    {/* STATUS */}
-    <select
-        className="form-control"
-        value={statusFilter}
-        onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-        }}
-        style={{
-            width: '170px',
-            flex: '0 0 170px'
-        }}
-    >
-        <option value="">
-            All Statuses
-        </option>
-
-        <option value="Active">
-            Active
-        </option>
-
-        <option value="Inactive">
-            Inactive
-        </option>
-    </select>
-
-    {/* RESET */}
-    <button
-        type="button"
-        className="btn btn-outline"
-        onClick={resetFilters}
-    >
-        Reset Filters
-    </button>
-</div>
+                <TableFilterBar
+                    filters={filters}
+                    onChange={setFilters}
+                    onReset={() => setFilters(emptyTableFilters())}
+                    items={platforms}
+                    dateKeys={['created_at']}
+                    showStatus
+                    statusOptions={['Active', 'Inactive']}
+                    searchPlaceholder="Search platform..."
+                />
 
                 {/* =========================
                     TABLE
                 ========================== */}
                 <div className="table-container">
-
                     <table>
-
                         <thead>
                             <tr>
-                                <th>
-                                    Platform Name
-                                </th>
-
-                                <th>
-                                    Status
-                                </th>
-
-                                <th>
-                                    Actions
-                                </th>
+                                <th>Platform Name</th>
+                                <th>Status</th>
+                                <th>Created Date</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
 
                         <tbody>
-
                             {/* LOADING */}
                             {loading ? (
                                 <tr>
-                                    <td
-                                        colSpan="3"
-                                        className="text-center"
-                                    >
+                                    <td colSpan="4" className="text-center">
                                         Loading platforms...
                                     </td>
                                 </tr>
-
                             ) : paginatedItems.length === 0 ? (
-
                                 /* EMPTY */
                                 <tr>
-                                    <td
-                                        colSpan="3"
-                                        className="text-center empty-state"
-                                    >
-                                        No platforms found.
+                                    <td colSpan="4" className="text-center empty-state">
+                                        No records found for the selected filters.
                                     </td>
                                 </tr>
-
                             ) : (
-
                                 /* DATA */
-                                paginatedItems.map(
-                                    (platform) => (
-                                        <tr
-                                            key={platform.id}
+                                paginatedItems.map((platform) => (
+                                    <tr key={platform.id}>
+                                        {/* PLATFORM NAME */}
+                                        <td
+                                            className="truncate-cell"
+                                            title={platform.platform_name}
+                                            style={{ fontWeight: 500 }}
                                         >
+                                            {platform.platform_name}
+                                        </td>
 
-                                            {/* PLATFORM NAME */}
-                                            <td
-                                                className="truncate-cell"
-                                                title={
-                                                    platform.platform_name
-                                                }
-                                                style={{
-                                                    fontWeight: 500
-                                                }}
+                                        {/* STATUS */}
+                                        <td>
+                                            <span
+                                                className={`badge ${
+                                                    platform.status === 'Active'
+                                                        ? 'badge-success'
+                                                        : 'badge-danger'
+                                                }`}
                                             >
-                                                {
-                                                    platform.platform_name
-                                                }
-                                            </td>
+                                                {platform.status || 'Active'}
+                                            </span>
+                                        </td>
 
-                                            {/* STATUS */}
-                                            <td>
-                                                <span
-                                                    className={
-                                                        platform.status === 'Active'
-                                                            ? 'status-badge status-active'
-                                                            : 'status-badge status-inactive'
-                                                    }
+                                        {/* CREATED DATE */}
+                                        <td>{formatDate(platform.created_at)}</td>
+
+                                        {/* ACTIONS */}
+                                        <td>
+                                            <div className="action-buttons">
+                                                {/* VIEW */}
+                                                <button
+                                                    className="icon-btn view"
+                                                    type="button"
+                                                    aria-label="View platform"
+                                                    title="View"
+                                                    onClick={() => setViewingPlatform(platform)}
                                                 >
-                                                    {
-                                                        platform.status
-                                                    }
-                                                </span>
-                                            </td>
+                                                    <Eye size={16} />
+                                                </button>
 
-                                            {/* ACTIONS */}
-                                            <td>
-
-                                                <div className="action-buttons">
-
-                                                    {/* VIEW */}
+                                                {/* EDIT */}
+                                                {hasPermission('platforms.edit') && (
                                                     <button
-                                                        className="icon-btn view"
+                                                        className="icon-btn edit"
                                                         type="button"
-                                                        title="View"
-                                                        onClick={() =>
-                                                            setViewingPlatform(
-                                                                platform
-                                                            )
-                                                        }
+                                                        aria-label="Edit platform"
+                                                        title="Edit"
+                                                        onClick={() => openModal(platform)}
                                                     >
-                                                        <Eye size={16} />
+                                                        <Edit size={16} />
                                                     </button>
+                                                )}
 
-                                                    {/* EDIT */}
-                                                    {hasPermission(
-                                                        'platforms.edit'
-                                                    ) && (
-                                                        <button
-                                                            className="icon-btn edit"
-                                                            type="button"
-                                                            title="Edit"
-                                                            onClick={() =>
-                                                                openModal(
-                                                                    platform
-                                                                )
-                                                            }
-                                                        >
-                                                            <Edit size={16} />
-                                                        </button>
-                                                    )}
-
-                                                    {/* DELETE */}
-                                                    {hasPermission(
-                                                        'platforms.delete'
-                                                    ) && (
-                                                        <button
-                                                            className="icon-btn delete"
-                                                            type="button"
-                                                            title="Delete"
-                                                            onClick={() =>
-                                                                setDeleteTarget(
-                                                                    platform
-                                                                )
-                                                            }
-                                                        >
-                                                            <Trash2 size={16} />
-                                                        </button>
-                                                    )}
-
-                                                </div>
-
-                                            </td>
-
-                                        </tr>
-                                    )
-                                )
+                                                {/* DELETE */}
+                                                {hasPermission('platforms.delete') && (
+                                                    <button
+                                                        className="icon-btn delete"
+                                                        type="button"
+                                                        aria-label="Delete platform"
+                                                        title="Delete"
+                                                        onClick={() => setDeleteTarget(platform)}
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
                             )}
-
                         </tbody>
-
                     </table>
-
                 </div>
 
                 {/* =========================
@@ -566,21 +361,15 @@ const PlatformPage = () => {
                     onPageSizeChange={setPageSize}
                     itemName="platforms"
                 />
-
             </div>
 
             {/* =========================
                 ADD / EDIT MODAL
             ========================== */}
             {showModal && (
-
                 <Modal
                     isOpen
-                    title={
-                        modal
-                            ? 'Edit Platform'
-                            : 'Add Platform'
-                    }
+                    title={modal ? 'Edit Platform' : 'Add Platform'}
                     onClose={closeModal}
                     maxWidth="480px"
                     footer={
@@ -603,69 +392,41 @@ const PlatformPage = () => {
                                 {saving
                                     ? 'Saving...'
                                     : modal
-                                        ? 'Update Platform'
-                                        : 'Save Platform'
-                                }
+                                    ? 'Update Platform'
+                                    : 'Save Platform'}
                             </button>
                         </>
                     }
                 >
-
                     {/* PLATFORM NAME */}
                     <div className="form-group">
-
-                        <label className="form-label">
-                            Platform Name *
-                        </label>
+                        <label className="form-label">Platform Name *</label>
 
                         <input
                             type="text"
                             className="form-control"
                             value={value}
-                            onChange={(event) =>
-                                setValue(
-                                    event.target.value
-                                )
-                            }
+                            onChange={(event) => setValue(event.target.value)}
                             placeholder="Enter platform name"
                             autoFocus
                         />
 
-                        {error && (
-                            <div className="text-danger">
-                                {error}
-                            </div>
-                        )}
-
+                        {error && <div className="text-danger">{error}</div>}
                     </div>
 
                     {/* STATUS */}
                     <div className="form-group">
-
-                        <label className="form-label">
-                            Status *
-                        </label>
+                        <label className="form-label">Status *</label>
 
                         <select
                             className="form-control"
                             value={status}
-                            onChange={(event) =>
-                                setStatus(
-                                    event.target.value
-                                )
-                            }
+                            onChange={(event) => setStatus(event.target.value)}
                         >
-                            <option value="Active">
-                                Active
-                            </option>
-
-                            <option value="Inactive">
-                                Inactive
-                            </option>
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
                         </select>
-
                     </div>
-
                 </Modal>
             )}
 
@@ -673,22 +434,17 @@ const PlatformPage = () => {
                 DELETE MODAL
             ========================== */}
             {deleteTarget && (
-
                 <Modal
                     isOpen
                     title="Delete Platform"
-                    onClose={() =>
-                        setDeleteTarget(null)
-                    }
+                    onClose={() => setDeleteTarget(null)}
                     maxWidth="420px"
                     footer={
                         <>
                             <button
                                 className="btn btn-outline"
                                 type="button"
-                                onClick={() =>
-                                    setDeleteTarget(null)
-                                }
+                                onClick={() => setDeleteTarget(null)}
                             >
                                 Cancel
                             </button>
@@ -703,12 +459,7 @@ const PlatformPage = () => {
                         </>
                     }
                 >
-
-                    <p>
-                        Are you sure you want to delete
-                        this platform?
-                    </p>
-
+                    <p>Are you sure you want to delete this platform?</p>
                 </Modal>
             )}
 
@@ -716,29 +467,16 @@ const PlatformPage = () => {
                 VIEW MODAL
             ========================== */}
             {viewingPlatform && (
-
                 <RecordViewModal
                     isOpen
-                    onClose={() =>
-                        setViewingPlatform(null)
-                    }
+                    onClose={() => setViewingPlatform(null)}
                     title="Platform Details"
                     record={viewingPlatform}
-                    fetchRecord={async (row) => {
-
-                        const response =
-                            await api.get(
-                                '/platforms/list.php'
-                            );
-
-                        return (
-                            response.data.data?.platforms?.find(
-                                (item) =>
-                                    String(item.id) ===
-                                    String(row.id)
-                            ) || row
-                        );
-                    }}
+                    fetchRecord={async (row) =>
+                        (await api.get('/platforms/list.php')).data.data?.platforms?.find(
+                            (item) => String(item.id) === String(row.id)
+                        ) || row
+                    }
                     fields={[
                         {
                             label: 'Platform Name',
@@ -747,12 +485,15 @@ const PlatformPage = () => {
                         {
                             label: 'Status',
                             key: 'status'
+                        },
+                        {
+                            label: 'Created Date',
+                            key: 'created_at',
+                            format: (val) => formatDate(val)
                         }
                     ]}
                 />
-
             )}
-
         </div>
     );
 };

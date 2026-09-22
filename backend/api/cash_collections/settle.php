@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/payment_modes.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -19,7 +20,7 @@ $settlementDate = trim((string) ($data->settlement_date ?? date('Y-m-d')));
 $paymentMode = trim((string) ($data->payment_mode ?? 'Cash'));
 $transactionId = trim((string) ($data->transaction_id ?? ''));
 $notes = trim((string) ($data->notes ?? ''));
-$allowedPaymentModes = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Other'];
+$allowedPaymentModes = getPaymentModes();
 
 if ($settlementDate === '' || !in_array($paymentMode, $allowedPaymentModes, true)) sendResponse(false, 'Valid settlement date and payment mode are required.', [], [], 400);
 if (isFutureDate($settlementDate)) sendResponse(false, 'Future settlement dates are not allowed.', [], [], 400);
