@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import api from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -33,7 +34,16 @@ export const AuthProvider = ({ children }) => {
         setPermissions(permissionList);
     };
 
-    const logout = () => {
+    const logout = async () => {
+        const token = localStorage.getItem('token');
+        try {
+            if (token) {
+                await api.post('/auth/logout.php', {}, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    skipGlobalError: true
+                });
+            }
+        } catch {}
         setUser(null);
         setPermissions([]);
         localStorage.removeItem('token');
@@ -43,6 +53,14 @@ export const AuthProvider = ({ children }) => {
 
     const hasPermission = (permissionKey) => {
         if (!permissionKey) return true;
+        const roleName = user?.role?.name || user?.role || '';
+        const username = user?.username || '';
+        if (
+            String(roleName).toLowerCase().includes('super') ||
+            String(username).toLowerCase() === 'admin'
+        ) {
+            return true;
+        }
         if (!permissions || !Array.isArray(permissions)) return false;
         return permissions.includes(permissionKey);
     };

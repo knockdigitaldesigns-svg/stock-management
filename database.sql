@@ -13,9 +13,17 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(50) DEFAULT 'super_admin',
     role_id INT DEFAULT NULL,
     status ENUM('active','inactive') DEFAULT 'active',
+    active_session_id CHAR(64) DEFAULT NULL,
+    active_session_created_at DATETIME DEFAULT NULL,
+    active_session_expires_at BIGINT UNSIGNED DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS active_session_id CHAR(64) DEFAULT NULL AFTER status,
+    ADD COLUMN IF NOT EXISTS active_session_created_at DATETIME DEFAULT NULL AFTER active_session_id,
+    ADD COLUMN IF NOT EXISTS active_session_expires_at BIGINT UNSIGNED DEFAULT NULL AFTER active_session_created_at;
 
 -- =====================================================
 -- RBAC TABLES

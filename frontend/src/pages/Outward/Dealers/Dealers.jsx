@@ -144,7 +144,10 @@ const Dealers = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Dealer Management</h2>
+                <div>
+                    <h2>Dealer Management</h2>
+                    <p className="page-subtitle">Manage dealer profiles, contact details, and allocated stock.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
@@ -178,6 +181,7 @@ const Dealers = () => {
                     showSimValidity
                     showInstallationStatus
                     showPaymentStatus
+                    gridCols={5}
                 />
 
                 <div className="table-container">

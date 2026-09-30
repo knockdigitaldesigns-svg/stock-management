@@ -10,6 +10,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 requirePermission('permissions.view');
+ensurePermissionDefinitions([
+    'courier.view', 'courier.add', 'courier.edit', 'courier.delete', 'courier.approve'
+]);
 
 $db = new Database();
 $conn = $db->getConnection();

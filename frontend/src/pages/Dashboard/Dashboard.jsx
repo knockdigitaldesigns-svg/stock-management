@@ -94,7 +94,8 @@ const getDefaultDateRange = () => {
 // =========================================================
 
 const Dashboard = () => {
-    const { user } = useAuth();
+    const { user, hasPermission } = useAuth();
+    const canViewDashboard = hasPermission('dashboard.view');
     const navigate = useNavigate();
 
     const [stats, setStats] = useState(null);
@@ -223,8 +224,12 @@ const Dashboard = () => {
     // =====================================================
 
     useEffect(() => {
-        fetchStats(financialYear, dateRange);
-    }, []);
+        if (canViewDashboard) {
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            fetchStats(financialYear, dateRange);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [canViewDashboard]);
 
 
     // =====================================================
@@ -630,10 +635,10 @@ const Dashboard = () => {
 
 
     // =====================================================
-    // Loading State
+    // Loading State (only when user has dashboard.view)
     // =====================================================
 
-    if (loading && !stats) {
+    if (canViewDashboard && loading && !stats) {
         return (
             <div
                 className="page-container text-center"
@@ -646,10 +651,10 @@ const Dashboard = () => {
 
 
     // =====================================================
-    // Error State
+    // Error State (only when user has dashboard.view)
     // =====================================================
 
-    if (!stats && !loading) {
+    if (canViewDashboard && !stats && !loading) {
         return (
             <div
                 className="page-container text-center text-danger"
@@ -684,6 +689,7 @@ const Dashboard = () => {
                 Dashboard Header
             ================================================= */}
 
+            {canViewDashboard && (
             <div className="dashboard-header-container">
 
                 <div className="page-header">
@@ -693,15 +699,16 @@ const Dashboard = () => {
                     </h2>
 
                     <p
+                        className="page-subtitle"
                         style={{
                             color: 'var(--text-secondary)',
                             margin: 0
                         }}
                     >
                         Welcome back,{' '}
-                        {user?.employee_name ||
+                        <strong>{user?.employee_name ||
                             user?.username ||
-                            'User'}
+                            'User'}</strong>
                     </p>
 
                 </div>
@@ -778,6 +785,42 @@ const Dashboard = () => {
                 </div>
 
             </div>
+            )}
+
+
+            {/* =================================================
+                No Permission State
+            ================================================= */}
+
+            {!canViewDashboard && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '60vh'
+                }}>
+                    <div style={{ textAlign: 'center' }}>
+                        <h2 style={{
+                            fontSize: '1.75rem',
+                            fontWeight: 700,
+                            color: 'var(--text-primary)',
+                            margin: '0 0 0.5rem'
+                        }}>
+                            Welcome, {user?.employee_name || user?.username || 'User'}
+                        </h2>
+                        <p style={{
+                            color: 'var(--text-secondary)',
+                            margin: 0,
+                            fontSize: '0.95rem'
+                        }}>
+                            {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+
+            {canViewDashboard && (<>
 
 
             {/* =================================================
@@ -1586,6 +1629,9 @@ const Dashboard = () => {
                 </div>
 
             </div>
+
+
+            </>)}
 
         </div>
     );

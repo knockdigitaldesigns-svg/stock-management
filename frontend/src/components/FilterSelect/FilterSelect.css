@@ -1,0 +1,101 @@
+.filter-select-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.filter-select-wrapper.is-open {
+  z-index: 1000;
+}
+
+.filter-select-trigger {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 0 11px;
+  border: 1px solid #dbe2ea;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 13px;
+  font-family: 'Montserrat', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.filter-select-trigger:focus,
+.filter-select-trigger.is-open {
+  border-color: #3b82f6;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.filter-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: left;
+}
+
+.filter-select-arrow {
+  color: #64748b;
+  font-size: 10px;
+  margin-left: 8px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.filter-select-arrow.open {
+  transform: rotate(180deg);
+}
+
+.filter-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 100%;
+  background: #ffffff;
+  border: 1px solid #dbe2ea;
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  z-index: 1000;
+  max-height: 176px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.filter-select-item {
+  height: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: 'Montserrat', sans-serif;
+  color: #1e293b;
+  background-color: transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.filter-select-item:hover {
+  background-color: #f1f5f9;
+}
+
+.filter-select-item.is-selected {
+  background-color: #eaf2ff;
+  color: #2563eb;
+  font-weight: 600;
+}

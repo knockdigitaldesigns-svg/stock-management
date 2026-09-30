@@ -1,0 +1,459 @@
+/* ==========================================================================
+   COURIER PAGE - STYLES
+   ========================================================================== */
+
+/* Typography */
+.courier-page,
+.courier-filter-card,
+.courier-table-card,
+.courier-table {
+  font-family: 'Montserrat', sans-serif;
+}
+
+/* ==========================================================================
+   FILTER SECTION (3 EQUAL COLUMNS PER ROW ON DESKTOP)
+   ========================================================================== */
+.courier-filter-card {
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-md, 0.75rem);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(11, 18, 40, 0.06));
+}
+
+.courier-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.courier-filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.courier-filter-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.courier-filter-col-placeholder {
+  height: 100%;
+  visibility: hidden;
+}
+
+.courier-filter-label {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  height: 16px;
+  line-height: 16px;
+  display: block;
+}
+
+.courier-filter-control {
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  max-height: 38px;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8125rem;
+  font-family: 'Montserrat', sans-serif;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-sm, 0.5rem);
+  background-color: #ffffff;
+  color: var(--text-primary, #0f172a);
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.courier-filter-control:focus {
+  outline: none;
+  border-color: var(--primary-color, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.courier-filter-row-reset {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0.15rem;
+  width: 100%;
+}
+
+.courier-filter-reset-btn {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 1.25rem;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary, #0f172a);
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-sm, 0.5rem);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast, 0.15s ease);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.courier-filter-reset-btn:hover {
+  background: #eef4ff;
+  border-color: #b9d2fb;
+  color: var(--primary-color, #2563eb);
+}
+
+/* ==========================================================================
+   COURIER MAIN TABLE & CONTAINER
+   ========================================================================== */
+.courier-table-card {
+  padding: 1.25rem;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-md, 0.75rem);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(11, 18, 40, 0.06));
+}
+
+.courier-table-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-md, 0.5rem);
+  background: #ffffff;
+}
+
+.courier-table-container::-webkit-scrollbar {
+  height: 8px;
+}
+.courier-table-container::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.courier-table-container::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.courier-table-container::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.courier-table {
+  width: 100%;
+  min-width: 2420px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: 'Montserrat', sans-serif;
+}
+
+/* Table Headers */
+.courier-table th {
+  padding: 0.85rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  background-color: #f3f7fc;
+  border-bottom: 2px solid var(--border-color, #e2e8f0);
+  text-align: left;
+  vertical-align: middle;
+  white-space: normal;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  font-family: 'Montserrat', sans-serif;
+  box-sizing: border-box;
+}
+
+/* Table Body Cells */
+.courier-table td {
+  padding: 0.8rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--text-primary, #0f172a);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  vertical-align: middle;
+  line-height: 1.4;
+  font-family: 'Montserrat', sans-serif;
+  box-sizing: border-box;
+}
+
+.courier-table tbody tr {
+  transition: background-color var(--transition-fast, 0.15s ease);
+}
+
+.courier-table tbody tr:hover td {
+  background-color: #f3f6fb;
+}
+
+/* Center-aligned columns */
+.courier-table th.col-courier-to,
+.courier-table td.col-courier-to,
+.courier-table th.col-status,
+.courier-table td.col-status,
+.courier-table th.col-asset-type,
+.courier-table td.col-asset-type,
+.courier-table th.col-send-via,
+.courier-table td.col-send-via,
+.courier-table th.col-courier-status,
+.courier-table td.col-courier-status,
+.courier-table th.col-approval-status,
+.courier-table td.col-approval-status,
+.courier-table th.col-actions,
+.courier-table td.col-actions {
+  text-align: center;
+}
+
+/* ==========================================================================
+   COLUMN WIDTH DEFINITIONS (GENEROUS & COMFORTABLE)
+   ========================================================================== */
+.courier-table .col-req-id {
+  width: 110px;
+  min-width: 110px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.courier-table .col-courier-to {
+  width: 120px;
+  min-width: 115px;
+}
+
+.courier-table .col-name {
+  width: 155px;
+  min-width: 140px;
+}
+
+.courier-table .col-status {
+  width: 115px;
+  min-width: 110px;
+}
+
+.courier-table .col-asset-type {
+  width: 110px;
+  min-width: 105px;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0.03em;
+}
+
+.courier-table .col-device-model {
+  width: 150px;
+  min-width: 140px;
+}
+
+.courier-table .col-imei {
+  width: 160px;
+  min-width: 150px;
+}
+
+.courier-table .col-sim-type {
+  width: 120px;
+  min-width: 110px;
+}
+
+.courier-table .col-sim-no {
+  width: 175px;
+  min-width: 165px;
+}
+
+.courier-table .col-software {
+  width: 140px;
+  min-width: 130px;
+}
+
+.courier-table .col-send-via {
+  width: 145px;
+  min-width: 135px;
+}
+
+.courier-table .col-courier-date {
+  width: 120px;
+  min-width: 115px;
+  white-space: nowrap;
+}
+
+.courier-table .col-tracking-id {
+  width: 155px;
+  min-width: 145px;
+}
+
+.courier-table .col-courier-status {
+  width: 130px;
+  min-width: 120px;
+}
+
+.courier-table .col-approval-status {
+  width: 155px;
+  min-width: 145px;
+}
+
+.courier-table .col-requested-by {
+  width: 135px;
+  min-width: 125px;
+}
+
+.courier-table .col-datetime {
+  width: 125px;
+  min-width: 115px;
+  white-space: nowrap;
+}
+
+.courier-table .col-actions {
+  width: 200px;
+  min-width: 200px;
+  white-space: nowrap;
+}
+
+/* Sticky Actions Column */
+.courier-table th.col-actions,
+.courier-table td.col-actions {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background-color: #ffffff;
+  border-left: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: -3px 0 6px rgba(11, 18, 40, 0.05);
+}
+
+.courier-table th.col-actions {
+  background-color: #f3f7fc;
+  z-index: 3;
+}
+
+.courier-table tbody tr:hover td.col-actions {
+  background-color: #f3f6fb;
+}
+
+/* Badges inside table */
+.courier-table .badge {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  display: inline-block;
+  white-space: nowrap;
+  line-height: 1.25;
+  font-family: 'Montserrat', sans-serif;
+}
+
+/* Cell Wrapping for Long Values */
+.courier-cell-wrap {
+  display: block;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.courier-cell-code {
+  display: block;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  letter-spacing: -0.2px;
+  font-family: 'Montserrat', sans-serif;
+}
+
+.courier-datetime {
+  display: block;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--text-secondary, #64748b);
+  font-family: 'Montserrat', sans-serif;
+}
+
+/* Action Icons - Single Horizontal Row */
+.courier-actions-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.courier-action-btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-secondary, #64748b);
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.courier-action-btn:hover {
+  background: #eef4ff;
+  border-color: #b9d2fb;
+  color: var(--primary-color, #2563eb);
+  transform: translateY(-1px);
+}
+
+.courier-action-btn.view:hover {
+  color: var(--primary-color, #2563eb);
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.courier-action-btn.edit:hover {
+  color: #2563eb;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.courier-action-btn.delete:hover {
+  color: #dc2626;
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
+/* ==========================================================================
+   RESPONSIVE QUERIES
+   ========================================================================== */
+@media (max-width: 768px) {
+  .courier-filter-card {
+    padding: 0.85rem 1rem;
+  }
+  .courier-filter-row {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  .courier-filter-col-placeholder {
+    display: none;
+  }
+  .courier-filter-reset-btn {
+    width: 100%;
+  }
+  .courier-table-card {
+    padding: 0.85rem 1rem;
+  }
+}

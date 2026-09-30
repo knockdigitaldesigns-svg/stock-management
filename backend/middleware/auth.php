@@ -67,6 +67,44 @@ function authenticate() {
         sendResponse(false, 'Invalid or expired token', [], [], 401);
     }
 
+    $userId = (int) ($payload['user_id'] ?? 0);
+    $sessionId = (string) ($payload['sid'] ?? '');
+    if (!$userId || $sessionId === '') {
+        sendResponse(false, 'Your session is no longer valid.', [], [], 401);
+    }
+
+    $conn = (new Database())->getConnection();
+    if (!$conn) {
+        sendResponse(false, 'Unable to validate user session.', [], [], 500);
+    }
+
+    $stmt = $conn->prepare('SELECT active_session_id, active_session_expires_at FROM users WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        $conn->close();
+        sendResponse(false, 'Unable to validate user session.', [], [], 500);
+    }
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $activeSession = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $activeSessionId = (string) ($activeSession['active_session_id'] ?? '');
+    $activeSessionExpiresAt = (int) ($activeSession['active_session_expires_at'] ?? 0);
+    $sessionMatches = $activeSessionId !== '' && hash_equals($activeSessionId, $sessionId);
+    if (!$sessionMatches || $activeSessionExpiresAt <= time()) {
+        if ($sessionMatches && $activeSessionExpiresAt <= time()) {
+            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ?');
+            if ($clearSession) {
+                $clearSession->bind_param('is', $userId, $sessionId);
+                $clearSession->execute();
+                $clearSession->close();
+            }
+        }
+        $conn->close();
+        sendResponse(false, 'Your session is no longer valid.', [], [], 401);
+    }
+
+    $conn->close();
     return $payload;
 }
 
@@ -199,7 +237,12 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'support.assign' => ['permission_name' => 'Support Assign', 'module' => 'support', 'action' => 'ASSIGN'],
         'support.close' => ['permission_name' => 'Support Close', 'module' => 'support', 'action' => 'CLOSE'],
         'support.qa.view' => ['permission_name' => 'Support Questions View', 'module' => 'support', 'action' => 'QA_VIEW'],
-        'support.qa.manage' => ['permission_name' => 'Support Questions Manage', 'module' => 'support', 'action' => 'QA_MANAGE']
+        'support.qa.manage' => ['permission_name' => 'Support Questions Manage', 'module' => 'support', 'action' => 'QA_MANAGE'],
+        'courier.view' => ['permission_name' => 'Courier View', 'module' => 'courier', 'action' => 'VIEW'],
+        'courier.add' => ['permission_name' => 'Courier Add', 'module' => 'courier', 'action' => 'ADD'],
+        'courier.edit' => ['permission_name' => 'Courier Edit', 'module' => 'courier', 'action' => 'EDIT'],
+        'courier.delete' => ['permission_name' => 'Courier Delete', 'module' => 'courier', 'action' => 'DELETE'],
+        'courier.approve' => ['permission_name' => 'Courier Approve', 'module' => 'courier', 'action' => 'APPROVE']
     ];
 
     foreach ($permissionKeys as $key) {

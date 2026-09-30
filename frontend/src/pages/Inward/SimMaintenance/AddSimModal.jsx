@@ -139,7 +139,7 @@ const AddSimModal = ({ onClose, onSuccess }) => {
             }
         >
             <form id="add-sim-form" onSubmit={handleSubmit}>
-                <div className="form-group" style={{ maxWidth: '200px' }}>
+                <div className="form-group">
                     <label className="form-label">SIM Count</label>
                     <input 
                         type="number" 
@@ -152,9 +152,24 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                 </div>
 
                 <div className="devices-list">
-                    {sims.map((sim) => (
-                        <div key={sim.id} className="device-row" style={{ gridTemplateColumns: 'repeat(2, 1fr) auto' }}>
-                            <div className="form-group">
+                    {sims.map((sim, index) => (
+                        <div key={sim.id} className="device-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', alignItems: 'start', marginBottom: '2rem' }}>
+                            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '-0.5rem' }}>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                                    SIM {index + 1}
+                                </span>
+                                {sims.length > 1 && (
+                                    <button 
+                                        type="button" 
+                                        className="icon-btn delete" 
+                                        onClick={() => removeRow(sim.id)}
+                                        title="Delete SIM"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
+                            </div>
+                            <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
                                 <label className="form-label">Purchase Date *</label>
                                 <DateInput 
                                     className="form-control"
@@ -163,26 +178,13 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                                     required
                                 />
                             </div>
-                            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                <label className="form-label">Notes</label>
-                                <textarea className="form-control" rows="3" placeholder="Enter notes..." value={sim.notes} onChange={(e) => handleSimChange(sim.id, 'notes', e.target.value)} />
-                            </div>
-                            <div className="form-group">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label className="form-label">SIM Type *</label>
                                 <select className="form-control" value={sim.sim_type} onChange={(e) => handleSimChange(sim.id, 'sim_type', e.target.value)} required>
                                     <option value="">Select SIM Type</option><option value="Voice">Voice</option><option value="Non Voice">Non Voice</option>
                                 </select>
                             </div>
-                            {/* <div className="form-group">
-                                <label className="form-label">SIM Validity *</label>
-                                <SearchableDropdown
-                                    options={validities.map((v) => ({ value: String(v.id), label: `${v.months} Months` }))}
-                                    value={String(sim.sim_validity_id)}
-                                    onChange={(val) => handleSimChange(sim.id, 'sim_validity_id', val)}
-                                    placeholder="Select Validity"
-                                />
-                            </div> */}
-                            <div className="form-group">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label className="form-label">SIM No *</label>
                                 <input 
                                     type="text" 
@@ -199,16 +201,10 @@ const AddSimModal = ({ onClose, onSuccess }) => {
                                     required
                                 />
                             </div>
-                            {sims.length > 1 && (
-                                <button 
-                                    type="button" 
-                                    className="icon-btn delete" 
-                                    style={{ marginBottom: '1.25rem' }}
-                                    onClick={() => removeRow(sim.id)}
-                                >
-                                    <Trash2 size={18} />
-                                </button>
-                            )}
+                            <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
+                                <label className="form-label">Notes</label>
+                                <textarea className="form-control" rows="3" placeholder="Enter notes..." value={sim.notes} onChange={(e) => handleSimChange(sim.id, 'notes', e.target.value)} />
+                            </div>
                         </div>
                     ))}
                 </div>

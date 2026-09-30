@@ -205,7 +205,10 @@ const InwardReports = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Inward Reports</h2>
+                <div>
+                    <h2>Inward Reports</h2>
+                    <p className="page-subtitle">Review incoming device and SIM stock with exportable reports.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? simList.length === 0 : deviceList.length === 0)} onClick={handleExportExcel}>
                         <Download size={16} /> Export Excel

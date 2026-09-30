@@ -26,7 +26,8 @@ import {
     History as HistoryIcon,
     LifeBuoy,
     Menu,
-    X
+    X,
+    Truck
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
@@ -82,8 +83,8 @@ const AdminLayout = () => {
         }
     }, [location.pathname]);
 
-    const handleLogout = () => {
-        logout();
+    const handleLogout = async () => {
+        await logout();
         navigate('/login');
     };
 
@@ -126,6 +127,9 @@ const AdminLayout = () => {
 
     const canViewDeviceAlert =
         hasPermission('device_alert.view');
+
+    const canViewCourier =
+        hasPermission('courier.view');
 
     // =========================
     // MASTER SETTINGS
@@ -466,6 +470,24 @@ const showCustomerManagement =
                         >
                             <Bell size={20} />
                             <span>Device Alert</span>
+                        </NavLink>
+                    )}
+
+                    {/* =========================================
+                        COURIER
+                    ========================================= */}
+
+                    {canViewCourier && (
+                        <NavLink
+                            to="/courier"
+                            className={({ isActive }) =>
+                                `nav-item ${
+                                    isActive ? 'active' : ''
+                                }`
+                            }
+                        >
+                            <Truck size={20} />
+                            <span>Courier</span>
                         </NavLink>
                     )}
                     {showCustomerManagement && (

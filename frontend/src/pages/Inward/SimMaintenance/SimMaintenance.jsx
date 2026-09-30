@@ -96,7 +96,10 @@ const SimMaintenance = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>SIM Maintenance</h2>
+                <div>
+                    <h2>SIM Maintenance</h2>
+                    <p className="page-subtitle">Receive, track, and manage SIM inventory.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
                         <Upload size={16} /> Upload Excel
@@ -118,6 +121,7 @@ const SimMaintenance = () => {
     showStatus
     statusOptions={['Available', 'Allocated', 'Used']}
     searchPlaceholder="Search by SIM number, type, or notes..."
+    gridCols={5}
 />
 
                 <div className="table-container">

@@ -120,7 +120,10 @@ const Technicians = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Technician Management</h2>
+                <div>
+                    <h2>Technician Management</h2>
+                    <p className="page-subtitle">Manage technician profiles and their assigned inventory.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
@@ -153,6 +156,7 @@ const Technicians = () => {
                     showSimType
                     showSimValidity
                     showPaymentStatus
+                    gridCols={5}
                 />
 
                 <div className="table-container">

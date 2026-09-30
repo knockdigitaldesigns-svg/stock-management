@@ -98,7 +98,10 @@ const StockManagement = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Stock Management</h2>
+                <div>
+                    <h2>Stock Management</h2>
+                    <p className="page-subtitle">Track available, allocated, and used device and SIM stock.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-primary" onClick={() => setIsUpdateModalOpen(true)}>
                         <PenTool size={16} /> Update Stock
@@ -123,6 +126,7 @@ const StockManagement = () => {
                     platformOptions={platforms}
                     showPaymentStatus
                     searchPlaceholder="Search by owner name, IMEI, SIM, or software..."
+                    gridCols={5}
                 />
 
                 <div className="table-container">

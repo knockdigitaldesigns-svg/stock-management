@@ -45,7 +45,10 @@ const ChangePasswordPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Change Password</h2>
+                <div>
+                    <h2>Change Password</h2>
+                    <p className="page-subtitle">Update the password used to sign in to your account.</p>
+                </div>
             </div>
             <div className="card" style={{ maxWidth: '520px' }}>
                 {error && <div className="alert alert-danger">{error}</div>}

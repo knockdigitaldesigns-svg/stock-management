@@ -81,7 +81,10 @@ const DeviceMaintenance = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Device Maintenance</h2>
+                <div>
+                    <h2>Device Maintenance</h2>
+                    <p className="page-subtitle">Receive, track, and manage device inventory.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
                         <Upload size={16} /> Upload Excel
@@ -104,6 +107,7 @@ const DeviceMaintenance = () => {
                     showStatus
                     statusOptions={['Available', 'Allocated', 'Used']}
                     searchPlaceholder="Search by IMEI, model, or notes..."
+                    gridCols={5}
                 />
 
                 <div className="table-container">

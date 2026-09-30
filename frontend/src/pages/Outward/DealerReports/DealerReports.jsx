@@ -133,7 +133,10 @@ const DealerReports = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Outward Reports</h2>
+                <div>
+                    <h2>Outward Reports</h2>
+                    <p className="page-subtitle">Review dealer and technician stock allocations and export reports.</p>
+                </div>
                 <div className="header-actions">
                     <button
                         className="btn btn-outline"
@@ -192,17 +195,20 @@ const DealerReports = () => {
                         />
                     </div>
                 </div>
-                <TableFilterBar
-                    filters={filters}
-                    onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
-                    items={reportData}
-                    dateKeys={['allocation_date']}
-                    showSimType={currentTab.type === 'SIM'}
-                    showSimValidity={currentTab.type === 'SIM'}
-                    showDeviceModel={currentTab.type !== 'SIM'}
-                    searchPlaceholder="Search report results..."
-                />
+                <div style={{ marginTop: '10px' }}>
+                    <TableFilterBar
+                        filters={filters}
+                        onChange={setFilters}
+                        onReset={() => setFilters(emptyTableFilters())}
+                        items={reportData}
+                        dateKeys={['allocation_date']}
+                        showSimType={currentTab.type === 'SIM'}
+                        showSimValidity={currentTab.type === 'SIM'}
+                        showDeviceModel={currentTab.type !== 'SIM'}
+                        searchPlaceholder="Search report results..."
+                        gridCols={5}
+                    />
+                </div>
             </div>
 
             <div className="card">

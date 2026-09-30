@@ -46,7 +46,7 @@ const CustomerCreatePage = () => {
     const [success, setSuccess] = useState('');
     const [showValidation, setShowValidation] = useState(false);
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
-    const [mobileConflict, setMobileConflict] = useState(null);
+    const [duplicateCustomerModal, setDuplicateCustomerModal] = useState(null);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -356,7 +356,7 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false) => {
+    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false, customData = null) => {
         try {
             const existing = JSON.parse(
                 sessionStorage.getItem(
@@ -381,27 +381,29 @@ const loadCustomer = async () => {
                 delete nextSession.step4;
             }
 
+            const step1Data = customData || {
+                platform_id: Number(
+                    form.platform_id
+                ),
+                username:
+                    form.username.trim(),
+                primary_mobile_no:
+                    form.primary_mobile_no.trim(),
+                secondary_mobile_no:
+                    form.secondary_mobile_no.trim(),
+                email:
+                    form.email.trim(),
+                location:
+                    form.location.trim(),
+                pincode:
+                    form.pincode.trim()
+            };
+
             sessionStorage.setItem(
                 `customer_creation_${id}`,
                 JSON.stringify({
                     ...nextSession,
-                    step1: {
-                        platform_id: Number(
-                            form.platform_id
-                        ),
-                        username:
-                            form.username.trim(),
-                        primary_mobile_no:
-                            form.primary_mobile_no.trim(),
-                        secondary_mobile_no:
-                            form.secondary_mobile_no.trim(),
-                        email:
-                            form.email.trim(),
-                        location:
-                            form.location.trim(),
-                        pincode:
-                            form.pincode.trim()
-                    }
+                    step1: step1Data
                 })
             );
         } catch (err) {
@@ -515,10 +517,27 @@ const loadCustomer = async () => {
                         { skipGlobalError: true }
                     );
                 } catch (err) {
-                    if (!err.response?.data?.data?.mobile_conflict) throw err;
-                    setMobileConflict({ payload, message: err.response.data.message });
-                    setSaving(false);
-                    return;
+                    const resData = err.response?.data;
+                    const code = resData?.data?.code || resData?.code;
+
+                    if (code === 'EXISTING_CUSTOMER_SAME_MOBILE') {
+                        const existingId = resData?.data?.customer_id || resData?.data?.customer?.id;
+                        setDuplicateCustomerModal({
+                            customerId: existingId,
+                            customer: resData?.data?.customer,
+                            message: resData?.message
+                        });
+                        setSaving(false);
+                        return;
+                    }
+
+                    if (code === 'USERNAME_EXISTS_DIFFERENT_MOBILE') {
+                        triggerError('Username already exists with a different mobile number.');
+                        setSaving(false);
+                        return;
+                    }
+
+                    throw err;
                 }
             }
 
@@ -582,29 +601,36 @@ const loadCustomer = async () => {
         }
     };
 
-    const confirmMobileConflict = async () => {
-        if (!mobileConflict) return;
-        try {
-            setSaving(true);
-            setMobileConflict(null);
-            const response = await api.post(
-                '/customers/create.php',
-                { ...mobileConflict.payload, mobile_reuse_confirmed: true },
-                { skipGlobalError: true }
+    const handleDuplicateYes = () => {
+        if (!duplicateCustomerModal?.customerId) return;
+        const existingId = Number(duplicateCustomerModal.customerId);
+        const existingCustomerData = duplicateCustomerModal.customer || {};
+
+        const step1Data = {
+            platform_id: Number(existingCustomerData.platform_id || form.platform_id),
+            username: (existingCustomerData.username || form.username).trim(),
+            primary_mobile_no: (existingCustomerData.primary_mobile_no || form.primary_mobile_no).trim(),
+            secondary_mobile_no: (existingCustomerData.secondary_mobile_no || form.secondary_mobile_no || '').trim(),
+            email: (existingCustomerData.email || form.email || '').trim(),
+            location: (existingCustomerData.location || form.location || '').trim(),
+            pincode: (existingCustomerData.pincode || form.pincode || '').trim()
+        };
+
+        setDuplicateCustomerModal(null);
+        saveStep1Session(existingId, true, true, step1Data);
+
+        setSuccess('Existing customer selected. Continuing to add vehicle...');
+
+        setTimeout(() => {
+            navigate(
+                `/customer-management/details/vehicle/${existingId}?mode=add`
             );
-            if (!response.data?.success) {
-                throw new Error(response.data?.message || 'Failed to save customer details.');
-            }
-            const savedId = Number(response.data?.data?.customer_id || response.data?.data?.id);
-            if (!savedId) throw new Error('Customer ID was not returned by the server.');
-            saveStep1Session(savedId, true, false);
-            setSuccess('Customer details saved successfully.');
-            setTimeout(() => navigate(`/customer-management/details/vehicle/${savedId}`), 250);
-        } catch (err) {
-            triggerError(err.response?.data?.message || err.message || 'Failed to save customer details.');
-        } finally {
-            setSaving(false);
-        }
+        }, 250);
+    };
+
+    const handleDuplicateNo = () => {
+        setDuplicateCustomerModal(null);
+        triggerError('This username and mobile number already exist.');
     };
 
     /*
@@ -1181,18 +1207,18 @@ const loadCustomer = async () => {
 
             </div>
 
-            {mobileConflict && (
+            {duplicateCustomerModal && (
                 <Modal
                     isOpen
-                    onClose={() => setMobileConflict(null)}
-                    title="Mobile number already exists"
+                    onClose={handleDuplicateNo}
+                    title="Customer already exists"
                     maxWidth="520px"
                     footer={
                         <>
                             <button
                                 type="button"
                                 className="btn btn-outline"
-                                onClick={() => setMobileConflict(null)}
+                                onClick={handleDuplicateNo}
                                 disabled={saving}
                             >
                                 No
@@ -1200,16 +1226,18 @@ const loadCustomer = async () => {
                             <button
                                 type="button"
                                 className="btn btn-primary"
-                                onClick={confirmMobileConflict}
+                                onClick={handleDuplicateYes}
                                 disabled={saving}
                             >
-                                {saving ? 'Saving...' : 'Yes'}
+                                Yes, Add Vehicle
                             </button>
                         </>
                     }
                 >
-                    <p>
-                        {mobileConflict.message || 'This mobile number is already associated with an existing user in this software. Do you want to continue with the same mobile number for this new user?'}
+                    <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: '#334155' }}>
+                        Customer already exists with the same username and mobile number.
+                        <br />
+                        Do you want to add another vehicle under this customer?
                     </p>
                 </Modal>
             )}

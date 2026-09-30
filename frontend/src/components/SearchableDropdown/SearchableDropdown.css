@@ -86,7 +86,7 @@
     margin: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    max-height: 220px;
+    max-height: 148px;
 }
 
 .dropdown-item {
@@ -97,6 +97,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    height: 37px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
 }
 
 .dropdown-item:hover {
@@ -118,6 +122,8 @@
     cursor: default;
     text-align: center;
     padding: 1rem;
+    height: auto;
+    display: block;
 }
 
 .dropdown-item.no-results:hover {

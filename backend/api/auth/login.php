@@ -54,14 +54,38 @@ if (strtolower((string) ($user['status'] ?? 'active')) !== 'active') {
 $roleName = $user['role_name'] ?? $user['role'] ?? 'No Role';
 $permissions = getUserPermissions((int)$user['id']);
 $secret = 'your_super_secret_key_12345';
+$sessionId = bin2hex(random_bytes(32));
+$expiresAt = time() + (86400 * 30);
 $payload = [
     'user_id' => (int) $user['id'],
     'username' => $user['username'],
     'role' => $roleName,
     'role_id' => (int)($user['role_id'] ?? 0),
-    'exp' => time() + (86400 * 30)
+    'sid' => $sessionId,
+    'exp' => $expiresAt
 ];
 $token = generateJWT($payload, $secret);
+
+$userId = (int) $user['id'];
+$currentTime = time();
+$updateSession = $conn->prepare('UPDATE users SET active_session_id = ?, active_session_created_at = CURRENT_TIMESTAMP, active_session_expires_at = ? WHERE id = ? AND (active_session_id IS NULL OR active_session_expires_at IS NULL OR active_session_expires_at <= ?)');
+if (!$updateSession) {
+    $conn->close();
+    sendResponse(false, 'Unable to create login session.', [], [], 500);
+}
+$updateSession->bind_param('siii', $sessionId, $expiresAt, $userId, $currentTime);
+if (!$updateSession->execute()) {
+    $updateSession->close();
+    $conn->close();
+    sendResponse(false, 'Unable to create login session.', [], [], 500);
+}
+$sessionClaimed = $updateSession->affected_rows === 1;
+$updateSession->close();
+
+if (!$sessionClaimed) {
+    $conn->close();
+    sendResponse(false, 'User is already logged in on another device.', [], [], 409);
+}
 
 $conn->close();
 

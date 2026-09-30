@@ -35,7 +35,10 @@ const DeviceAlertPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Device Alert</h2>
+                <div>
+                    <h2>Device Alert</h2>
+                    <p className="page-subtitle">Set stock alert rules and choose whether notifications are enabled.</p>
+                </div>
             </div>
             <div className="card" style={{ maxWidth: '640px' }}>
                 <div className="form-group">

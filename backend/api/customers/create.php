@@ -232,70 +232,74 @@ $stmt->close();
 
 /*
 |--------------------------------------------------------------------------
-| Check Duplicate Username (per platform)
+| Check Customer Uniqueness
+| 1. Same Username + Same Mobile -> EXISTING_CUSTOMER_SAME_MOBILE
+| 2. Same Username + Different Mobile -> USERNAME_EXISTS_DIFFERENT_MOBILE
+| 3. Different Username + Same Mobile -> Allowed (New customer)
+| 4. Different Username + Different Mobile -> Allowed (New customer)
 |--------------------------------------------------------------------------
 */
 
+// Check 1: Same Username + Same Mobile No
 $stmt = $conn->prepare(
-    "SELECT id
+    "SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no, email, location, pincode, status
      FROM customers
-     WHERE platform_id = ?
-       AND LOWER(username) = LOWER(?)
+     WHERE LOWER(TRIM(username)) = LOWER(?)
+       AND TRIM(primary_mobile_no) = ?
+     ORDER BY id ASC
      LIMIT 1"
 );
 
-$stmt->bind_param('is', $platformId, $username);
+$stmt->bind_param('ss', $username, $primaryMobile);
 $stmt->execute();
+$existingSameMobile = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-$result = $stmt->get_result();
-
-if ($result->num_rows > 0) {
-    $stmt->close();
+if ($existingSameMobile) {
+    $conn->rollback();
     $conn->close();
 
     sendResponse(
         false,
-        'Username already exists in this software. Please use a different username.',
-        [],
+        'Customer already exists with the same username and mobile number.',
+        [
+            'code' => 'EXISTING_CUSTOMER_SAME_MOBILE',
+            'customer_id' => (int) $existingSameMobile['id'],
+            'customer' => $existingSameMobile
+        ],
         [],
         409
     );
 }
 
-$stmt->close();
-
-
-/*
-|--------------------------------------------------------------------------
-| Check Same-Platform Mobile Reuse
-|--------------------------------------------------------------------------
-*/
-
+// Check 2: Same Username + Different Mobile No
 $stmt = $conn->prepare(
-    "SELECT id, username
+    "SELECT id
      FROM customers
-     WHERE platform_id = ?
-       AND primary_mobile_no = ?
+     WHERE LOWER(TRIM(username)) = LOWER(?)
+       AND TRIM(primary_mobile_no) != ?
      ORDER BY id ASC
      LIMIT 1"
 );
-$stmt->bind_param('is', $platformId, $primaryMobile);
+
+$stmt->bind_param('ss', $username, $primaryMobile);
 $stmt->execute();
-$mobileCustomer = $stmt->get_result()->fetch_assoc();
+$existingDiffMobile = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-if ($mobileCustomer) {
-    if (!$mobileReuseConfirmed) {
-        $conn->rollback();
-        $conn->close();
-        sendResponse(
-            false,
-            'This mobile number is already associated with an existing user in this software. Do you want to continue with the same mobile number for this new user?',
-            ['mobile_conflict' => true],
-            [],
-            409
-        );
-    }
+if ($existingDiffMobile) {
+    $conn->rollback();
+    $conn->close();
+
+    sendResponse(
+        false,
+        'Username already exists with a different mobile number.',
+        [
+            'code' => 'USERNAME_EXISTS_DIFFERENT_MOBILE'
+        ],
+        [],
+        409
+    );
 }
 
 

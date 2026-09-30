@@ -37,6 +37,9 @@ import StockManagement
 import StockTransferPage
     from './pages/StockTransfer/StockTransferPage';
 
+import CourierPage
+    from './pages/Courier/CourierPage';
+
 import ProtectedRoute
     from './components/ProtectedRoute/ProtectedRoute';
 
@@ -169,13 +172,7 @@ function App() {
 
                     <Route
                         path="dashboard"
-                        element={
-                            <ProtectedRoute
-                                permission="dashboard.view"
-                            >
-                                <Dashboard />
-                            </ProtectedRoute>
-                        }
+                        element={<Dashboard />}
                     />
 
                     <Route
@@ -322,6 +319,21 @@ function App() {
                                 permission="device_alert.view"
                             >
                                 <DeviceAlertPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    {/* =================================================
+                        COURIER
+                    ================================================= */}
+
+                    <Route
+                        path="courier"
+                        element={
+                            <ProtectedRoute
+                                permission="courier.view"
+                            >
+                                <CourierPage />
                             </ProtectedRoute>
                         }
                     />
