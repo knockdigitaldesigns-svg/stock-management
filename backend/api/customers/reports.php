@@ -181,7 +181,7 @@ $optionResult = $conn->query("SELECT id, lead_closure_name FROM lead_closures WH
 while ($optionResult && ($row = $optionResult->fetch_assoc())) $leadClosures[] = ['id' => (int)$row['id'], 'name' => $row['lead_closure_name']];
 
 $deviceTypes = [];
-$optionResult = $conn->query('SELECT id, device_type FROM device_types ORDER BY device_type');
+$optionResult = $conn->query("SELECT id, device_type FROM device_types WHERE status IS NULL OR status = '' OR LOWER(status) = 'active' ORDER BY device_type");
 while ($optionResult && ($row = $optionResult->fetch_assoc())) $deviceTypes[] = ['id' => (int)$row['id'], 'name' => $row['device_type']];
 
 $validities = [];

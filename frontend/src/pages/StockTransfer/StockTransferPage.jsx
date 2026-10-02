@@ -19,7 +19,7 @@ const emptyFilters = () => ({
 });
 
 const StockTransferPage = () => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, permissions } = useAuth();
 
     // --------------------------------------------------
     // TABLE STATE
@@ -438,7 +438,7 @@ const StockTransferPage = () => {
                                                 {hasPermission('stock_transfer.edit') && (
                                                     <button className="icon-btn edit" title="Edit" onClick={() => { setEditTarget(row); setEditNotes(row.notes || ''); }}><Edit size={16} /></button>
                                                 )}
-                                                {hasPermission('stock_transfer.delete') && (
+                                                {Array.isArray(permissions) && permissions.includes('stock_transfer.delete') && (
                                                     <button className="icon-btn delete" title="Delete" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>
                                                 )}
                                             </div>

@@ -874,26 +874,6 @@ const CustomerVehicleDetailsPage = () => {
             );
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Existing IMEI should not appear invalid.
-            |--------------------------------------------------------------------------
-            */
-
-            if (
-                vehicle.imei_no
-            ) {
-
-                setImeiLookupStatus(
-                    'verified'
-                );
-
-                setImeiLookupMessage(
-                    '✓ Existing IMEI verified'
-                );
-
-            }
-
         } catch (err) {
 
             console.error(
@@ -1036,40 +1016,6 @@ const CustomerVehicleDetailsPage = () => {
 
         /*
         |--------------------------------------------------------------------------
-        | Existing customer's own IMEI
-        |--------------------------------------------------------------------------
-        |
-        | It must remain valid during edit.
-        |--------------------------------------------------------------------------
-        */
-
-        if (
-            existingVehicleImei &&
-            imei === existingVehicleImei &&
-            form.device_model_id
-        ) {
-
-            setImeiLookupLoading(false);
-
-            setImeiLookupStatus(
-                'verified'
-            );
-
-            setImeiLookupMessage(
-                '✓ Existing IMEI verified'
-            );
-
-            return () => {
-
-                active = false;
-
-            };
-
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
         | Only lookup at 15 digits
         |--------------------------------------------------------------------------
         */
@@ -1114,7 +1060,7 @@ const CustomerVehicleDetailsPage = () => {
 
                         const response =
                             await api.get(
-                                `/devices/get_by_imei.php?imei=${encodeURIComponent(imei)}`
+                                `/devices/get_by_imei.php?imei=${encodeURIComponent(imei)}&customer_id=${encodeURIComponent(customerId || 0)}&vehicle_id=${encodeURIComponent(vehicleRecordId || 0)}`
                             );
 
 
@@ -1166,52 +1112,34 @@ const CustomerVehicleDetailsPage = () => {
 
                         /*
                         |--------------------------------------------------------------------------
-                        | Current customer's own IMEI
-                        |--------------------------------------------------------------------------
-                        */
-
-                        if (
-                            existingVehicleImei &&
-                            imei === existingVehicleImei
-                        ) {
-
-                            setImeiLookupStatus(
-                                'verified'
-                            );
-
-                            setImeiLookupMessage(
-                                '✓ Existing IMEI verified'
-                            );
-
-                            return;
-
-                        }
-
-
-                        /*
-                        |--------------------------------------------------------------------------
-                        | Already used
+                        | Customer assignment check
                         |--------------------------------------------------------------------------
                         */
 
                         const deviceStatus = String(device.status || '').toLowerCase();
                         const ownerType = String(device.owner_type || '').toLowerCase();
                         const ownerInstallationStatus = String(device.owner_installation_status || '').toLowerCase();
-                        const ownerEligible = ownerType === 'technician' || (ownerType === 'dealer' && ['onsite', 'offsite'].includes(ownerInstallationStatus));
-                        const deviceUsed = Boolean(device.is_used) || ['et', 'technician', 'dealer'].includes(String(device.usage_type || '').toLowerCase());
+                        const ownerEligible = Number(device.owner_id) > 0 && (
+                            ownerType === 'technician' ||
+                            (ownerType === 'dealer' && ['onsite', 'offsite'].includes(ownerInstallationStatus))
+                        );
 
-                        if (deviceUsed || deviceStatus === 'used') {
-
-                            setImeiLookupStatus(
-                                'used'
-                            );
-
-                            setImeiLookupMessage(
-                                'This IMEI is already used for a customer.'
-                            );
-
+                        if (device.is_assigned_to_current_customer && !device.is_assigned_to_another_customer) {
+                            setImeiLookupStatus('verified');
+                            setImeiLookupMessage('✓ Existing IMEI verified');
                             return;
+                        }
 
+                        if (device.is_assigned_to_another_customer) {
+                            setImeiLookupStatus('used');
+                            setImeiLookupMessage('✕ IMEI is already assigned to another customer.');
+                            return;
+                        }
+
+                        if (deviceStatus === 'used') {
+                            setImeiLookupStatus('used');
+                            setImeiLookupMessage('✕ IMEI is already used and cannot be assigned again.');
+                            return;
                         }
 
 
@@ -1308,8 +1236,9 @@ const CustomerVehicleDetailsPage = () => {
 
     }, [
         form.imei_no,
-        existingVehicleImei,
-        form.device_model_id
+        form.device_model_id,
+        customerId,
+        vehicleRecordId
     ]);
 
     useEffect(() => {
@@ -1324,27 +1253,30 @@ const CustomerVehicleDetailsPage = () => {
                     next[field] = `✕ ${field === 'sim_no_1' ? 'SIM No 1' : 'SIM No 2'} must contain exactly 10 or 13 digits.`;
                     continue;
                 }
-                const isExistingSim =
-                    (field === 'sim_no_1' && existingVehicleSim1 && value === existingVehicleSim1) ||
-                    (field === 'sim_no_2' && existingVehicleSim2 && value === existingVehicleSim2);
-
-                if (isExistingSim) {
-                    next[field] = '✓ Existing SIM verified';
-                    continue;
-                }
-
                 try {
-                    const response = await api.get(`/sims/list.php?search=${encodeURIComponent(value)}`);
+                    const response = await api.get(`/sims/list.php?search=${encodeURIComponent(value)}&customer_id=${encodeURIComponent(customerId || 0)}&vehicle_id=${encodeURIComponent(vehicleRecordId || 0)}`);
                     const sims = response.data?.data?.sims || [];
                     const found = sims.find((sim) => String(sim.sim_no) === value);
+                    const simStatus = String(found?.status || '').toLowerCase();
                     if (!found) {
                         next[field] = `✕ ${field === 'sim_no_1' ? 'SIM No 1' : 'SIM No 2'} does not exist in SIM Maintenance.`;
+                    } else if (found.is_assigned_to_current_customer && !found.is_assigned_to_another_customer) {
+                        next[field] = '✓ Existing SIM verified';
+                    } else if (simStatus === 'used') {
+                        next[field] = '✕ SIM is already used and cannot be assigned again.';
+                    } else if (found.is_assigned_to_another_customer) {
+                        next[field] = '✕ SIM is already assigned to another customer.';
                     } else {
-                        const simStatus = String(found.status || '').toLowerCase();
-                        if (simStatus === 'used') {
-                            next[field] = `✕ ${field === 'sim_no_1' ? 'SIM No 1' : 'SIM No 2'} is already used by another customer.`;
-                        } else {
+                        const ownerType = String(found.owner_type || '').toLowerCase();
+                        const ownerInstallationStatus = String(found.owner_installation_status || '').toLowerCase();
+                        const ownerEligible = Number(found.owner_id) > 0 && (
+                            ownerType === 'technician' ||
+                            (ownerType === 'dealer' && ['onsite', 'offsite'].includes(ownerInstallationStatus))
+                        );
+                        if (simStatus === 'available' || (simStatus === 'allocated' && ownerEligible)) {
                             next[field] = '✓ SIM verified';
+                        } else {
+                            next[field] = `✕ ${field === 'sim_no_1' ? 'SIM No 1' : 'SIM No 2'} is not available for allocation.`;
                         }
                     }
                 } catch {
@@ -1355,7 +1287,7 @@ const CustomerVehicleDetailsPage = () => {
         };
         const timer = setTimeout(checkSims, 250);
         return () => { active = false; clearTimeout(timer); };
-    }, [form.sim_no_1, form.sim_no_2, existingVehicleSim1, existingVehicleSim2]);
+    }, [form.sim_no_1, form.sim_no_2, customerId, vehicleRecordId]);
 
 
     /*
@@ -1465,6 +1397,11 @@ const CustomerVehicleDetailsPage = () => {
                     .replace(/\D/g, '')
                     .slice(0, 13);
 
+            setSimLookup((previous) => ({
+                ...previous,
+                [name]: ''
+            }));
+
         }
 
 
@@ -1541,13 +1478,10 @@ const CustomerVehicleDetailsPage = () => {
         }
 
 
-        if (
-            imeiLookupStatus === 'used' &&
-            form.imei_no !== existingVehicleImei
-        ) {
+        if (imeiLookupStatus === 'used') {
 
             return (
-                'This IMEI is already used for a customer.'
+                'IMEI is already used and cannot be assigned again.'
             );
 
         }
@@ -1574,6 +1508,10 @@ const CustomerVehicleDetailsPage = () => {
 
         }
 
+        if (imeiLookupLoading || imeiLookupStatus !== 'verified') {
+            return 'Please wait for IMEI verification to complete.';
+        }
+
 
         if (
             !form.sim_no_1
@@ -1586,6 +1524,8 @@ const CustomerVehicleDetailsPage = () => {
         }
 
         if (simLookup.sim_no_1 && simLookup.sim_no_1.startsWith('✕')) return simLookup.sim_no_1.replace('✕ ', '');
+
+        if (!simLookup.sim_no_1.startsWith('✓')) return 'Please wait for SIM No 1 validation to complete.';
 
 
         if (
@@ -1624,6 +1564,8 @@ const CustomerVehicleDetailsPage = () => {
             }
 
             if (simLookup.sim_no_2 && simLookup.sim_no_2.startsWith('✕')) return simLookup.sim_no_2.replace('✕ ', '');
+
+            if (!simLookup.sim_no_2.startsWith('✓')) return 'Please wait for SIM No 2 validation to complete.';
 
 
             if (

@@ -3,6 +3,7 @@ import { useError } from '../../context/ErrorContext';
 import './TableFilterBar.css';
 import { Search, RotateCcw } from 'lucide-react';
 import FilterSelect from '../FilterSelect/FilterSelect';
+import { PAYMENT_STATUS_OPTIONS } from '../../constants/paymentStatuses';
 
 const MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -252,7 +253,8 @@ const TableFilterBar = ({
     showDateRange = false,
     dealerOptions,
     showDealer = false,
-    gridCols = 4
+    gridCols = 4,
+    className = ''
 }) => {
     const { showError } = useError();
     const years = useMemo(() => getAvailableYears(items, dateKeys), [items, dateKeys]);
@@ -299,10 +301,8 @@ const TableFilterBar = ({
 
     const resolvedPaymentStatuses = useMemo(() => {
         if (paymentStatusOptions) return unique(paymentStatusOptions);
-        const statuses = unique(items.map((i) => i.payment_status));
-        const defaultList = ['Paid', 'Partially Paid', 'Not Paid', 'No Payment Required'];
-        return unique([...defaultList, ...statuses]);
-    }, [paymentStatusOptions, items]);
+        return PAYMENT_STATUS_OPTIONS;
+    }, [paymentStatusOptions]);
 
     const resolvedStatuses = useMemo(() => {
         if (statusOptions) return unique(statusOptions);
@@ -332,7 +332,7 @@ const TableFilterBar = ({
     const set = (key) => (event) => onChange({ ...filters, [key]: event.target.value });
 
     return (
-        <div className="table-filter-card card">
+        <div className={`table-filter-card card ${className}`.trim()}>
             <div className={`table-filter-grid${gridCols === 5 ? ' table-filter-grid--5col' : ''}`}>
                 {/* 1. Search */}
                 {showSearch && (
@@ -486,7 +486,7 @@ const TableFilterBar = ({
 
                 {/* 12. Installation Status (starts on next row) */}
                 {(showInstallationStatus || installationStatusOptions) && (
-                    <div className="filter-group" style={{ gridColumnStart: 1 }}>
+                    <div className="filter-group filter-group--next-row">
                         <label className="filter-label">Installation Status</label>
                         <FilterSelect value={filters.installationStatus || ''} onChange={set('installationStatus')}>
                             <option value="">All Installation Status</option>

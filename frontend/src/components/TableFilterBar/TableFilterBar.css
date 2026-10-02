@@ -23,6 +23,10 @@
   flex-direction: column;
 }
 
+.filter-group--next-row {
+  grid-column-start: 1;
+}
+
 .filter-label {
   display: block;
   margin-bottom: 7px;
@@ -113,6 +117,16 @@
   }
 }
 
+@media (max-width: 1280px) and (min-width: 521px) {
+  .dealer-filter-card .table-filter-grid--5col {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dealer-filter-card .filter-group--next-row {
+    grid-column-start: auto;
+  }
+}
+
 @media (max-width: 1024px) {
   .table-filter-grid,
   .table-filter-grid--5col {
@@ -130,6 +144,12 @@
 @media (max-width: 480px) {
   .table-filter-grid,
   .table-filter-grid--5col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .dealer-filter-card .table-filter-grid--5col {
     grid-template-columns: 1fr;
   }
 }

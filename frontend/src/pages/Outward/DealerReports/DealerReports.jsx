@@ -18,6 +18,9 @@ const tabs = [
 const DealerReports = () => {
     const [activeTab, setActiveTab] = useState('dealer-sim');
     const [owners, setOwners] = useState({ dealers: [], technicians: [] });
+    const [deviceModels, setDeviceModels] = useState([]);
+    const [simValidities, setSimValidities] = useState([]);
+    const [simTypes, setSimTypes] = useState([]);
     const [selectedOwner, setSelectedOwner] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
     const [reportData, setReportData] = useState([]);
@@ -36,6 +39,25 @@ const DealerReports = () => {
                 })
             )
             .catch((error) => console.error('Failed to load report owners', error));
+    }, []);
+
+    useEffect(() => {
+        Promise.all([
+            api.get('/device_types/list.php').catch(() => null),
+            api.get('/sim_validities/list.php').catch(() => null),
+            api.get('/sim_types/list.php').catch(() => null)
+        ]).then(([deviceTypesResponse, validitiesResponse, simTypesResponse]) => {
+            const deviceTypes = deviceTypesResponse?.data.data?.device_types || [];
+            const validities = validitiesResponse?.data.data?.validities || [];
+            const masterSimTypes = simTypesResponse?.data.data?.sim_types || [];
+            setDeviceModels(deviceTypes
+                .filter((type) => String(type.status || 'Active').trim().toLowerCase() === 'active')
+                .map((type) => type.device_type));
+            setSimValidities(validities
+                .filter((validity) => String(validity.status || 'active').trim().toLowerCase() === 'active')
+                .map((validity) => `${validity.months} Months`));
+            setSimTypes(masterSimTypes.map((simType) => simType.sim_type));
+        });
     }, []);
 
     useEffect(() => {
@@ -202,6 +224,9 @@ const DealerReports = () => {
                         onReset={() => setFilters(emptyTableFilters())}
                         items={reportData}
                         dateKeys={['allocation_date']}
+                        deviceModelOptions={currentTab.type !== 'SIM' ? deviceModels : undefined}
+                        simTypeOptions={currentTab.type === 'SIM' ? simTypes : undefined}
+                        simValidityOptions={currentTab.type === 'SIM' ? simValidities : undefined}
                         showSimType={currentTab.type === 'SIM'}
                         showSimValidity={currentTab.type === 'SIM'}
                         showDeviceModel={currentTab.type !== 'SIM'}

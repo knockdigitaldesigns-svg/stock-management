@@ -469,25 +469,6 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     const isApproved = isEdit && editData?.approval_status === 'Approved';
     const isSupportedPerson = true;
 
-    const hasValidRecipient = 
-        (courierToPerson === 'Dealer' && selectedDealer) || 
-        (courierToPerson === 'Technician' && selectedTechnician) || 
-        (courierToPerson === 'Customer' && selectedCustomer);
-
-    const isDevicesValid = (assetType === 'device' || assetType === 'both')
-        ? (deviceRows.length > 0 && deviceRows.every(r => r.device_model_id && r.device_id))
-        : true;
-
-    const isSimsValid = (assetType === 'sim' || assetType === 'both')
-        ? (simRows.length > 0 && simRows.every(r => r.sim_type && r.sim_id))
-        : true;
-
-    const isNewCustomerValid = isCreatingNewCustomer
-        ? (Boolean(newCustomerForm.username.trim()) && /^\d{10}$/.test(newCustomerForm.primary_mobile_no.trim()))
-        : true;
-
-    const canSubmit = hasValidRecipient && isDevicesValid && isSimsValid && isNewCustomerValid && courierDate;
-
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -507,6 +488,10 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
         }
 
         if (isCreatingNewCustomer) {
+            if (!newCustomerForm.platform_id) {
+                triggerError('Please select a Platform for the new customer.');
+                return;
+            }
             if (!newCustomerForm.username.trim()) {
                 triggerError("Username is required for New Customer.");
                 return;
@@ -782,13 +767,16 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                 </div>
                                 <div className="row">
                                     <div className="col-md-6 mb-3">
-                                        <label className="form-label small font-weight-bold">Platform</label>
+                                        <label className="form-label small font-weight-bold">
+                                            Platform <span className="text-danger">*</span>
+                                        </label>
                                         <select
                                             className="form-control"
                                             name="platform_id"
                                             value={newCustomerForm.platform_id}
                                             onChange={handleNewCustomerChange}
                                             disabled={saving}
+                                            required
                                         >
                                             <option value="">Select Platform</option>
                                             {platformsList.map(p => (
@@ -1553,7 +1541,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                         <button
                             type="submit"
                             className="btn btn-primary"
-                            disabled={!canSubmit || saving}
+                            disabled={saving}
                         >
                             {saving ? 'Saving...' : isEdit ? 'Update Request' : 'Submit Courier Request'}
                         </button>

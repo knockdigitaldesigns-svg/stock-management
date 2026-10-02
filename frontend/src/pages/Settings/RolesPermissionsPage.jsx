@@ -10,6 +10,7 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../compon
 import useModalScrollLock from '../../hooks/useModalScrollLock';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
+import { useAuth } from '../../context/AuthContext';
 
 const PERMISSION_COLUMNS = ['view', 'add', 'edit', 'delete', 'export', 'update', 'approve'];
 
@@ -291,6 +292,7 @@ const buildPermissionMatrix = (definitions = [], assigned = []) => {
 };
 
 const RolesPermissionsPage = () => {
+    const { currentUser, updatePermissions } = useAuth();
     const [tab, setTab] = useState('roles');
     const [roles, setRoles] = useState([]);
     const [filters, setFilters] = useState(emptyTableFilters);
@@ -359,6 +361,10 @@ const closeFeedback = () => {
             const assigned = response.data.data?.permissions || [];
             setAssignedPermissions(assigned);
             setMatrix(buildPermissionMatrix(definitions, assigned));
+            const currentRoleId = currentUser?.role?.id ?? currentUser?.role_id;
+            if (currentRoleId && String(roleId) === String(currentRoleId)) {
+                updatePermissions(assigned);
+            }
         } catch (error) {
             console.error('Failed to fetch permissions', error);
         }

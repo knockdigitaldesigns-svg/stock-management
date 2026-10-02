@@ -98,6 +98,17 @@ if ($courier_to_person === 'Dealer') {
             sendResponse(false, "Primary mobile number must contain exactly 10 digits.", [], [], 400);
         }
 
+        $platformId = (int)($step1->platform_id ?? 0);
+        $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
+        $platformStmt->bind_param('i', $platformId);
+        $platformStmt->execute();
+        $validPlatform = $platformStmt->get_result()->fetch_assoc();
+        $platformStmt->close();
+        if (!$validPlatform) {
+            $conn->close();
+            sendResponse(false, "Select an active Platform for the new customer.", [], [], 400);
+        }
+
         // Check if username already exists with different mobile
         $stmt = $conn->prepare("SELECT id FROM customers WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) != ? LIMIT 1");
         $stmt->bind_param("ss", $username, $primaryMobile);
@@ -405,19 +416,22 @@ try {
         $updCode->execute();
         $updCode->close();
 
-        // Mark device reserved (Only for existing Dealer, Technician, or Existing Customer)
-        if ($curDeviceId && !$is_new_customer) {
-            $updDev = $conn->prepare("UPDATE devices SET status = 'reserved' WHERE id = ?");
+        // The courier_requests row is the reservation link for every request type.
+        if ($curDeviceId) {
+            $updDev = $conn->prepare("UPDATE devices SET status = 'reserved' WHERE id = ? AND status = 'available'");
             $updDev->bind_param("i", $curDeviceId);
-            $updDev->execute();
+            if (!$updDev->execute() || $updDev->affected_rows !== 1) {
+                throw new Exception("Selected Device is no longer available to reserve.");
+            }
             $updDev->close();
         }
 
-        // Mark SIM reserved (Only for existing Dealer, Technician, or Existing Customer)
-        if ($curSimId && !$is_new_customer) {
-            $updSim = $conn->prepare("UPDATE sims SET status = 'reserved' WHERE id = ?");
+        if ($curSimId) {
+            $updSim = $conn->prepare("UPDATE sims SET status = 'reserved' WHERE id = ? AND status = 'available'");
             $updSim->bind_param("i", $curSimId);
-            $updSim->execute();
+            if (!$updSim->execute() || $updSim->affected_rows !== 1) {
+                throw new Exception("Selected SIM is no longer available to reserve.");
+            }
             $updSim->close();
         }
     }

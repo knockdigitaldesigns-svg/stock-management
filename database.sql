@@ -608,9 +608,9 @@ CREATE TABLE IF NOT EXISTS customer_installations (
         ENUM('Technician', 'Dealer')
         NOT NULL,
 
-    installation_person_id INT NOT NULL,
+    installation_person_id INT DEFAULT NULL,
 
-    lead_closure_id INT UNSIGNED NOT NULL,
+    lead_closure_id INT UNSIGNED DEFAULT NULL,
 
     installation_date DATE NOT NULL,
 

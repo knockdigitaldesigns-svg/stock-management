@@ -448,6 +448,24 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
     }
 }
 
+$installationPersonIdColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'installation_person_id'");
+if ($installationPersonIdColumn && ($column = $installationPersonIdColumn->fetch_assoc()) && $column['Null'] !== 'YES') {
+    if ($conn->query("ALTER TABLE customer_installations MODIFY COLUMN installation_person_id INT DEFAULT NULL") === TRUE) {
+        echo "Column 'installation_person_id' on customer_installations is now nullable\n";
+    } else {
+        echo "Error making installation_person_id nullable: " . $conn->error . "\n";
+    }
+}
+
+$installationLeadClosureColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'lead_closure_id'");
+if ($installationLeadClosureColumn && ($column = $installationLeadClosureColumn->fetch_assoc()) && $column['Null'] !== 'YES') {
+    if ($conn->query("ALTER TABLE customer_installations MODIFY COLUMN lead_closure_id INT UNSIGNED DEFAULT NULL") === TRUE) {
+        echo "Column 'lead_closure_id' on customer_installations is now nullable\n";
+    } else {
+        echo "Error making lead_closure_id nullable: " . $conn->error . "\n";
+    }
+}
+
 $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available'");
 $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL");
 $conn->query("UPDATE stock_allocations sa JOIN sims s ON s.id = sa.sim_id SET sa.sim_given_date = COALESCE(sa.sim_given_date, sa.allocation_date), sa.sim_validity_id = COALESCE(sa.sim_validity_id, s.sim_validity_id), sa.sim_status = COALESCE(sa.sim_status, 'Available') WHERE sa.sim_id IS NOT NULL");
@@ -623,10 +641,14 @@ $permissionDefinitions = [
     ['outward_reports.view', 'Outward Reports View', 'outward_reports', 'VIEW'],
     ['outward_reports.export', 'Outward Reports Export', 'outward_reports', 'EXPORT'],
     ['stock.view', 'Stock Management View', 'stock', 'VIEW'],
+    ['stock_management.edit', 'Stock Management Edit', 'stock_management', 'EDIT'],
+    ['stock_management.delete', 'Stock Management Delete', 'stock_management', 'DELETE'],
     ['stock.update', 'Stock Management Update', 'stock', 'UPDATE'],
     ['stock.export', 'Stock Management Export', 'stock', 'EXPORT'],
     ['stock_transfer.view', 'Stock Transfer View', 'stock_transfer', 'VIEW'],
     ['stock_transfer.add', 'Stock Transfer Add', 'stock_transfer', 'ADD'],
+    ['stock_transfer.edit', 'Stock Transfer Edit', 'stock_transfer', 'EDIT'],
+    ['stock_transfer.delete', 'Stock Transfer Delete', 'stock_transfer', 'DELETE'],
     ['customers.view', 'Customer Details View', 'customers', 'VIEW'],
     ['customers.add', 'Customer Details Add', 'customers', 'ADD'],
     ['customers.edit', 'Customer Details Edit', 'customers', 'EDIT'],
@@ -634,8 +656,10 @@ $permissionDefinitions = [
     ['customers.export', 'Customer Details Export', 'customers', 'EXPORT'],
     ['customers.update', 'Customer Details Update', 'customers', 'UPDATE'],
     ['customer_reports.view', 'Customer Reports View', 'customer_reports', 'VIEW'],
+    ['reports.export', 'Reports Export', 'reports', 'EXPORT'],
     ['customer_renewals.view', 'Customer Renewals View', 'customer_renewals', 'VIEW'],
     ['customer_renewals.edit', 'Customer Renewals Edit', 'customer_renewals', 'EDIT'],
+    ['renewals.delete', 'Customer Renewals Delete', 'renewals', 'DELETE'],
     ['customer_renewals.renew', 'Customer Renewals Renew', 'customer_renewals', 'RENEW'],
     ['customer_renewals.history', 'Customer Renewals History', 'customer_renewals', 'HISTORY'],
     ['sim_lifecycle.view', 'SIM Lifecycle View', 'sim_lifecycle', 'VIEW'],

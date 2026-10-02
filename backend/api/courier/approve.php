@@ -34,6 +34,9 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
+// Begin the transaction before locking the request and its assets.
+$conn->begin_transaction();
+
 // 1. Fetch courier request with FOR UPDATE lock
 $fetchStmt = $conn->prepare("SELECT * FROM courier_requests WHERE id = ? FOR UPDATE");
 $fetchStmt->bind_param("i", $id);
@@ -42,11 +45,13 @@ $request = $fetchStmt->get_result()->fetch_assoc();
 $fetchStmt->close();
 
 if (!$request) {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request not found", [], [], 404);
 }
 
 if ($request['approval_status'] !== 'Pending Approval') {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request is already {$request['approval_status']}.", [], [], 400);
 }
@@ -65,6 +70,7 @@ if ($owner_type === 'technician') {
 }
 
 if (!$isNewCustomer && $owner_id <= 0) {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Recipient owner ID not found for this request.", [], [], 400);
 }
@@ -75,11 +81,8 @@ $allocation_date = !empty($request['courier_date']) ? $request['courier_date'] :
 $software = $request['software'] ?? '';
 $notes = $request['notes'] ?? '';
 
-// Begin DB Transaction
-$conn->begin_transaction();
-
 try {
-    // 2. Verify selected Device is available or reserved
+    // 2. Verify selected Device is available or reserved by this request.
     if ($device_id) {
         $devStmt = $conn->prepare("SELECT id, status FROM devices WHERE id = ? FOR UPDATE");
         $devStmt->bind_param("i", $device_id);
@@ -90,18 +93,31 @@ try {
         if (!$devRow) {
             throw new Exception("Device associated with this request was not found.");
         }
-        if ($isNewCustomer) {
-            if ($devRow['status'] !== 'available') {
-                throw new Exception("Device is no longer available in stock (current status: {$devRow['status']}).");
-            }
-        } else {
-            if ($devRow['status'] !== 'reserved') {
-                throw new Exception("Device is no longer reserved for this request (current status: {$devRow['status']}).");
-            }
+
+        $devOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND device_id = ? AND approval_status = 'Pending Approval' LIMIT 1");
+        $devOwnerStmt->bind_param("ii", $id, $device_id);
+        $devOwnerStmt->execute();
+        $deviceReservationOwner = $devOwnerStmt->get_result()->fetch_assoc();
+        $devOwnerStmt->close();
+
+        $otherDevOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE device_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+        $otherDevOwnerStmt->bind_param("ii", $device_id, $id);
+        $otherDevOwnerStmt->execute();
+        $otherDeviceReservation = $otherDevOwnerStmt->get_result()->fetch_assoc();
+        $otherDevOwnerStmt->close();
+
+        if ($devRow['status'] === 'reserved' && (!$deviceReservationOwner || $otherDeviceReservation)) {
+            throw new Exception("Device is no longer available in stock (reserved by another request or transaction).");
+        }
+        if ($devRow['status'] !== 'available' && $devRow['status'] !== 'reserved') {
+            throw new Exception("Device is no longer available in stock (current status: {$devRow['status']}).");
+        }
+        if ($devRow['status'] === 'available' && $otherDeviceReservation) {
+            throw new Exception("Device is reserved by another courier request.");
         }
     }
 
-    // 3. Verify selected SIM is available or reserved
+    // 3. Verify selected SIM is available or reserved by this request.
     if ($sim_id) {
         $simStmt = $conn->prepare("SELECT id, status, sim_validity_id FROM sims WHERE id = ? FOR UPDATE");
         $simStmt->bind_param("i", $sim_id);
@@ -112,14 +128,27 @@ try {
         if (!$simRow) {
             throw new Exception("SIM associated with this request was not found.");
         }
-        if ($isNewCustomer) {
-            if ($simRow['status'] !== 'available') {
-                throw new Exception("SIM is no longer available in stock (current status: {$simRow['status']}).");
-            }
-        } else {
-            if ($simRow['status'] !== 'reserved') {
-                throw new Exception("SIM is no longer reserved for this request (current status: {$simRow['status']}).");
-            }
+
+        $simOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND sim_id = ? AND approval_status = 'Pending Approval' LIMIT 1");
+        $simOwnerStmt->bind_param("ii", $id, $sim_id);
+        $simOwnerStmt->execute();
+        $simReservationOwner = $simOwnerStmt->get_result()->fetch_assoc();
+        $simOwnerStmt->close();
+
+        $otherSimOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE sim_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+        $otherSimOwnerStmt->bind_param("ii", $sim_id, $id);
+        $otherSimOwnerStmt->execute();
+        $otherSimReservation = $otherSimOwnerStmt->get_result()->fetch_assoc();
+        $otherSimOwnerStmt->close();
+
+        if ($simRow['status'] === 'reserved' && (!$simReservationOwner || $otherSimReservation)) {
+            throw new Exception("SIM is no longer available in stock (reserved by another request or transaction).");
+        }
+        if ($simRow['status'] !== 'available' && $simRow['status'] !== 'reserved') {
+            throw new Exception("SIM is no longer available in stock (current status: {$simRow['status']}).");
+        }
+        if ($simRow['status'] === 'available' && $otherSimReservation) {
+            throw new Exception("SIM is reserved by another courier request.");
         }
     }
 
@@ -155,7 +184,15 @@ try {
             $chkDiff->close();
 
             // Insert Customer
-            $platformId = !empty($step1['platform_id']) ? (int)$step1['platform_id'] : 1;
+            $platformId = (int)($step1['platform_id'] ?? 0);
+            $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
+            $platformStmt->bind_param('i', $platformId);
+            $platformStmt->execute();
+            $validPlatform = $platformStmt->get_result()->fetch_assoc();
+            $platformStmt->close();
+            if (!$validPlatform) {
+                throw new Exception('Select an active Platform by editing this courier request before approving the new customer.');
+            }
             $secMobile = !empty($step1['secondary_mobile_no']) ? trim($step1['secondary_mobile_no']) : null;
             $email = !empty($step1['email']) ? trim($step1['email']) : null;
             $location = !empty($step1['location']) ? trim($step1['location']) : '';
@@ -189,16 +226,25 @@ try {
         $vSim1 = trim((string)($step2['sim_no_1'] ?? ''));
         $vSim2 = trim((string)($step2['sim_no_2'] ?? ''));
         $vValidityId = !empty($step2['validity_id']) ? (int)$step2['validity_id'] : null;
+        $vValidityMonths = 0;
+        if ($vValidityId) {
+            $validityStmt = $conn->prepare('SELECT months FROM sim_validities WHERE id = ? LIMIT 1');
+            $validityStmt->bind_param('i', $vValidityId);
+            $validityStmt->execute();
+            $validityRow = $validityStmt->get_result()->fetch_assoc();
+            $validityStmt->close();
+            $vValidityMonths = (int) ($validityRow['months'] ?? 0);
+        }
 
         if ($vehicleNo !== '' || $vImeiNo !== '') {
             $chkVehTable = $conn->query("SHOW TABLES LIKE 'customer_vehicle_details'");
             if ($chkVehTable && $chkVehTable->num_rows > 0) {
                 $insVeh = $conn->prepare("
                     INSERT INTO customer_vehicle_details (
-                        customer_id, vehicle_no, vehicle_type_id, device_model_id, imei_no, sim_no_1, sim_no_2, validity_id, status
-                    ) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), ?, ?, ?, NULLIF(?, 0), 'Active')
+                        customer_id, vehicle_no, vehicle_type_id, device_model_id, imei_no, sim_no_1, sim_no_2, validity_months
+                    ) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), ?, ?, ?, NULLIF(?, 0))
                 ");
-                $insVeh->bind_param("isiisssi", $owner_id, $vehicleNo, $vTypeId, $vDevModelId, $vImeiNo, $vSim1, $vSim2, $vValidityId);
+                $insVeh->bind_param("isiisssi", $owner_id, $vehicleNo, $vTypeId, $vDevModelId, $vImeiNo, $vSim1, $vSim2, $vValidityMonths);
                 $insVeh->execute();
                 $insVeh->close();
             }
@@ -206,18 +252,57 @@ try {
 
         // Insert Installation Details if present
         $step3 = $newCustomerData['step3'] ?? [];
-        $instPersonType = !empty($step3['installation_person_type']) ? trim($step3['installation_person_type']) : null;
+        $requestedInstPersonType = !empty($step3['installation_person_type']) ? trim($step3['installation_person_type']) : null;
         $instPersonId = !empty($step3['installation_person_id']) ? (int)$step3['installation_person_id'] : null;
+        $instPersonType = null;
+        if ($instPersonId) {
+            if ($requestedInstPersonType === 'Technician') {
+                $instPersonStmt = $conn->prepare('SELECT id FROM technicians WHERE id = ? LIMIT 1');
+                $instPersonStmt->bind_param('i', $instPersonId);
+                $instPersonStmt->execute();
+                $validInstPerson = $instPersonStmt->get_result()->fetch_assoc();
+                $instPersonStmt->close();
+                $instPersonType = 'Technician';
+            } elseif (in_array($requestedInstPersonType, ['Onsite Dealer', 'Offsite Dealer'], true)) {
+                $expectedInstallationStatus = $requestedInstPersonType === 'Onsite Dealer' ? 'Onsite' : 'Offsite';
+                $instPersonStmt = $conn->prepare('SELECT id FROM dealers WHERE id = ? AND LOWER(TRIM(installation_status)) = LOWER(?) LIMIT 1');
+                $instPersonStmt->bind_param('is', $instPersonId, $expectedInstallationStatus);
+                $instPersonStmt->execute();
+                $validInstPerson = $instPersonStmt->get_result()->fetch_assoc();
+                $instPersonStmt->close();
+                $instPersonType = 'Dealer';
+            } else {
+                throw new Exception('Invalid installation person type for the selected person.');
+            }
+
+            if (!$validInstPerson) {
+                throw new Exception('Selected installation person does not exist or does not match the selected type.');
+            }
+        } elseif ($requestedInstPersonType === 'Technician') {
+            $instPersonType = 'Technician';
+        } elseif (in_array($requestedInstPersonType, ['Onsite Dealer', 'Offsite Dealer'], true)) {
+            $instPersonType = 'Dealer';
+        }
         $instDate = !empty($step3['installation_date']) ? $step3['installation_date'] : null;
         $leadClosureId = !empty($step3['lead_closure_id']) ? (int)$step3['lead_closure_id'] : null;
+        if ($leadClosureId) {
+            $leadClosureStmt = $conn->prepare("SELECT id FROM lead_closures WHERE id = ? AND (status IS NULL OR status = '' OR LOWER(status) = 'active') LIMIT 1");
+            $leadClosureStmt->bind_param('i', $leadClosureId);
+            $leadClosureStmt->execute();
+            $validLeadClosure = $leadClosureStmt->get_result()->fetch_assoc();
+            $leadClosureStmt->close();
+            if (!$validLeadClosure) {
+                throw new Exception('Selected lead closure is inactive or does not exist.');
+            }
+        }
 
-        if ($instPersonType || $instPersonId || $instDate || $leadClosureId) {
+        if ($instPersonType !== null && ($instPersonId || $instDate || $leadClosureId)) {
             $chkInstTable = $conn->query("SHOW TABLES LIKE 'customer_installations'");
             if ($chkInstTable && $chkInstTable->num_rows > 0) {
                 $insInst = $conn->prepare("
                     INSERT INTO customer_installations (
-                        customer_id, installation_person_type, installation_person_id, installation_date, lead_closure_id, status
-                    ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0), 'Completed')
+                        customer_id, installation_person_type, installation_person_id, installation_date, lead_closure_id
+                    ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0))
                 ");
                 $insInst->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
                 $insInst->execute();
@@ -251,8 +336,9 @@ try {
     }
 
     // 4. Change Approval Status to Approved in courier_requests
-    $updReq = $conn->prepare("UPDATE courier_requests SET customer_id = ?, approval_status = 'Approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    $updReq->bind_param("ii", $owner_id, $id);
+    $requestCustomerId = $owner_type === 'customer' ? $owner_id : 0;
+    $updReq = $conn->prepare("UPDATE courier_requests SET customer_id = NULLIF(?, 0), approval_status = 'Approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    $updReq->bind_param("ii", $requestCustomerId, $id);
     if (!$updReq->execute()) {
         throw new Exception("Failed to update approval status: " . $updReq->error);
     }

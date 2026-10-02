@@ -13,25 +13,11 @@ import Modal from '../../components/Modal/Modal';
 import './CourierPage.css';
 
 const CourierPage = () => {
-    const { hasPermission, role, user } = useAuth();
-
-    const getRoleStr = (val) => {
-        if (!val) return '';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'object') return String(val.name || val.role || '');
-        return String(val);
-    };
-
-    // Check if user is Super Admin or has approve permission
-    const isSuperAdmin = Boolean(
-        getRoleStr(user?.role).toLowerCase().includes('super') ||
-        getRoleStr(role).toLowerCase().includes('super') ||
-        String(user?.username || '').toLowerCase() === 'admin'
-    );
-    const canApprove = isSuperAdmin || hasPermission('courier.approve');
-    const canAdd = isSuperAdmin || hasPermission('courier.add');
-    const canEdit = isSuperAdmin || hasPermission('courier.edit');
-    const canDelete = isSuperAdmin || hasPermission('courier.delete');
+    const { hasPermission } = useAuth();
+    const canApprove = hasPermission('courier.approve');
+    const canAdd = hasPermission('courier.add');
+    const canEdit = hasPermission('courier.edit');
+    const canDelete = hasPermission('courier.delete');
 
     // --------------------------------------------------
     // STATE
@@ -526,7 +512,7 @@ const CourierPage = () => {
                                                 )}
 
                                                 {/* Courier Update Action Icon (Available ONLY for Approved requests) */}
-                                                {row.approval_status === 'Approved' && (canEdit || canApprove || isSuperAdmin) && (
+                                                {row.approval_status === 'Approved' && (canEdit || canApprove) && (
                                                     <button
                                                         type="button"
                                                         className="courier-action-btn edit"

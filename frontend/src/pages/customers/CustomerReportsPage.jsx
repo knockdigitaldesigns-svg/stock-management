@@ -6,6 +6,7 @@ import usePagination from '../../hooks/usePagination';
 import { exportToExcel, exportToPDF } from '../../utils/export';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
+import { PAYMENT_STATUS_FILTERS } from '../../constants/paymentStatuses';
 
 const emptyFilters = () => ({
     search: '',
@@ -263,7 +264,7 @@ const CustomerReportsPage = () => {
                         </div>
                         <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />
                         <SearchableDropdown label="Lead Closure" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosures.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
-                        <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, { value: 'paid', label: 'Paid' }, { value: 'partially_paid', label: 'Partially Paid' }, { value: 'not_paid', label: 'Not Paid' }]} onChange={value => updateFilter('payment', value)} />
+                        <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, ...PAYMENT_STATUS_FILTERS]} onChange={value => updateFilter('payment', value)} />
                         <SearchableDropdown label="Device Type" value={filters.deviceType} options={[{ value: '', label: 'All' }, ...options.deviceTypes.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('deviceType', value)} />
                         <SearchableDropdown label="Validity" value={filters.validity} options={[{ value: '', label: 'All' }, ...options.validities.map(value => ({ value, label: `${value} Months` }))]} onChange={value => updateFilter('validity', value)} />
                     </div>

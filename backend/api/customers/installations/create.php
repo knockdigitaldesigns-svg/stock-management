@@ -227,7 +227,7 @@ try {
         ? 'id = ? AND customer_id = ?'
         : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1';
     $vehicleStmt = $conn->prepare(
-        "SELECT device_id, sim_id_1 FROM customer_vehicle_details WHERE {$vehicleLookup} FOR UPDATE"
+        "SELECT id, device_id, sim_id_1 FROM customer_vehicle_details WHERE {$vehicleLookup} FOR UPDATE"
     );
     if ($vehicleId > 0) {
         $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
@@ -240,6 +240,21 @@ try {
     if (!$vehicle || empty($vehicle['device_id']) || empty($vehicle['sim_id_1'])) {
         throw new Exception('Device and SIM are required before saving installation details.');
     }
+
+    $assertNotUsedByAnotherCustomer = static function ($conn, string $assetColumn, int $assetId, string $assetLabel) use ($customerId): void {
+        $stmt = $conn->prepare(
+            "SELECT id FROM customer_vehicle_details WHERE {$assetColumn} = ? AND customer_id <> ? LIMIT 1 FOR UPDATE"
+        );
+        $stmt->bind_param('ii', $assetId, $customerId);
+        $stmt->execute();
+        $usedByAnotherCustomer = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+        if ($usedByAnotherCustomer) {
+            throw new Exception("This {$assetLabel} is already used by another customer.");
+        }
+    };
+    $assertNotUsedByAnotherCustomer($conn, 'device_id', (int) $vehicle['device_id'], 'Device');
+    $assertNotUsedByAnotherCustomer($conn, 'sim_id_1', (int) $vehicle['sim_id_1'], 'SIM');
 
     $resolveOwner = static function ($conn, string $assetColumn, int $assetId): ?array {
         $stmt = $conn->prepare(
@@ -289,10 +304,10 @@ try {
         );
     }
     if ($deviceOwner && $simOwner && ($deviceOwner['type'] !== $simOwner['type'] || $deviceOwner['id'] !== $simOwner['id'])) {
-        throw new Exception('Device and SIM are allocated to different persons. Please transfer the device/SIM to the same owner before proceeding.');
+        throw new Exception('Device and SIM are allocated to different persons. Please use Stock Transfer to move them to the same person before installation.');
     }
 
-    $currentOwner = $deviceOwner ?: $simOwner;
+    $currentOwner = $deviceOwner && $simOwner ? $deviceOwner : null;
     if (!$currentOwner) {
         $currentOwner = null;
     }

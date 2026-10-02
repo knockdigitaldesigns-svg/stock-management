@@ -15,6 +15,7 @@ const InwardReports = () => {
     const [deviceSummary, setDeviceSummary] = useState(null);
     const [simList, setSimList] = useState([]);
     const [deviceList, setDeviceList] = useState([]);
+    const [deviceModels, setDeviceModels] = useState([]);
     const [filters, setFilters] = useState(emptyTableFilters);
     
     const [loading, setLoading] = useState(false);
@@ -22,6 +23,17 @@ const InwardReports = () => {
     useEffect(() => {
         setFilters(emptyTableFilters());
     }, [activeTab]);
+
+    useEffect(() => {
+        api.get('/device_types/list.php')
+            .then((response) => {
+                const deviceTypes = response.data.data?.device_types || [];
+                setDeviceModels(deviceTypes
+                    .filter((type) => String(type.status || 'Active').trim().toLowerCase() === 'active')
+                    .map((type) => type.device_type));
+            })
+            .catch(() => setDeviceModels([]));
+    }, []);
 
     useEffect(() => {
         const fetchReports = async () => {
@@ -305,6 +317,7 @@ const InwardReports = () => {
                             onReset={() => setFilters(emptyTableFilters())}
                             items={activeTab === 'sim' ? simList : deviceList}
                             dateKeys={['purchase_date']}
+                            deviceModelOptions={activeTab === 'device' ? deviceModels : undefined}
                             showSimType={activeTab === 'sim'}
                             showDeviceModel={activeTab === 'device'}
                             searchPlaceholder={activeTab === 'sim' ? 'Search SIM number, type, or notes...' : 'Search IMEI, model, or notes...'}

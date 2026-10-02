@@ -7,7 +7,6 @@ import EditDealerModal from './EditDealerModal';
 import DealerExcelUploadModal from './DealerExcelUploadModal';
 import AddStockAllocationModal from '../../../components/AddStockAllocationModal/AddStockAllocationModal';
 import Modal from '../../../components/Modal/Modal';
-import Can from '../../../components/Can/Can';
 import Pagination from '../../../components/Pagination/Pagination';
 import usePagination from '../../../hooks/usePagination';
 import PaymentModal from '../../../components/PaymentModal/PaymentModal';
@@ -152,11 +151,9 @@ const Dealers = () => {
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
                     </button>
-                    <Can permission="dealers.import">
                         <button className="btn btn-outline" onClick={() => setIsDealerUploadModalOpen(true)}>
                             <Upload size={16} /> Upload Excel
                         </button>
-                    </Can>
                     <button className="btn btn-primary" onClick={() => setIsAddDealerModalOpen(true)}>
                         <Plus size={16} /> Add Dealer
                     </button>
@@ -182,6 +179,7 @@ const Dealers = () => {
                     showInstallationStatus
                     showPaymentStatus
                     gridCols={5}
+                    className="dealer-filter-card"
                 />
 
                 <div className="table-container">

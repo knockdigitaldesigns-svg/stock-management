@@ -9,7 +9,7 @@ function parseAndNormalizeDate($value) {
     }
     $str = trim((string) $value);
     // Format: DD-MM-YYYY or DD/MM/YYYY
-    if (preg_match('/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/', $str, $m)) {
+    if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/', $str, $m)) {
         $day = (int) $m[1];
         $month = (int) $m[2];
         $year = (int) $m[3];
@@ -19,7 +19,7 @@ function parseAndNormalizeDate($value) {
         return false;
     }
     // Format: YYYY-MM-DD or YYYY/MM/DD
-    if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/', $str, $m)) {
+    if (preg_match('/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/', $str, $m)) {
         $year = (int) $m[1];
         $month = (int) $m[2];
         $day = (int) $m[3];

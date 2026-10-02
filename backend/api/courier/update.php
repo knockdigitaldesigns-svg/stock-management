@@ -28,7 +28,10 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
+require_once __DIR__ . '/setup_table.php';
+
 // Fetch existing request
+$conn->begin_transaction();
 $fetchStmt = $conn->prepare("SELECT * FROM courier_requests WHERE id = ? FOR UPDATE");
 $fetchStmt->bind_param("i", $id);
 $fetchStmt->execute();
@@ -36,11 +39,10 @@ $existing = $fetchStmt->get_result()->fetch_assoc();
 $fetchStmt->close();
 
 if (!$existing) {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request not found", [], [], 404);
 }
-
-require_once __DIR__ . '/setup_table.php';
 
 $currentApprovalStatus = $existing['approval_status'];
 $newTrackingId = trim((string)($data->tracking_id ?? $existing['tracking_id']));
@@ -83,7 +85,6 @@ if ($currentApprovalStatus === 'Approved') {
     }
 
     // Only update non-asset fields
-    $conn->begin_transaction();
     try {
         $updStmt = $conn->prepare("
             UPDATE courier_requests 
@@ -126,6 +127,22 @@ if (!in_array($newCourierTo, ['Dealer', 'Technician', 'Customer'], true)) {
 $newDealerId = $newCourierTo === 'Dealer' ? (int)($data->dealer_id ?? $existing['dealer_id']) : null;
 $newTechnicianId = $newCourierTo === 'Technician' ? (int)($data->technician_id ?? $existing['technician_id']) : null;
 $newCustomerId = $newCourierTo === 'Customer' ? (int)($data->customer_id ?? $existing['customer_id']) : null;
+$newCustomerDataJson = $existing['new_customer_data'];
+if (!empty($existing['is_new_customer']) && isset($data->new_customer_data)) {
+    $newCustomerData = json_decode(json_encode($data->new_customer_data), true) ?: [];
+    $step1 = $newCustomerData['step1'] ?? [];
+    $platformId = (int)($step1['platform_id'] ?? 0);
+    $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
+    $platformStmt->bind_param('i', $platformId);
+    $platformStmt->execute();
+    $validPlatform = $platformStmt->get_result()->fetch_assoc();
+    $platformStmt->close();
+    if (!$validPlatform) {
+        $conn->close();
+        sendResponse(false, 'Select an active Platform for the new customer.', [], [], 400);
+    }
+    $newCustomerDataJson = json_encode($newCustomerData);
+}
 
 $newAssetType = trim((string)($data->asset_type ?? $existing['asset_type']));
 $newDeviceModelId = (int)($data->device_model_id ?? 0);
@@ -153,25 +170,42 @@ if ($newAssetType === 'sim' || $newAssetType === 'both') {
     $newSimId = null;
 }
 
-$conn->begin_transaction();
 try {
     // 1. Release old device reservation if device changed
     if ((int)$existing['device_id'] > 0 && (int)$existing['device_id'] !== $newDeviceId) {
         if ($existing['approval_status'] === 'Pending Approval') {
-            $relDev = $conn->prepare("UPDATE devices SET status = 'available' WHERE id = ?");
-            $relDev->bind_param("i", $existing['device_id']);
-            $relDev->execute();
-            $relDev->close();
+            $otherDevOwner = $conn->prepare("SELECT id FROM courier_requests WHERE device_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+            $otherDevOwner->bind_param("ii", $existing['device_id'], $id);
+            $otherDevOwner->execute();
+            $hasOtherDevOwner = $otherDevOwner->get_result()->num_rows > 0;
+            $otherDevOwner->close();
+            if (!$hasOtherDevOwner) {
+                $relDev = $conn->prepare("UPDATE devices SET status = 'available' WHERE id = ? AND status = 'reserved'");
+                $relDev->bind_param("i", $existing['device_id']);
+                if (!$relDev->execute()) {
+                    throw new Exception("Failed to release Device reservation: " . $relDev->error);
+                }
+                $relDev->close();
+            }
         }
     }
 
     // 2. Release old SIM reservation if SIM changed
     if ((int)$existing['sim_id'] > 0 && (int)$existing['sim_id'] !== $newSimId) {
         if ($existing['approval_status'] === 'Pending Approval') {
-            $relSim = $conn->prepare("UPDATE sims SET status = 'available' WHERE id = ?");
-            $relSim->bind_param("i", $existing['sim_id']);
-            $relSim->execute();
-            $relSim->close();
+            $otherSimOwner = $conn->prepare("SELECT id FROM courier_requests WHERE sim_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+            $otherSimOwner->bind_param("ii", $existing['sim_id'], $id);
+            $otherSimOwner->execute();
+            $hasOtherSimOwner = $otherSimOwner->get_result()->num_rows > 0;
+            $otherSimOwner->close();
+            if (!$hasOtherSimOwner) {
+                $relSim = $conn->prepare("UPDATE sims SET status = 'available' WHERE id = ? AND status = 'reserved'");
+                $relSim->bind_param("i", $existing['sim_id']);
+                if (!$relSim->execute()) {
+                    throw new Exception("Failed to release SIM reservation: " . $relSim->error);
+                }
+                $relSim->close();
+            }
         }
     }
 
@@ -185,25 +219,31 @@ try {
 
         if (!$devRes) throw new Exception("Selected Device not found");
 
-        $pendingCheck = $conn->prepare("SELECT id FROM courier_requests WHERE device_id = ? AND approval_status = 'Pending Approval' AND id != ?");
+        $pendingCheck = $conn->prepare("SELECT id FROM courier_requests WHERE device_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
         $pendingCheck->bind_param("ii", $newDeviceId, $id);
         $pendingCheck->execute();
-        $isPending = $pendingCheck->get_result()->num_rows > 0;
+        $otherDeviceOwner = $pendingCheck->get_result()->fetch_assoc();
         $pendingCheck->close();
 
-        if ($isPending || ($devRes['status'] === 'reserved' && (int)$existing['device_id'] !== $newDeviceId)) {
+        if ($otherDeviceOwner) {
             throw new Exception("This Device/SIM is already reserved in a pending Courier request.");
         }
 
-        if ($devRes['status'] !== 'available' && (int)$existing['device_id'] !== $newDeviceId) {
+        $samePendingReservation = $currentApprovalStatus === 'Pending Approval'
+            && (int)$existing['device_id'] === $newDeviceId
+            && $devRes['status'] === 'reserved';
+        if ($devRes['status'] !== 'available' && !$samePendingReservation) {
             throw new Exception("Selected Device is already {$devRes['status']}");
         }
 
-        // Reserve new device
-        $updDev = $conn->prepare("UPDATE devices SET status = 'reserved' WHERE id = ?");
-        $updDev->bind_param("i", $newDeviceId);
-        $updDev->execute();
-        $updDev->close();
+        if ($devRes['status'] === 'available') {
+            $updDev = $conn->prepare("UPDATE devices SET status = 'reserved' WHERE id = ? AND status = 'available'");
+            $updDev->bind_param("i", $newDeviceId);
+            if (!$updDev->execute() || $updDev->affected_rows !== 1) {
+                throw new Exception("Selected Device is no longer available to reserve.");
+            }
+            $updDev->close();
+        }
     }
 
     // 4. Verify and Reserve new SIM if changed or resubmitting
@@ -216,25 +256,31 @@ try {
 
         if (!$simRes) throw new Exception("Selected SIM not found");
 
-        $pendingSimCheck = $conn->prepare("SELECT id FROM courier_requests WHERE sim_id = ? AND approval_status = 'Pending Approval' AND id != ?");
+        $pendingSimCheck = $conn->prepare("SELECT id FROM courier_requests WHERE sim_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
         $pendingSimCheck->bind_param("ii", $newSimId, $id);
         $pendingSimCheck->execute();
-        $isSimPending = $pendingSimCheck->get_result()->num_rows > 0;
+        $otherSimOwner = $pendingSimCheck->get_result()->fetch_assoc();
         $pendingSimCheck->close();
 
-        if ($isSimPending || ($simRes['status'] === 'reserved' && (int)$existing['sim_id'] !== $newSimId)) {
+        if ($otherSimOwner) {
             throw new Exception("This Device/SIM is already reserved in a pending Courier request.");
         }
 
-        if ($simRes['status'] !== 'available' && (int)$existing['sim_id'] !== $newSimId) {
+        $samePendingReservation = $currentApprovalStatus === 'Pending Approval'
+            && (int)$existing['sim_id'] === $newSimId
+            && $simRes['status'] === 'reserved';
+        if ($simRes['status'] !== 'available' && !$samePendingReservation) {
             throw new Exception("Selected SIM is already {$simRes['status']}");
         }
 
-        // Reserve new SIM
-        $updSim = $conn->prepare("UPDATE sims SET status = 'reserved' WHERE id = ?");
-        $updSim->bind_param("i", $newSimId);
-        $updSim->execute();
-        $updSim->close();
+        if ($simRes['status'] === 'available') {
+            $updSim = $conn->prepare("UPDATE sims SET status = 'reserved' WHERE id = ? AND status = 'available'");
+            $updSim->bind_param("i", $newSimId);
+            if (!$updSim->execute() || $updSim->affected_rows !== 1) {
+                throw new Exception("Selected SIM is no longer available to reserve.");
+            }
+            $updSim->close();
+        }
     }
 
     // If rejected request is edited, reset approval_status to 'Pending Approval'
@@ -246,6 +292,7 @@ try {
             dealer_id = NULLIF(?, 0),
             technician_id = NULLIF(?, 0),
             customer_id = NULLIF(?, 0),
+            new_customer_data = ?,
             asset_type = ?,
             device_count = ?,
             device_model_id = NULLIF(?, 0),
@@ -266,11 +313,12 @@ try {
     ";
     $updStmt = $conn->prepare($updSql);
     $updStmt->bind_param(
-        "siiisiiiisisssssssssi",
+        "siiissiiiisisssssssssi",
         $newCourierTo,
         $newDealerId,
         $newTechnicianId,
         $newCustomerId,
+        $newCustomerDataJson,
         $newAssetType,
         $newDeviceCount,
         $newDeviceModelId,

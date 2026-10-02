@@ -172,10 +172,14 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'outward_reports.view' => ['permission_name' => 'Outward Reports View', 'module' => 'outward_reports', 'action' => 'VIEW'],
         'outward_reports.export' => ['permission_name' => 'Outward Reports Export', 'module' => 'outward_reports', 'action' => 'EXPORT'],
         'stock.view' => ['permission_name' => 'Stock Management View', 'module' => 'stock', 'action' => 'VIEW'],
+        'stock_management.edit' => ['permission_name' => 'Stock Management Edit', 'module' => 'stock_management', 'action' => 'EDIT'],
+        'stock_management.delete' => ['permission_name' => 'Stock Management Delete', 'module' => 'stock_management', 'action' => 'DELETE'],
         'stock.update' => ['permission_name' => 'Stock Management Update', 'module' => 'stock', 'action' => 'UPDATE'],
         'stock.export' => ['permission_name' => 'Stock Management Export', 'module' => 'stock', 'action' => 'EXPORT'],
         'stock_transfer.view' => ['permission_name' => 'Stock Transfer View', 'module' => 'stock_transfer', 'action' => 'VIEW'],
         'stock_transfer.add' => ['permission_name' => 'Stock Transfer Add', 'module' => 'stock_transfer', 'action' => 'ADD'],
+        'stock_transfer.edit' => ['permission_name' => 'Stock Transfer Edit', 'module' => 'stock_transfer', 'action' => 'EDIT'],
+        'stock_transfer.delete' => ['permission_name' => 'Stock Transfer Delete', 'module' => 'stock_transfer', 'action' => 'DELETE'],
         'customers.view' => ['permission_name' => 'Customer Details View', 'module' => 'customers', 'action' => 'VIEW'],
         'customers.add' => ['permission_name' => 'Customer Details Add', 'module' => 'customers', 'action' => 'ADD'],
         'customers.edit' => ['permission_name' => 'Customer Details Edit', 'module' => 'customers', 'action' => 'EDIT'],
@@ -183,8 +187,10 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'customers.export' => ['permission_name' => 'Customer Details Export', 'module' => 'customers', 'action' => 'EXPORT'],
         'customers.update' => ['permission_name' => 'Customer Details Update', 'module' => 'customers', 'action' => 'UPDATE'],
         'customer_reports.view' => ['permission_name' => 'Customer Reports View', 'module' => 'customer_reports', 'action' => 'VIEW'],
+        'reports.export' => ['permission_name' => 'Reports Export', 'module' => 'reports', 'action' => 'EXPORT'],
         'customer_renewals.view' => ['permission_name' => 'Customer Renewals View', 'module' => 'customer_renewals', 'action' => 'VIEW'],
         'customer_renewals.edit' => ['permission_name' => 'Customer Renewals Edit', 'module' => 'customer_renewals', 'action' => 'EDIT'],
+        'renewals.delete' => ['permission_name' => 'Customer Renewals Delete', 'module' => 'renewals', 'action' => 'DELETE'],
         'customer_renewals.renew' => ['permission_name' => 'Customer Renewals Renew', 'module' => 'customer_renewals', 'action' => 'RENEW'],
         'customer_renewals.history' => ['permission_name' => 'Customer Renewals History', 'module' => 'customer_renewals', 'action' => 'HISTORY'],
         'sim_lifecycle.view' => ['permission_name' => 'SIM Lifecycle View', 'module' => 'sim_lifecycle', 'action' => 'VIEW'],
@@ -259,18 +265,6 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         $safeModule = $conn->real_escape_string($info['module']);
         $safeAction = $conn->real_escape_string($info['action']);
         $conn->query("INSERT INTO permissions (permission_key, permission_name, module, action) VALUES ('$safeKey', '$safeName', '$safeModule', '$safeAction') ON DUPLICATE KEY UPDATE permission_name = VALUES(permission_name), module = VALUES(module), action = VALUES(action)");
-    }
-
-    $superRole = $conn->query("SELECT id FROM roles WHERE LOWER(role_name) = 'super admin' LIMIT 1");
-    if ($superRole && $superRole->num_rows > 0) {
-        $superRoleId = (int) $superRole->fetch_assoc()['id'];
-        foreach (array_keys($definitions) as $key) {
-            $permIdResult = $conn->query("SELECT id FROM permissions WHERE permission_key = '" . $conn->real_escape_string($key) . "' LIMIT 1");
-            if ($permIdResult && $permIdResult->num_rows > 0) {
-                $permId = (int) $permIdResult->fetch_assoc()['id'];
-                $conn->query("INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES ($superRoleId, $permId)");
-            }
-        }
     }
 
     $conn->close();

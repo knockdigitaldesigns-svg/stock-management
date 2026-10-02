@@ -15,6 +15,9 @@ requirePermission('customers.view');
 $customerId = isset($_GET['customer_id'])
     ? (int) $_GET['customer_id']
     : (isset($_GET['id']) ? (int) $_GET['id'] : 0);
+$requestedVehicleId = isset($_GET['vehicle_id'])
+    ? (int) $_GET['vehicle_id']
+    : 0;
 
 if ($customerId <= 0) {
     sendResponse(false, 'Customer ID is required.', [], [], 400);
@@ -129,7 +132,8 @@ try {
                 ON simdlr.id = simsa.owner_id AND simsa.owner_type = 'dealer'
             LEFT JOIN technicians simtech
                 ON simtech.id = simsa.owner_id AND simsa.owner_type = 'technician'
-         WHERE cvd.customer_id = ?
+                 WHERE cvd.customer_id = ?
+                     AND (? = 0 OR cvd.id = ?)
          ORDER BY cvd.created_at DESC, cvd.id DESC
          LIMIT 1"
     );
@@ -138,7 +142,7 @@ try {
         throw new Exception('Failed to prepare vehicle query.');
     }
 
-    $vehicleStmt->bind_param('i', $customerId);
+    $vehicleStmt->bind_param('iii', $customerId, $requestedVehicleId, $requestedVehicleId);
     $vehicleStmt->execute();
     $vehicleResult = $vehicleStmt->get_result();
     $vehicle = $vehicleResult->fetch_assoc();

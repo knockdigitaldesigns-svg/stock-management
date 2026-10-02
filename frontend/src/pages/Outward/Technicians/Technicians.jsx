@@ -7,7 +7,6 @@ import EditTechnicianModal from './EditTechnicianModal';
 import TechnicianExcelUploadModal from './TechnicianExcelUploadModal';
 import AddStockAllocationModal from '../../../components/AddStockAllocationModal/AddStockAllocationModal';
 import Modal from '../../../components/Modal/Modal';
-import Can from '../../../components/Can/Can';
 import Pagination from '../../../components/Pagination/Pagination';
 import usePagination from '../../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
@@ -128,11 +127,9 @@ const Technicians = () => {
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
                     </button>
-                    <Can permission="technicians.import">
                         <button className="btn btn-outline" onClick={() => setIsTechnicianUploadModalOpen(true)}>
                             <Upload size={16} /> Upload Excel
                         </button>
-                    </Can>
                     <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
                         <Plus size={16} /> Add Technician
                     </button>

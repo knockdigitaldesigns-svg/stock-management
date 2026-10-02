@@ -34,6 +34,9 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
+// Start the transaction before taking the request lock so reject/approve cannot race.
+$conn->begin_transaction();
+
 // 1. Fetch request with FOR UPDATE lock
 $fetchStmt = $conn->prepare("SELECT * FROM courier_requests WHERE id = ? FOR UPDATE");
 $fetchStmt->bind_param("i", $id);
@@ -42,11 +45,13 @@ $request = $fetchStmt->get_result()->fetch_assoc();
 $fetchStmt->close();
 
 if (!$request) {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request not found", [], [], 404);
 }
 
 if ($request['approval_status'] !== 'Pending Approval') {
+    $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request is already {$request['approval_status']}.", [], [], 400);
 }
@@ -54,10 +59,44 @@ if ($request['approval_status'] !== 'Pending Approval') {
 $device_id = !empty($request['device_id']) ? (int)$request['device_id'] : null;
 $sim_id = !empty($request['sim_id']) ? (int)$request['sim_id'] : null;
 
-$conn->begin_transaction();
-
 try {
-    // 2. Change Approval Status to Rejected
+    // Release only reservations still linked to this request, preserving any
+    // reservation another pending request may now own.
+    if ($device_id) {
+        $otherDevOwner = $conn->prepare("SELECT id FROM courier_requests WHERE device_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+        $otherDevOwner->bind_param("ii", $device_id, $id);
+        $otherDevOwner->execute();
+        $hasOtherDevOwner = $otherDevOwner->get_result()->num_rows > 0;
+        $otherDevOwner->close();
+
+        if (!$hasOtherDevOwner) {
+            $updDev = $conn->prepare("UPDATE devices SET status = 'available' WHERE id = ? AND status = 'reserved'");
+            $updDev->bind_param("i", $device_id);
+            if (!$updDev->execute()) {
+                throw new Exception("Failed to release Device reservation: " . $updDev->error);
+            }
+            $updDev->close();
+        }
+    }
+
+    if ($sim_id) {
+        $otherSimOwner = $conn->prepare("SELECT id FROM courier_requests WHERE sim_id = ? AND approval_status = 'Pending Approval' AND id != ? LIMIT 1");
+        $otherSimOwner->bind_param("ii", $sim_id, $id);
+        $otherSimOwner->execute();
+        $hasOtherSimOwner = $otherSimOwner->get_result()->num_rows > 0;
+        $otherSimOwner->close();
+
+        if (!$hasOtherSimOwner) {
+            $updSim = $conn->prepare("UPDATE sims SET status = 'available' WHERE id = ? AND status = 'reserved'");
+            $updSim->bind_param("i", $sim_id);
+            if (!$updSim->execute()) {
+                throw new Exception("Failed to release SIM reservation: " . $updSim->error);
+            }
+            $updSim->close();
+        }
+    }
+
+    // Change the request state only after its owned reservations are released.
     $updReq = $conn->prepare("UPDATE courier_requests SET approval_status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
     $updReq->bind_param("i", $id);
     if (!$updReq->execute()) {
@@ -65,23 +104,7 @@ try {
     }
     $updReq->close();
 
-    // 3. Release Device Reservation -> status becomes 'available'
-    if ($device_id) {
-        $updDev = $conn->prepare("UPDATE devices SET status = 'available' WHERE id = ? AND status = 'reserved'");
-        $updDev->bind_param("i", $device_id);
-        $updDev->execute();
-        $updDev->close();
-    }
-
-    // 4. Release SIM Reservation -> status becomes 'available'
-    if ($sim_id) {
-        $updSim = $conn->prepare("UPDATE sims SET status = 'available' WHERE id = ? AND status = 'reserved'");
-        $updSim->bind_param("i", $sim_id);
-        $updSim->execute();
-        $updSim->close();
-    }
-
-    // 5. Generic History Audit (Section 17)
+    // Generic History Audit (Section 17)
     writeAudit($conn, $id, 'Courier', 'Admin Reject', 'approval_status', 'Pending Approval', 'Rejected', $currentUser);
 
     $conn->commit();

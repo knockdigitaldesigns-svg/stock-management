@@ -10,8 +10,14 @@ import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import StockAllocationEditModal from './StockAllocationEditModal';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
+import { useAuth } from '../../context/AuthContext';
 
 const StockManagement = () => {
+    const { hasPermission } = useAuth();
+    const canUpdateStock = hasPermission('stock.update') || hasPermission('stock_management.update');
+    const canEditStock = hasPermission('stock_management.edit') || hasPermission('stock.edit');
+    const canDeleteStock = hasPermission('stock_management.delete') || hasPermission('stock.delete');
+
     const [stockAllocations, setStockAllocations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState(emptyTableFilters);
@@ -103,9 +109,11 @@ const StockManagement = () => {
                     <p className="page-subtitle">Track available, allocated, and used device and SIM stock.</p>
                 </div>
                 <div className="header-actions">
-                    <button className="btn btn-primary" onClick={() => setIsUpdateModalOpen(true)}>
-                        <PenTool size={16} /> Update Stock
-                    </button>
+                    {canUpdateStock && (
+                        <button className="btn btn-primary" onClick={() => setIsUpdateModalOpen(true)}>
+                            <PenTool size={16} /> Update Stock
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -197,8 +205,12 @@ const StockManagement = () => {
                                             <td>
                                                 <div className="action-buttons stock-actions">
                                                     <button type="button" className="icon-btn view" aria-label="View stock allocation" title="View" onClick={() => setViewingAllocation(row)}><Eye size={16} /></button>
-                                                    <button type="button" className="icon-btn edit" aria-label="Edit stock allocation" title="Edit" onClick={() => setEditingAllocationId(row.allocation_id)}><Edit size={16} /></button>
-                                                    <button type="button" className="icon-btn delete" aria-label="Delete allocated stock" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>
+                                                    {canEditStock && (
+                                                        <button type="button" className="icon-btn edit" aria-label="Edit stock allocation" title="Edit" onClick={() => setEditingAllocationId(row.allocation_id)}><Edit size={16} /></button>
+                                                    )}
+                                                    {canDeleteStock && (
+                                                        <button type="button" className="icon-btn delete" aria-label="Delete allocated stock" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -219,7 +231,7 @@ const StockManagement = () => {
                 />
             </div>
 
-            {isUpdateModalOpen && <UpdateStockModal onClose={() => setIsUpdateModalOpen(false)} onSuccess={() => { setIsUpdateModalOpen(false); fetchStockSummary(); }} />}
+            {isUpdateModalOpen && canUpdateStock && <UpdateStockModal onClose={() => setIsUpdateModalOpen(false)} onSuccess={() => { setIsUpdateModalOpen(false); fetchStockSummary(); }} />}
             {editingAllocationId && <StockAllocationEditModal allocationId={editingAllocationId} onClose={() => setEditingAllocationId(null)} onSuccess={() => { setEditingAllocationId(null); fetchStockSummary(); }} />}
             {viewingAllocation && (
                 <RecordViewModal

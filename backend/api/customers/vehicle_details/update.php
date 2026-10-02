@@ -220,7 +220,10 @@ try {
 
     $findAsset = static function ($conn, $table, $numberColumn, $number) {
         $allocationColumn = $numberColumn === 'imei_no' ? 'device_id' : 'sim_id';
-        $stmt = $conn->prepare("SELECT a.id, a.status, sa.owner_type, sa.owner_id FROM {$table} a LEFT JOIN stock_allocations sa ON sa.id = (SELECT latest_sa.id FROM stock_allocations latest_sa WHERE latest_sa.{$allocationColumn} = a.id ORDER BY latest_sa.created_at DESC, latest_sa.id DESC LIMIT 1) WHERE a.{$numberColumn} = ? LIMIT 1 FOR UPDATE");
+        $statusExpression = $table === 'devices'
+            ? "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.device_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END"
+            : "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = a.id OR cvd.sim_id_2 = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.sim_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END";
+        $stmt = $conn->prepare("SELECT a.id, {$statusExpression} AS status, sa.owner_type, sa.owner_id, (SELECT installation_status FROM dealers WHERE id = sa.owner_id AND sa.owner_type = 'dealer' LIMIT 1) AS owner_installation_status FROM {$table} a LEFT JOIN stock_allocations sa ON sa.id = (SELECT latest_sa.id FROM stock_allocations latest_sa WHERE latest_sa.{$allocationColumn} = a.id ORDER BY latest_sa.created_at DESC, latest_sa.id DESC LIMIT 1) WHERE a.{$numberColumn} = ? LIMIT 1 FOR UPDATE");
         $stmt->bind_param('s', $number);
         $stmt->execute();
         $asset = $stmt->get_result()->fetch_assoc();
@@ -236,6 +239,39 @@ try {
     $newDeviceId = (int) $device['id'];
     $newSimId1 = (int) $sim1['id'];
     $newSimId2 = $sim2 ? (int) $sim2['id'] : null;
+    $assetChecks = [
+        [$device, 'device_id', 'IMEI is already assigned to another customer.', 'This IMEI is not available for allocation.'],
+        [$sim1, 'sim_id_1', 'SIM is already assigned to another customer.', 'This SIM is not available for allocation.'],
+        [$sim2, 'sim_id_2', 'SIM is already assigned to another customer.', 'This SIM is not available for allocation.']
+    ];
+    foreach ($assetChecks as [$asset, $customerColumn, $assignedMessage, $unavailableMessage]) {
+        if (!$asset) continue;
+        $assetId = (int) $asset['id'];
+        $sameExistingAsset = (int) ($old[$customerColumn] ?? 0) === $assetId;
+        $assetStatus = strtolower(trim((string) ($asset['status'] ?? '')));
+        if ($assetStatus === 'used' && !$sameExistingAsset) {
+            throw new Exception($customerColumn === 'device_id'
+                ? 'IMEI is already used and cannot be assigned again.'
+                : 'SIM is already used and cannot be assigned again.');
+        }
+        $customerCheck = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$customerColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
+        $customerCheck->bind_param('ii', $assetId, $id);
+        $customerCheck->execute();
+        $alreadyUsed = $customerCheck->get_result()->num_rows > 0;
+        $customerCheck->close();
+        if ($alreadyUsed) throw new Exception($assignedMessage);
+
+        $assetOwnerType = strtolower(trim((string) ($asset['owner_type'] ?? '')));
+        $assetOwnerId = (int) ($asset['owner_id'] ?? 0);
+        $ownerInstallationStatus = strtolower(trim((string) ($asset['owner_installation_status'] ?? '')));
+        $ownerEligible = $assetOwnerId > 0 && (
+            $assetOwnerType === 'technician' ||
+            ($assetOwnerType === 'dealer' && in_array($ownerInstallationStatus, ['onsite', 'offsite'], true))
+        );
+        if (!$sameExistingAsset && $assetStatus !== 'available' && !($assetStatus === 'allocated' && $ownerEligible)) {
+            throw new Exception($unavailableMessage);
+        }
+    }
     $ownerKey = static function ($asset) {
         return !empty($asset['owner_type']) && (int) ($asset['owner_id'] ?? 0) > 0
             ? strtolower((string) $asset['owner_type']) . ':' . (int) $asset['owner_id']
@@ -248,30 +284,6 @@ try {
         if ($simOwnerKey && $simOwnerKey !== $deviceOwnerKey) {
             throw new Exception('The selected IMEI and SIM must belong to the same current owner.');
         }
-    }
-    $assetChecks = [
-        [$device, 'device_id'],
-        [$sim1, 'sim_id_1'],
-        [$sim2, 'sim_id_2']
-    ];
-    foreach ($assetChecks as [$asset, $customerColumn]) {
-        if (!$asset) continue;
-        $customerCheck = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$customerColumn} = ? AND id <> ? LIMIT 1");
-        $assetId = (int) $asset['id'];
-        $customerCheck->bind_param('ii', $assetId, $id);
-        $customerCheck->execute();
-        $alreadyUsed = $customerCheck->get_result()->num_rows > 0;
-        $customerCheck->close();
-        if ($alreadyUsed) throw new Exception('The selected device or SIM is already used by another customer.');
-
-        $allocationColumn = $customerColumn === 'device_id' ? 'device_id' : 'sim_id';
-        $useCheck = $conn->prepare("SELECT id FROM stock_transactions WHERE {$allocationColumn} = ? AND transaction_type = 'USE' ORDER BY id DESC LIMIT 1");
-        $useCheck->bind_param('i', $assetId);
-        $useCheck->execute();
-        $hasUse = $useCheck->get_result()->num_rows > 0;
-        $useCheck->close();
-        $sameExistingAsset = (int) ($old[$customerColumn] ?? 0) === $assetId;
-        if ($hasUse && !$sameExistingAsset) throw new Exception('The selected device or SIM is already used and cannot be reassigned.');
     }
 
 
@@ -417,7 +429,7 @@ try {
         $stmt->close();
 
         throw new Exception(
-            'IMEI No is already used by another customer.'
+            'IMEI is already assigned to another customer.'
         );
     }
 
@@ -461,7 +473,7 @@ try {
         $stmt->close();
 
         throw new Exception(
-            'SIM No 1 is already used by another customer.'
+            'SIM is already assigned to another customer.'
         );
     }
 
@@ -501,7 +513,7 @@ try {
             $stmt->close();
 
             throw new Exception(
-                'SIM No 2 is already used by another customer.'
+                'SIM is already assigned to another customer.'
             );
         }
 
