@@ -21,7 +21,6 @@ function convertCellValue($cell, $sharedStrings) {
     }
     return $val;
 }
-function excelSerialDateToIso($value) { if (!is_numeric($value) || (float) $value < 1) return ''; $date = DateTimeImmutable::createFromFormat('!Y-m-d', '1899-12-30'); return $date ? $date->modify('+' . (int) floor((float) $value) . ' days')->format('Y-m-d') : ''; }
 function parseXlsxRows($filePath, $requiredHeaders, $optionalHeaders = []) {
     if (!class_exists('ZipArchive')) return ['error' => 'XLSX support is not available on the server.'];
     $zip = new ZipArchive();

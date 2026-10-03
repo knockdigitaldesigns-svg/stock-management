@@ -120,7 +120,7 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
             }
         >
             <form id="add-device-form" onSubmit={handleSubmit}>
-                <div className="form-group" style={{ maxWidth: '200px' }}>
+                <div className="form-group">
                     <label className="form-label">Device Count</label>
                     <input 
                         type="number" 
@@ -133,9 +133,24 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
                 </div>
 
                 <div className="devices-list">
-                    {devices.map((device) => (
-                        <div key={device.id} className="device-row">
-                            <div className="form-group">
+                    {devices.map((device, index) => (
+                        <div key={device.id} className="device-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', alignItems: 'start', marginBottom: '2rem' }}>
+                            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '-0.5rem' }}>
+                                <span style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                                    Device {index + 1}
+                                </span>
+                                {devices.length > 1 && (
+                                    <button 
+                                        type="button" 
+                                        className="icon-btn delete" 
+                                        onClick={() => removeRow(device.id)}
+                                        title="Delete Device"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
+                            </div>
+                            <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
                                 <label className="form-label">Purchase Date *</label>
                                 <DateInput 
                                     className="form-control"
@@ -144,11 +159,7 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
                                     required
                                 />
                             </div>
-                            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                <label className="form-label">Notes</label>
-                                <textarea className="form-control" rows="3" placeholder="Enter notes..." value={device.notes} onChange={(e) => handleDeviceChange(device.id, 'notes', e.target.value)} />
-                            </div>
-                            <div className="form-group">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label className="form-label">Device Model *</label>
                                 <SearchableDropdown 
                                     options={models}
@@ -157,7 +168,7 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
                                     placeholder={modelsLoading ? "Loading..." : "Select Model"}
                                 />
                             </div>
-                            <div className="form-group">
+                            <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label className="form-label">IMEI No *</label>
                                 <input 
                                     type="text" 
@@ -174,16 +185,10 @@ const AddDeviceModal = ({ onClose, onSuccess }) => {
                                     required
                                 />
                             </div>
-                            {devices.length > 1 && (
-                                <button 
-                                    type="button" 
-                                    className="icon-btn delete" 
-                                    style={{ marginBottom: '1.25rem' }}
-                                    onClick={() => removeRow(device.id)}
-                                >
-                                    <Trash2 size={18} />
-                                </button>
-                            )}
+                            <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
+                                <label className="form-label">Notes</label>
+                                <textarea className="form-control" rows="3" placeholder="Enter notes..." value={device.notes} onChange={(e) => handleDeviceChange(device.id, 'notes', e.target.value)} />
+                            </div>
                         </div>
                     ))}
                 </div>

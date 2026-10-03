@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Eye, Edit, Trash2 } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
@@ -308,7 +308,10 @@ const VehicleTypesPage = () => {
             ========================== */}
             <div className="page-header">
 
-                <h2>Vehicle Types</h2>
+                <div>
+                    <h2>Vehicle Types</h2>
+                    <p className="page-subtitle">Manage the vehicle types available for customer records.</p>
+                </div>
 
                 <div className="header-actions">
 
@@ -355,54 +358,55 @@ const VehicleTypesPage = () => {
                 {/* =========================
                     FILTERS
                 ========================== */}
-                <div className="table-filter-bar">
+                <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
+                    <div className="table-filter-grid">
 
-                    {/* SEARCH */}
-                    <input
-                        type="text"
-                        placeholder="Search vehicle type..."
-                        value={search}
-                        onChange={(e) => {
-                            setSearch(e.target.value);
-                            setPage(1);
-                        }}
-                        className="form-control table-filter-search"
-                    />
+                        {/* SEARCH */}
+                        <div className="filter-group">
+                            <label className="filter-label">Search</label>
+                            <div className="search-input-wrapper">
+                                <Search size={16} className="search-icon" />
+                                <input
+                                    type="text"
+                                    placeholder="Search vehicle type..."
+                                    value={search}
+                                    onChange={(e) => {
+                                        setSearch(e.target.value);
+                                        setPage(1);
+                                    }}
+                                    className="form-control filter-input has-icon table-filter-search"
+                                />
+                            </div>
+                        </div>
 
-                    {/* STATUS */}
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => {
-                            setStatusFilter(
-                                e.target.value
-                            );
-                            setPage(1);
-                        }}
-                        className="form-control"
-                    >
-                        <option value="">
-                            All Statuses
-                        </option>
-
-                        <option value="Active">
-                            Active
-                        </option>
-
-                        <option value="Inactive">
-                            Inactive
-                        </option>
-                    </select>
-
-                    {/* RESET */}
-                    <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={resetFilters}
-                    >
-                        Reset Filters
-                    </button>
-
+                        {/* STATUS */}
+                        <div className="filter-group">
+                            <label className="filter-label">Status</label>
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => {
+                                    setStatusFilter(e.target.value);
+                                    setPage(1);
+                                }}
+                                className="form-control filter-input"
+                            >
+                                <option value="">All Statuses</option>
+                                <option value="Active">Active</option>
+                                <option value="Inactive">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="table-filter-actions">
+                        <button type="button" className="btn btn-primary table-filter-btn" onClick={() => setPage(1)}>
+                            <Search size={16} /> Search
+                        </button>
+                        <button type="button" className="btn btn-secondary table-filter-btn" onClick={resetFilters}>
+                            <RotateCcw size={16} /> Reset
+                        </button>
+                    </div>
                 </div>
+
 
                 {/* =========================
                     TABLE

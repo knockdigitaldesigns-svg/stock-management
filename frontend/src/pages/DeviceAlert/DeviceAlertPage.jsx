@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, Edit, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../components/Modal/Modal';
@@ -20,6 +20,7 @@ const isWholeNumberString = (value) => /^[0-9]+$/.test(String(value).trim());
 
 const DeviceAlertPage = () => {
     const { hasPermission } = useAuth();
+    const alertFormRef = useRef(null);
     const [owners, setOwners] = useState([]);
     const [ownerOptions, setOwnerOptions] = useState([]);
     
@@ -51,6 +52,8 @@ const DeviceAlertPage = () => {
         showGlobalError(msg);
     };
 
+    const canView = hasPermission('device_alert.view');
+    const canAdd = hasPermission('device_alert.add');
     const canEdit = hasPermission('device_alert.edit');
     const canDelete = hasPermission('device_alert.delete');
 
@@ -176,6 +179,9 @@ const DeviceAlertPage = () => {
         });
         setError('');
         setSuccess('');
+        requestAnimationFrame(() => {
+            alertFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
     };
 
     const handleDeleteConfig = async () => {
@@ -292,10 +298,14 @@ const DeviceAlertPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Device Alert</h2>
+                <div>
+                    <h2>Device Alert</h2>
+                    <p className="page-subtitle">Configure low-stock alerts for devices, SIMs, and their owners.</p>
+                </div>
             </div>
 
-            <div className="card">
+            {(canAdd || isEditing) && (
+            <div className="card" ref={alertFormRef}>
                 <h3 style={{ marginTop: 0 }}>Configure Low Stock Alert</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                     <div className="form-group" style={{ margin: 0 }}>
@@ -411,7 +421,9 @@ const DeviceAlertPage = () => {
                     {success && <span className="text-success">{success}</span>}
                 </div>
             </div>
+            )}
 
+            {canView && (
             <div className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
                     <h3 style={{ margin: 0 }}>Configured Owners</h3>
@@ -522,6 +534,7 @@ const DeviceAlertPage = () => {
                     itemName="configured owners"
                 />
             </div>
+            )}
 
             {deleteTarget && (
                 <Modal

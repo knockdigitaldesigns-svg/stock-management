@@ -118,7 +118,10 @@ await fetchValidities();
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>SIM Validity</h2>
+                <div>
+                    <h2>SIM Validity</h2>
+                    <p className="page-subtitle">Manage validity periods available for SIM plans.</p>
+                </div>
                 <div className="header-actions">
                     {hasPermission('sim_validity.add') && (
                         <button className="btn btn-primary" onClick={() => openModal()}>
@@ -243,22 +246,22 @@ await fetchValidities();
                             className="form-control"
                             value={months}
                             onChange={(event) => setMonths(event.target.value)}
+                            placeholder="Enter validity in months"
                             autoFocus
                         />
-                        <div className="form-group">
-    <label className="form-label">Status *</label>
-
-    <select
-        className="form-control"
-        value={status}
-        onChange={(event) => setStatus(event.target.value)}
-    >
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-    </select>
-</div>
-                        {error && <div className="text-danger">{error}</div>}
                     </div>
+                    <div className="form-group">
+                        <label className="form-label">Status *</label>
+                        <select
+                            className="form-control"
+                            value={status}
+                            onChange={(event) => setStatus(event.target.value)}
+                        >
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                    {error && <div className="text-danger" style={{ marginTop: '8px' }}>{error}</div>}
                 </Modal>
             )}
 

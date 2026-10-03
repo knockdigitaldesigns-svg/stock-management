@@ -148,6 +148,16 @@ try {
     }
     $stmt->close();
 
+    $existingRow = null;
+    if (!$appendVehicle) {
+        $existingVehicleStmt = $conn->prepare('SELECT * FROM customer_vehicle_details WHERE customer_id = ? LIMIT 1 FOR UPDATE');
+        $existingVehicleStmt->bind_param('i', $customerId);
+        $existingVehicleStmt->execute();
+        $existingRow = $existingVehicleStmt->get_result()->fetch_assoc() ?: null;
+        $existingVehicleStmt->close();
+    }
+    $existingVehicleId = (int) ($existingRow['id'] ?? 0);
+
     /*
     |--------------------------------------------------------------------------
     | VEHICLE TYPE CHECK
@@ -241,79 +251,29 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | IMEI DUPLICATE (Excluding current customer)
-    |--------------------------------------------------------------------------
-    */
-    $stmt = $conn->prepare(
-        'SELECT id FROM customer_vehicle_details
-         WHERE imei_no = ?
-           AND customer_id != ?
-         LIMIT 1'
-    );
-    if (!$stmt) {
-        throw new Exception('Failed to check IMEI.');
-    }
-    $stmt->bind_param('si', $imeiNo, $customerId);
-    $stmt->execute();
-    if ($stmt->get_result()->num_rows > 0) {
-        $stmt->close();
-        throw new Exception('This IMEI is already used for another customer.');
-    }
-    $stmt->close();
-
-    /*
-    |--------------------------------------------------------------------------
-    | SIM 1 DUPLICATE (Excluding current customer)
-    |--------------------------------------------------------------------------
-    */
-    $stmt = $conn->prepare(
-        'SELECT id FROM customer_vehicle_details
-         WHERE (sim_no_1 = ? OR sim_no_2 = ?)
-           AND customer_id != ?
-         LIMIT 1'
-    );
-    if (!$stmt) {
-        throw new Exception('Failed to check SIM No 1.');
-    }
-    $stmt->bind_param('ssi', $simNo1, $simNo1, $customerId);
-    $stmt->execute();
-    if ($stmt->get_result()->num_rows > 0) {
-        $stmt->close();
-        throw new Exception('SIM No 1 is already used by another customer.');
-    }
-    $stmt->close();
-
-    /*
-    |--------------------------------------------------------------------------
-    | SIM 2 DUPLICATE (Excluding current customer)
-    |--------------------------------------------------------------------------
-    */
-    if ($simNo2 !== '') {
-        $stmt = $conn->prepare(
-            'SELECT id FROM customer_vehicle_details
-             WHERE (sim_no_1 = ? OR sim_no_2 = ?)
-               AND customer_id != ?
-             LIMIT 1'
-        );
-        if (!$stmt) {
-            throw new Exception('Failed to check SIM No 2.');
-        }
-        $stmt->bind_param('ssi', $simNo2, $simNo2, $customerId);
-        $stmt->execute();
-        if ($stmt->get_result()->num_rows > 0) {
-            $stmt->close();
-            throw new Exception('SIM No 2 is already used by another customer.');
-        }
-        $stmt->close();
-    }
-
-    /*
-    |--------------------------------------------------------------------------
     | FIND DEVICE FROM INVENTORY
     |--------------------------------------------------------------------------
     */
     $stmt = $conn->prepare(
-        'SELECT d.id, d.device_model_id, d.status, sa.owner_type, sa.owner_id
+        "SELECT d.id, d.device_model_id,
+                CASE
+                    WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = d.id)
+                        OR EXISTS (
+                            SELECT 1 FROM stock_transactions st
+                            WHERE st.device_id = d.id
+                              AND st.from_owner_type = sa.owner_type
+                              AND st.from_owner_id = sa.owner_id
+                              AND st.id = (
+                                  SELECT MAX(st_latest.id) FROM stock_transactions st_latest
+                                  WHERE st_latest.device_id = d.id
+                                    AND st_latest.from_owner_type = sa.owner_type
+                                    AND st_latest.from_owner_id = sa.owner_id
+                              )
+                              AND st.transaction_type = 'USE'
+                        ) THEN 'used'
+                    ELSE d.status
+                END AS status,
+                sa.owner_type, sa.owner_id
          FROM devices d
          LEFT JOIN stock_allocations sa
             ON sa.id = (
@@ -325,7 +285,7 @@ try {
             )
          WHERE d.imei_no = ?
          LIMIT 1
-         FOR UPDATE'
+         FOR UPDATE"
     );
     if (!$stmt) {
         throw new Exception('Failed to prepare device query.');
@@ -345,6 +305,21 @@ try {
     $deviceStatus = strtolower(trim((string) $device['status']));
     $deviceOwnerType = strtolower(trim((string) ($device['owner_type'] ?? '')));
     $deviceOwnerId = (int) ($device['owner_id'] ?? 0);
+    $assertNoOtherCustomerAssignment = static function ($assetColumn, $assetId, $message) use ($conn, $existingVehicleId) {
+        $stmt = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$assetColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
+        $stmt->bind_param('ii', $assetId, $existingVehicleId);
+        $stmt->execute();
+        $assignedToAnotherCustomer = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+        if ($assignedToAnotherCustomer) {
+            throw new Exception($message);
+        }
+    };
+    $sameExistingDevice = (int) ($existingRow['device_id'] ?? 0) === $deviceId;
+    if ($deviceStatus === 'used' && !$sameExistingDevice) {
+        throw new Exception('IMEI is already used and cannot be assigned again.');
+    }
+    $assertNoOtherCustomerAssignment('device_id', $deviceId, 'IMEI is already assigned to another customer.');
 
     /*
     |--------------------------------------------------------------------------
@@ -360,15 +335,17 @@ try {
     | DEVICE STATUS & USAGE CHECK
     |--------------------------------------------------------------------------
     */
+    $deviceOwnerEligible = false;
     if ($deviceOwnerType === 'dealer' && $deviceOwnerId > 0) {
-        $ownerStmt = $conn->prepare('SELECT id FROM dealers WHERE id = ? LIMIT 1');
+        $ownerStmt = $conn->prepare('SELECT installation_status FROM dealers WHERE id = ? LIMIT 1');
         $ownerStmt->bind_param('i', $deviceOwnerId);
         $ownerStmt->execute();
-        $ownerExists = $ownerStmt->get_result()->num_rows > 0;
+        $deviceOwner = $ownerStmt->get_result()->fetch_assoc();
         $ownerStmt->close();
-        if (!$ownerExists) {
+        if (!$deviceOwner) {
             throw new Exception('The device owner dealer was not found.');
         }
+        $deviceOwnerEligible = in_array(strtolower(trim((string) $deviceOwner['installation_status'])), ['onsite', 'offsite'], true);
     } elseif ($deviceOwnerType === 'technician' && $deviceOwnerId > 0) {
         $ownerStmt = $conn->prepare('SELECT id FROM technicians WHERE id = ? LIMIT 1');
         $ownerStmt->bind_param('i', $deviceOwnerId);
@@ -378,23 +355,15 @@ try {
         if (!$ownerExists) {
             throw new Exception('The device owner technician was not found.');
         }
+        $deviceOwnerEligible = true;
     }
 
-    $allowedAllocatedOwners = ['technician', 'dealer'];
-    if ($deviceStatus === 'available') {
+    if ($sameExistingDevice || $deviceStatus === 'available') {
         // OK
-    } elseif ($deviceStatus === 'allocated' && in_array($deviceOwnerType, $allowedAllocatedOwners, true)) {
+    } elseif ($deviceStatus === 'allocated' && $deviceOwnerEligible) {
         // OK, preserve owner relationship
     } else {
-        $sameCustomerCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE device_id = ? AND customer_id = ? LIMIT 1');
-        $sameCustomerCheck->bind_param('ii', $deviceId, $customerId);
-        $sameCustomerCheck->execute();
-        $isSameCustomerDevice = $sameCustomerCheck->get_result()->num_rows > 0;
-        $sameCustomerCheck->close();
-
-        if (!$isSameCustomerDevice) {
-            throw new Exception('This IMEI is not available for allocation.');
-        }
+        throw new Exception('This IMEI is not available for allocation.');
     }
 
     /*
@@ -403,7 +372,25 @@ try {
     |--------------------------------------------------------------------------
     */
     $stmt = $conn->prepare(
-        'SELECT s.id, s.status, sa.owner_type, sa.owner_id
+        'SELECT s.id,
+                CASE
+                    WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = s.id OR cvd.sim_id_2 = s.id)
+                        OR EXISTS (
+                            SELECT 1 FROM stock_transactions st
+                            WHERE st.sim_id = s.id
+                              AND st.from_owner_type = sa.owner_type
+                              AND st.from_owner_id = sa.owner_id
+                              AND st.id = (
+                                  SELECT MAX(st_latest.id) FROM stock_transactions st_latest
+                                  WHERE st_latest.sim_id = s.id
+                                    AND st_latest.from_owner_type = sa.owner_type
+                                    AND st_latest.from_owner_id = sa.owner_id
+                              )
+                              AND st.transaction_type = "USE"
+                        ) THEN "used"
+                    ELSE s.status
+                END AS status,
+                sa.owner_type, sa.owner_id
          FROM sims s
          LEFT JOIN stock_allocations sa
             ON sa.id = (
@@ -434,16 +421,23 @@ try {
     $sim1Status = strtolower(trim((string) $sim1['status']));
     $sim1OwnerType = strtolower(trim((string) ($sim1['owner_type'] ?? '')));
     $sim1OwnerId = (int) ($sim1['owner_id'] ?? 0);
+    $sameExistingSim1 = (int) ($existingRow['sim_id_1'] ?? 0) === $simId1;
+    if ($sim1Status === 'used' && !$sameExistingSim1) {
+        throw new Exception('SIM is already used and cannot be assigned again.');
+    }
+    $assertNoOtherCustomerAssignment('sim_id_1', $simId1, 'SIM is already assigned to another customer.');
 
+    $sim1OwnerEligible = false;
     if ($sim1OwnerType === 'dealer' && $sim1OwnerId > 0) {
-        $ownerStmt = $conn->prepare('SELECT id FROM dealers WHERE id = ? LIMIT 1');
+        $ownerStmt = $conn->prepare('SELECT installation_status FROM dealers WHERE id = ? LIMIT 1');
         $ownerStmt->bind_param('i', $sim1OwnerId);
         $ownerStmt->execute();
-        $ownerExists = $ownerStmt->get_result()->num_rows > 0;
+        $sim1Owner = $ownerStmt->get_result()->fetch_assoc();
         $ownerStmt->close();
-        if (!$ownerExists) {
+        if (!$sim1Owner) {
             throw new Exception('The SIM No 1 owner dealer was not found.');
         }
+        $sim1OwnerEligible = in_array(strtolower(trim((string) $sim1Owner['installation_status'])), ['onsite', 'offsite'], true);
     } elseif ($sim1OwnerType === 'technician' && $sim1OwnerId > 0) {
         $ownerStmt = $conn->prepare('SELECT id FROM technicians WHERE id = ? LIMIT 1');
         $ownerStmt->bind_param('i', $sim1OwnerId);
@@ -453,22 +447,15 @@ try {
         if (!$ownerExists) {
             throw new Exception('The SIM No 1 owner technician was not found.');
         }
+        $sim1OwnerEligible = true;
     }
 
-    if ($sim1Status === 'available') {
+    if ($sameExistingSim1 || $sim1Status === 'available') {
         // OK
-    } elseif ($sim1Status === 'allocated' && in_array($sim1OwnerType, $allowedAllocatedOwners, true)) {
+    } elseif ($sim1Status === 'allocated' && $sim1OwnerEligible) {
         // OK
     } else {
-        $sameCustomerCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE sim_id_1 = ? AND customer_id = ? LIMIT 1');
-        $sameCustomerCheck->bind_param('ii', $simId1, $customerId);
-        $sameCustomerCheck->execute();
-        $isSameCustomerSim = $sameCustomerCheck->get_result()->num_rows > 0;
-        $sameCustomerCheck->close();
-
-        if (!$isSameCustomerSim) {
-            throw new Exception('SIM No 1 is not available for allocation.');
-        }
+        throw new Exception('SIM No 1 is not available for allocation.');
     }
 
     /*
@@ -482,7 +469,25 @@ try {
 
     if ($simNo2 !== '') {
         $stmt = $conn->prepare(
-            'SELECT s.id, s.status, sa.owner_type, sa.owner_id
+            'SELECT s.id,
+                    CASE
+                        WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = s.id OR cvd.sim_id_2 = s.id)
+                            OR EXISTS (
+                                SELECT 1 FROM stock_transactions st
+                                WHERE st.sim_id = s.id
+                                  AND st.from_owner_type = sa.owner_type
+                                  AND st.from_owner_id = sa.owner_id
+                                  AND st.id = (
+                                      SELECT MAX(st_latest.id) FROM stock_transactions st_latest
+                                      WHERE st_latest.sim_id = s.id
+                                        AND st_latest.from_owner_type = sa.owner_type
+                                        AND st_latest.from_owner_id = sa.owner_id
+                                  )
+                                  AND st.transaction_type = "USE"
+                            ) THEN "used"
+                        ELSE s.status
+                    END AS status,
+                    sa.owner_type, sa.owner_id
              FROM sims s
              LEFT JOIN stock_allocations sa
                 ON sa.id = (
@@ -513,16 +518,23 @@ try {
         $sim2Status = strtolower(trim((string) $sim2['status']));
         $sim2OwnerType = strtolower(trim((string) ($sim2['owner_type'] ?? '')));
         $sim2OwnerId = (int) ($sim2['owner_id'] ?? 0);
+        $sameExistingSim2 = (int) ($existingRow['sim_id_2'] ?? 0) === $simId2;
+        if ($sim2Status === 'used' && !$sameExistingSim2) {
+            throw new Exception('SIM is already used and cannot be assigned again.');
+        }
+        $assertNoOtherCustomerAssignment('sim_id_2', $simId2, 'SIM is already assigned to another customer.');
 
+        $sim2OwnerEligible = false;
         if ($sim2OwnerType === 'dealer' && $sim2OwnerId > 0) {
-            $ownerStmt = $conn->prepare('SELECT id FROM dealers WHERE id = ? LIMIT 1');
+            $ownerStmt = $conn->prepare('SELECT installation_status FROM dealers WHERE id = ? LIMIT 1');
             $ownerStmt->bind_param('i', $sim2OwnerId);
             $ownerStmt->execute();
-            $ownerExists = $ownerStmt->get_result()->num_rows > 0;
+            $sim2Owner = $ownerStmt->get_result()->fetch_assoc();
             $ownerStmt->close();
-            if (!$ownerExists) {
+            if (!$sim2Owner) {
                 throw new Exception('The SIM No 2 owner dealer was not found.');
             }
+            $sim2OwnerEligible = in_array(strtolower(trim((string) $sim2Owner['installation_status'])), ['onsite', 'offsite'], true);
         } elseif ($sim2OwnerType === 'technician' && $sim2OwnerId > 0) {
             $ownerStmt = $conn->prepare('SELECT id FROM technicians WHERE id = ? LIMIT 1');
             $ownerStmt->bind_param('i', $sim2OwnerId);
@@ -532,22 +544,15 @@ try {
             if (!$ownerExists) {
                 throw new Exception('The SIM No 2 owner technician was not found.');
             }
+            $sim2OwnerEligible = true;
         }
 
-        if ($sim2Status === 'available') {
+        if ($sameExistingSim2 || $sim2Status === 'available') {
             // OK
-        } elseif ($sim2Status === 'allocated' && in_array($sim2OwnerType, $allowedAllocatedOwners, true)) {
+        } elseif ($sim2Status === 'allocated' && $sim2OwnerEligible) {
             // OK
         } else {
-            $sameCustomerCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE sim_id_2 = ? AND customer_id = ? LIMIT 1');
-            $sameCustomerCheck->bind_param('ii', $simId2, $customerId);
-            $sameCustomerCheck->execute();
-            $isSameCustomerSim2 = $sameCustomerCheck->get_result()->num_rows > 0;
-            $sameCustomerCheck->close();
-
-            if (!$isSameCustomerSim2) {
-                throw new Exception('SIM No 2 is not available for allocation.');
-            }
+            throw new Exception('SIM No 2 is not available for allocation.');
         }
     }
 
@@ -581,12 +586,6 @@ try {
     | INSERT OR UPDATE CUSTOMER VEHICLE DETAILS
     |--------------------------------------------------------------------------
     */
-    $checkCustomerStmt = $conn->prepare('SELECT * FROM customer_vehicle_details WHERE customer_id = ? LIMIT 1 FOR UPDATE');
-    $checkCustomerStmt->bind_param('i', $customerId);
-    $checkCustomerStmt->execute();
-    $existingRow = $checkCustomerStmt->get_result()->fetch_assoc();
-    $checkCustomerStmt->close();
-
     $cleanSimNo2 = $simNo2 !== '' ? $simNo2 : null;
 
     if ($existingRow && !$appendVehicle) {

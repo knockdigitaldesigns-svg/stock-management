@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, History, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import { Eye, History, Pencil, RotateCcw, Trash2, Search } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
@@ -15,7 +15,7 @@ const display = (value) => value === null || value === undefined || value === ''
 const formatDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '-';
 const formatDateTime = (value) => value ? `${formatDate(value)} ${String(value).slice(11, 19)}` : '-';
 const Field = ({ label, children }) => <label className="form-group"><span className="form-label">{label}</span>{children}</label>;
-const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 18 }}><h4 style={{ margin: '0 0 10px', borderBottom: '1px solid #e2e8f0', paddingBottom: 6 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : `${display(record?.[key])}${key === 'validity_months' ? ' Months' : ''}`; const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); return <div key={key}><strong>{label}</strong>{inputStyle ? <input className="form-control" type={isDate ? 'date' : 'text'} defaultValue={inputValue} readOnly={false} onChange={(event) => onChange ? onChange(key, event.target.value) : (record[key] = event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
+const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 18 }}><h4 style={{ margin: '0 0 10px', borderBottom: '1px solid #e2e8f0', paddingBottom: 6 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : `${display(record?.[key])}${key === 'validity_months' ? ' Months' : ''}`; const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <input className="form-control" type="date" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
 
 const RenewalsPage = () => {
     const [rows, setRows] = useState([]);
@@ -151,26 +151,72 @@ const RenewalsPage = () => {
     ];
 
     return <div className="page-container"><div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}><h2>Renewals</h2><button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button></div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, margin: '18px 0' }}>
-            <input className="form-control" placeholder="Search username, mobile, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
-            <input className="form-control" type="date" value={filters.date_from || ''} onChange={(event) => {
-                if (filters.date_to && event.target.value > filters.date_to) {
-                    showGlobalError('From Date cannot be later than To Date.');
-                    return;
-                }
-                updateFilter('date_from', event.target.value);
-            }} aria-label="From Date" />
-            <input className="form-control" type="date" value={filters.date_to || ''} onChange={(event) => {
-                if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
-                    showGlobalError('From Date cannot be later than To Date.');
-                    return;
-                }
-                updateFilter('date_to', event.target.value);
-            }} aria-label="To Date" />
-            <select className="form-control" value={filters.validity} onChange={(event) => updateFilter('validity', event.target.value)}><option value="">All Validity</option>{validities.map((validity) => <option key={validity} value={validity}>{validity} Months</option>)}</select>
-            <select className="form-control" value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}><option value="">All Status</option>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
-            <button className="btn" type="button" onClick={() => setFilters(EMPTY_FILTERS)}><RotateCcw size={16} /> Reset</button>
+        <div className="page-header"><div><h2>Renewals</h2><p className="page-subtitle">Review upcoming SIM renewals and manage lifecycle actions.</p></div><button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button></div>
+        <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
+            <div className="table-filter-grid">
+                
+                {/* SEARCH */}
+                <div className="filter-group">
+                    <label className="filter-label">Search</label>
+                    <div className="search-input-wrapper">
+                        <Search size={16} className="search-icon" />
+                        <input className="form-control filter-input has-icon table-filter-search" placeholder="Search username, mobile, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
+                    </div>
+                </div>
+
+                {/* DATE FROM */}
+                <div className="filter-group">
+                    <label className="filter-label">From Date</label>
+                    <input className="form-control filter-input" type="date" value={filters.date_from || ''} onChange={(event) => {
+                        if (filters.date_to && event.target.value > filters.date_to) {
+                            showGlobalError('From Date cannot be later than To Date.');
+                            return;
+                        }
+                        updateFilter('date_from', event.target.value);
+                    }} aria-label="From Date" />
+                </div>
+
+                {/* DATE TO */}
+                <div className="filter-group">
+                    <label className="filter-label">To Date</label>
+                    <input className="form-control filter-input" type="date" value={filters.date_to || ''} onChange={(event) => {
+                        if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                            showGlobalError('From Date cannot be later than To Date.');
+                            return;
+                        }
+                        updateFilter('date_to', event.target.value);
+                    }} aria-label="To Date" />
+                </div>
+
+                {/* VALIDITY */}
+                <div className="filter-group">
+                    <label className="filter-label">Validity</label>
+                    <select className="form-control filter-input" value={filters.validity} onChange={(event) => updateFilter('validity', event.target.value)}>
+                        <option value="">All Validity</option>
+                        {validities.map((validity) => <option key={validity} value={validity}>{validity} Months</option>)}
+                    </select>
+                </div>
+
+                {/* STATUS */}
+                <div className="filter-group">
+                    <label className="filter-label">Status</label>
+                    <select className="form-control filter-input" value={filters.status} onChange={(event) => updateFilter('status', event.target.value)}>
+                        <option value="">All Status</option>
+                        {STATUSES.map((status) => <option key={status}>{status}</option>)}
+                    </select>
+                </div>
+                
+            </div>
+            
+            {/* RESET & SEARCH */}
+            <div className="table-filter-actions">
+                <button type="button" className="btn btn-primary table-filter-btn" onClick={() => load(1, filters)}>
+                    <Search size={16} /> Search
+                </button>
+                <button className="btn btn-secondary table-filter-btn" type="button" onClick={() => setFilters(EMPTY_FILTERS)}>
+                    <RotateCcw size={16} /> Reset
+                </button>
+            </div>
         </div>
         <div className="table-container"><table><thead><tr>{['Installation Date', 'Username', 'Mobile No', 'IMEI No', 'SIM No', 'Device Model', 'Next Renewal Date', 'Platform', 'Validity', 'SIM Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan="11">Loading renewals...</td></tr> : rows.length === 0 ? <tr><td colSpan="11">No renewal records found.</td></tr> : rows.map((row) => <tr key={row.id}><td>{formatDate(row.installation_date)}</td><td>{display(row.username)}</td><td>{display(row.primary_mobile_no)}</td><td>{display(row.imei_no)}</td><td>{display(row.sim_no_1)}</td><td>{display(row.device_model)}</td><td>{formatDate(row.next_renewal_date)}</td><td>{display(row.platform_name)}</td><td>{display(row.validity_months)} Months</td><td><span className="badge">{display(row.sim_status)}</span></td><td><div style={{ display: 'flex', gap: 6 }}><button className="btn" type="button" title="View" onClick={() => openView(row)}><Eye size={16} /></button><button className="btn" type="button" title="Edit" onClick={() => openEdit(row)}><Pencil size={16} /></button><button className="btn btn-danger" type="button" title="Delete" onClick={() => { setDeleteTarget(row); setModal('delete'); }}><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
         <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => load(page, filters)} onPageSizeChange={(size) => load(1, filters, size)} itemName="renewals" />

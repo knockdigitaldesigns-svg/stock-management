@@ -233,7 +233,10 @@ const deleteUser = async () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Add User</h2>
+                <div>
+                    <h2>Add User</h2>
+                    <p className="page-subtitle">Create and manage user accounts and their assigned roles.</p>
+                </div>
                 <div className="header-actions">
                     <Can permission="users.add">
                         <button className="btn btn-primary" type="button" onClick={() => { setEditingUser(null); setForm({ employee_name: '', mobile_no: '', role_id: '', password: '', confirm_password: '', status: 'active' }); setShowModal(true); }}>

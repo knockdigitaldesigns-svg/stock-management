@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Eye, RefreshCw, Search } from 'lucide-react';
+import { Eye, RefreshCw, Search, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
@@ -111,42 +111,125 @@ const HistoryPage = () => {
             <div className="page-header"><div><h2>History</h2><p className="page-subtitle">Global application audit history</p></div><button className="btn btn-outline" type="button" onClick={() => loadHistory()} disabled={loading}><RefreshCw size={16} /> Refresh</button></div>
             {error && <div className="alert alert-danger">{error}</div>}
             <div className="card">
-                <form className="history-filters" onSubmit={applyFilters}>
-                    <label className="history-search"><Search size={16} /><input value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} placeholder="Search history..." /></label>
-                    <select value={filters.module} onChange={(event) => updateFilter('module', event.target.value)} aria-label="Filter by module"><option value="">All modules</option>{modules.map((module) => <option key={module}>{module}</option>)}</select>
-                    <select value={filters.action} onChange={(event) => updateFilter('action', event.target.value)} aria-label="Filter by action"><option value="">All actions</option><option>Create</option><option>Edit</option><option>Delete</option></select>
-                    <input type="date" value={filters.date_from} onChange={(event) => {
-                        if (filters.date_to && event.target.value > filters.date_to) {
-                            setError('From Date cannot be later than To Date.');
-                            return;
-                        }
-                        updateFilter('date_from', event.target.value);
-                    }} aria-label="Date from" />
-                    <input type="date" value={filters.date_to} onChange={(event) => {
-                        if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
-                            setError('From Date cannot be later than To Date.');
-                            return;
-                        }
-                        updateFilter('date_to', event.target.value);
-                    }} aria-label="Date to" />
-                    <select
-    value={filters.changed_by}
-    onChange={(event) => updateFilter('changed_by', event.target.value)}
-    aria-label="Filter by changed user"
->
-    <option value="">All Users</option>
+                <div className="table-filter-card" style={{ border: 'none', boxShadow: 'none', padding: '20px 22px 20px 22px', borderBottom: '1px solid #e2e8f0', marginBottom: '10px' }}>
+                    <form className="table-filter-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }} onSubmit={applyFilters}>
+                        {/* SEARCH */}
+                        <div className="filter-group">
+                            <label className="filter-label">Search</label>
+                            <div className="search-input-wrapper">
+                                <Search size={16} className="search-icon" />
+                                <input className="form-control filter-input has-icon table-filter-search" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} placeholder="Search history..." />
+                            </div>
+                        </div>
 
-    {users.map((user) => (
-        <option key={user.id} value={user.id}>
-            {user.username}
-        </option>
-    ))}
-</select>
-                    <button className="btn btn-primary" type="submit">Apply</button><button className="btn btn-outline" type="button" onClick={resetFilters}>Reset</button>
-                </form>
+                        {/* MODULE */}
+                        <div className="filter-group">
+                            <label className="filter-label">Module</label>
+                            <select className="form-control filter-input" value={filters.module} onChange={(event) => updateFilter('module', event.target.value)} aria-label="Filter by module">
+                                <option value="">All modules</option>
+                                {modules.map((module) => <option key={module}>{module}</option>)}
+                            </select>
+                        </div>
+
+                        {/* ACTION */}
+                        <div className="filter-group">
+                            <label className="filter-label">Action</label>
+                            <select className="form-control filter-input" value={filters.action} onChange={(event) => updateFilter('action', event.target.value)} aria-label="Filter by action">
+                                <option value="">All actions</option>
+                                <option>Create</option>
+                                <option>Edit</option>
+                                <option>Delete</option>
+                            </select>
+                        </div>
+
+                        {/* DATE FROM */}
+                        <div className="filter-group">
+                            <label className="filter-label">From Date</label>
+                            <input className="form-control filter-input" type="date" value={filters.date_from} onChange={(event) => {
+                                if (filters.date_to && event.target.value > filters.date_to) {
+                                    setError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                updateFilter('date_from', event.target.value);
+                            }} aria-label="Date from" />
+                        </div>
+
+                        {/* DATE TO */}
+                        <div className="filter-group">
+                            <label className="filter-label">To Date</label>
+                            <input className="form-control filter-input" type="date" value={filters.date_to} onChange={(event) => {
+                                if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                                    setError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                updateFilter('date_to', event.target.value);
+                            }} aria-label="Date to" />
+                        </div>
+
+                        {/* CHANGED BY */}
+                        <div className="filter-group">
+                            <label className="filter-label">Changed By</label>
+                            <select
+                                className="form-control filter-input"
+                                value={filters.changed_by}
+                                onChange={(event) => updateFilter('changed_by', event.target.value)}
+                                aria-label="Filter by changed user"
+                            >
+                                <option value="">All Users</option>
+                                {users.map((user) => (
+                                    <option key={user.id} value={user.id}>
+                                        {user.username}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </form>
+
+                    {/* FILTER ACTIONS */}
+                    <div className="table-filter-actions">
+                        <button className="btn btn-primary table-filter-btn" type="submit" onClick={applyFilters}>
+                            <Search size={16} /> Apply
+                        </button>
+                        <button className="btn btn-secondary table-filter-btn" type="button" onClick={resetFilters}>
+                            <RotateCcw size={16} /> Reset
+                        </button>
+                    </div>
+                </div>
+
                 <div className="table-container history-table-wrap">
-                    <table className="history-table"><thead><tr><th>Date &amp; Time</th><th>Module</th><th>Action</th><th>Summary</th><th>Changed By</th><th>Actions</th></tr></thead>
-                        <tbody>{loading ? <tr><td colSpan="6" className="text-center">Loading history...</td></tr> : history.length === 0 ? <tr><td colSpan="6" className="text-center empty-state">No history records found.</td></tr> : history.map((group) => <tr key={group.id}><td className="history-date">{formatDateTime(group.changed_at)}</td><td>{group.module}</td><td><span className={`badge badge-${String(group.action).toLowerCase()}`}>{actionLabel(group.action)}</span></td><td className="history-summary">{summary(group)}</td><td>{group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-'}</td><td><button className="icon-btn view" type="button" title="View details" aria-label="View history details" onClick={() => setSelected(group)}><Eye size={16} /></button></td></tr>)}</tbody>
+                    <table className="history-table">
+                        <thead>
+                            <tr>
+                                <th>Date &amp; Time</th>
+                                <th>Module</th>
+                                <th>Action</th>
+                                <th>Summary</th>
+                                <th>Changed By</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr><td colSpan="6" className="text-center">Loading history...</td></tr>
+                            ) : history.length === 0 ? (
+                                <tr><td colSpan="6" className="text-center empty-state">No history records found.</td></tr>
+                            ) : (
+                                history.map((group) => (
+                                    <tr key={group.id}>
+                                        <td className="history-date">{formatDateTime(group.changed_at)}</td>
+                                        <td>{group.module}</td>
+                                        <td><span className={`badge badge-${String(group.action).toLowerCase()}`}>{actionLabel(group.action)}</span></td>
+                                        <td className="history-summary">{summary(group)}</td>
+                                        <td>{group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-'}</td>
+                                        <td>
+                                            <button className="icon-btn view" type="button" title="View details" aria-label="View history details" onClick={() => setSelected(group)}>
+                                                <Eye size={16} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
                     </table>
                 </div>
                 <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => loadHistory(page)} onPageSizeChange={(size) => loadHistory(1, appliedFilters, size)} itemName="history entries" />

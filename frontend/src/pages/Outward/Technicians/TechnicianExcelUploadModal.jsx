@@ -50,7 +50,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!file) return triggerErrors(['Please select an Excel file.']);
         setLoading(true); setErrors([]); setSuccessMsg('');
         try {
-            const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellDates: true });
+            const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const headerRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: true });
             const headerRow = headerRows[0] || [];

@@ -12,8 +12,10 @@ import usePagination from '../../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
 import useDeviceModels from '../../../hooks/useDeviceModels';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
+import { useAuth } from '../../../context/AuthContext';
 
 const DeviceMaintenance = () => {
+    const { hasPermission } = useAuth();
     const [devices, setDevices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState(emptyTableFilters);
@@ -81,14 +83,21 @@ const DeviceMaintenance = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Device Maintenance</h2>
+                <div>
+                    <h2>Device Maintenance</h2>
+                    <p className="page-subtitle">Receive, track, and manage device inventory.</p>
+                </div>
                 <div className="header-actions">
-                    <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
-                        <Upload size={16} /> Upload Excel
-                    </button>
-                    <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
-                        <Plus size={16} /> Add Device
-                    </button>
+                    {hasPermission('devices.add') && (
+                        <>
+                            <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
+                                <Upload size={16} /> Upload Excel
+                            </button>
+                            <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
+                                <Plus size={16} /> Add Device
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -104,6 +113,7 @@ const DeviceMaintenance = () => {
                     showStatus
                     statusOptions={['Available', 'Allocated', 'Used']}
                     searchPlaceholder="Search by IMEI, model, or notes..."
+                    gridCols={5}
                 />
 
                 <div className="table-container">
@@ -138,8 +148,8 @@ const DeviceMaintenance = () => {
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View device" title="View" onClick={() => setViewingDevice(device)}><Eye size={16} /></button>
-                                                <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>
-                                                <button className="icon-btn delete" type="button" aria-label="Delete device" onClick={() => setDeleteTarget(device)}><Trash2 size={16} /></button>
+                                                {hasPermission('devices.edit') && <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>}
+                                                {hasPermission('devices.delete') && <button className="icon-btn delete" type="button" aria-label="Delete device" onClick={() => setDeleteTarget(device)}><Trash2 size={16} /></button>}
                                             </div>
                                         </td>
                                     </tr>
@@ -159,7 +169,7 @@ const DeviceMaintenance = () => {
                 />
             </div>
 
-            {isAddModalOpen && (
+            {isAddModalOpen && hasPermission('devices.add') && (
                 <AddDeviceModal 
                     onClose={() => setIsAddModalOpen(false)} 
                     onSuccess={() => {
@@ -169,7 +179,7 @@ const DeviceMaintenance = () => {
                 />
             )}
 
-            {isExcelModalOpen && (
+            {isExcelModalOpen && hasPermission('devices.add') && (
                 <DeviceExcelUploadModal 
                     onClose={() => setIsExcelModalOpen(false)} 
                     onSuccess={() => {
@@ -179,7 +189,7 @@ const DeviceMaintenance = () => {
                 />
             )}
 
-            {editingDevice && (
+            {editingDevice && hasPermission('devices.edit') && (
                 <EditDeviceModal
                     device={editingDevice}
                     onClose={() => setEditingDevice(null)}
@@ -192,7 +202,7 @@ const DeviceMaintenance = () => {
 
             {viewingDevice && <RecordViewModal isOpen onClose={() => setViewingDevice(null)} title="Device Details" record={viewingDevice} fetchRecord={async (row) => (await api.get('/devices/list.php')).data.data.devices.find((device) => String(device.id) === String(row.id)) || row} fields={[{ label: 'Device Model', key: 'model_name' }, { label: 'IMEI No', key: 'imei_no' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
 
-            {deleteTarget && (
+            {deleteTarget && hasPermission('devices.delete') && (
                 <Modal
                     isOpen={Boolean(deleteTarget)}
                     onClose={() => setDeleteTarget(null)}

@@ -15,6 +15,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import CustomerExcelUploadModal from './CustomerExcelUploadModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import Pagination from '../../components/Pagination/Pagination';
 
 const CustomerDetailsPage = () => {
 
@@ -817,448 +818,136 @@ const CustomerDetailsPage = () => {
                 >
                     {error}
                 </div>
-
             )}
 
-
             {/* =====================================================
-                FILTER CARD
+                FILTERS + TABLE
             ===================================================== */}
+            <div className="card">
+                <div className="table-filter-card">
+                    <div className="table-filter-grid">
 
-            <div
-                className="card"
-                style={{
-                    padding: '20px 22px',
-                    marginBottom: '20px',
-                    borderRadius: '12px'
-                }}
-            >
+                        {/* SEARCH */}
+                        <div className="filter-group">
+                            <label className="filter-label">Search</label>
+                            <div style={{ position: 'relative' }}>
+                                <Search size={16} style={{ position: 'absolute', left: '11px', top: '10px', color: '#64748b' }} />
+                                <input
+                                    type="text"
+                                    className="form-control filter-input"
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    placeholder="Username / Mobile / Vehicle / IMEI"
+                                    style={{ paddingLeft: '34px' }}
+                                />
+                            </div>
+                        </div>
 
-                <div
-                    style={{
-                        display: 'grid',
-                        gridTemplateColumns:
-                            'minmax(220px, 1.5fr) repeat(5, minmax(130px, 1fr))',
-                        gap: '15px',
-                        alignItems: 'end'
-                    }}
-                >
+                        {/* PLATFORM */}
+                        <div className="filter-group">
+                            <label className="filter-label">Platform</label>
+                            <select
+                                className="form-control filter-input"
+                                value={platformFilter}
+                                onChange={e => setPlatformFilter(e.target.value)}
+                            >
+                                <option value="">All Platforms</option>
+                                {platforms.map(platform => (
+                                    <option key={platform} value={platform}>{platform}</option>
+                                ))}
+                            </select>
+                        </div>
 
-                    {/* SEARCH */}
+                        {/* LOCATION */}
+                        <div className="filter-group">
+                            <label className="filter-label">Location</label>
+                            <select
+                                className="form-control filter-input"
+                                value={locationFilter}
+                                onChange={e => setLocationFilter(e.target.value)}
+                            >
+                                <option value="">All Locations</option>
+                                {locations.map(location => (
+                                    <option key={location} value={location}>{location}</option>
+                                ))}
+                            </select>
+                        </div>
 
-                    <div>
+                        {/* PAYMENT */}
+                        <div className="filter-group">
+                            <label className="filter-label">Payment Status</label>
+                            <select
+                                className="form-control filter-input"
+                                value={paymentFilter}
+                                onChange={e => setPaymentFilter(e.target.value)}
+                            >
+                                <option value="">All</option>
+                                <option value="Paid">Paid</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Partially Paid">Partially Paid</option>
+                                <option value="Not Paid">Not Paid</option>
+                            </select>
+                        </div>
 
-                        <label style={labelStyle}>
-                            Search
-                        </label>
-
-                        <div
-                            style={{
-                                position: 'relative'
-                            }}
-                        >
-
-                            <Search
-                                size={16}
-                                style={{
-                                    position: 'absolute',
-                                    left: '11px',
-                                    top: '12px',
-                                    color: '#64748b'
-                                }}
-                            />
-
+                        {/* DATE FROM */}
+                        <div className="filter-group">
+                            <label className="filter-label">From Date</label>
                             <input
-                                type="text"
-                                value={search}
-                                onChange={e =>
-                                    setSearch(
-                                        e.target.value
-                                    )
-                                }
-                                placeholder="Username / Mobile / Vehicle / IMEI"
-                                style={{
-                                    ...inputStyle,
-                                    paddingLeft: '34px'
+                                type="date"
+                                className="form-control filter-input"
+                                value={dateFrom}
+                                onChange={e => {
+                                    if (dateTo && e.target.value > dateTo) {
+                                        showGlobalError('From Date cannot be later than To Date.');
+                                        return;
+                                    }
+                                    setDateFrom(e.target.value)
                                 }}
+                                max={dateTo || new Date().toISOString().split('T')[0]}
                             />
+                        </div>
 
+                        {/* DATE TO */}
+                        <div className="filter-group">
+                            <label className="filter-label">To Date</label>
+                            <input
+                                type="date"
+                                className="form-control filter-input"
+                                value={dateTo}
+                                onChange={e => {
+                                    if (dateFrom && e.target.value && e.target.value < dateFrom) {
+                                        showGlobalError('From Date cannot be later than To Date.');
+                                        return;
+                                    }
+                                    setDateTo(e.target.value)
+                                }}
+                                min={dateFrom || undefined}
+                                max={new Date().toISOString().split('T')[0]}
+                            />
                         </div>
 
                     </div>
 
-
-                    {/* PLATFORM */}
-
-                    <div>
-
-                        <label style={labelStyle}>
-                            Platform
-                        </label>
-
-                        <select
-                            value={platformFilter}
-                            onChange={e =>
-                                setPlatformFilter(
-                                    e.target.value
-                                )
-                            }
-                            style={inputStyle}
-                        >
-
-                            <option value="">
-                                All Platforms
-                            </option>
-
-                            {platforms.map(
-                                platform => (
-                                    <option
-                                        key={platform}
-                                        value={platform}
-                                    >
-                                        {platform}
-                                    </option>
-                                )
-                            )}
-
-                        </select>
-
+                    <div className="table-filter-actions">
+                        <button type="button" className="btn btn-primary" onClick={() => setPage(1)}>
+                            <Search size={16} /> Search
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={handleReset}>
+                            <RotateCcw size={16} /> Reset
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={handleExport}>
+                            <Download size={16} /> Export
+                        </button>
                     </div>
-
-
-                    {/* LOCATION */}
-
-                    <div>
-
-                        <label style={labelStyle}>
-                            Location
-                        </label>
-
-                        <select
-                            value={locationFilter}
-                            onChange={e =>
-                                setLocationFilter(
-                                    e.target.value
-                                )
-                            }
-                            style={inputStyle}
-                        >
-
-                            <option value="">
-                                All Locations
-                            </option>
-
-                            {locations.map(
-                                location => (
-                                    <option
-                                        key={location}
-                                        value={location}
-                                    >
-                                        {location}
-                                    </option>
-                                )
-                            )}
-
-                        </select>
-
-                    </div>
-
-
-                    {/* PAYMENT */}
-
-                    <div>
-
-                        <label style={labelStyle}>
-                            Payment Status
-                        </label>
-
-                        <select
-                            value={paymentFilter}
-                            onChange={e =>
-                                setPaymentFilter(
-                                    e.target.value
-                                )
-                            }
-                            style={inputStyle}
-                        >
-
-                            <option value="">
-                                All
-                            </option>
-
-                            <option value="Paid">
-                                Paid
-                            </option>
-
-                            <option value="Pending">
-                                Pending
-                            </option>
-
-                            <option value="Partially Paid">
-                                Partially Paid
-                            </option>
-
-                            <option value="Not Paid">
-                                Not Paid
-                            </option>
-
-                        </select>
-
-                    </div>
-
-
-                    {/* DATE FROM */}
-
-                    <div>
-
-                        <label style={labelStyle}>
-                            Date From
-                        </label>
-
-                        <input
-                            type="date"
-                            value={dateFrom}
-                            onChange={e => {
-                                if (dateTo && e.target.value > dateTo) {
-                                    showGlobalError('From Date cannot be later than To Date.');
-                                    return;
-                                }
-                                setDateFrom(
-                                    e.target.value
-                                )
-                            }}
-                            max={
-                                dateTo ||
-                                new Date()
-                                    .toISOString()
-                                    .split('T')[0]
-                            }
-                            style={inputStyle}
-                        />
-
-                    </div>
-
-
-                    {/* DATE TO */}
-
-                    <div>
-
-                        <label style={labelStyle}>
-                            Date To
-                        </label>
-
-                        <input
-                            type="date"
-                            value={dateTo}
-                            onChange={e => {
-                                if (dateFrom && e.target.value && e.target.value < dateFrom) {
-                                    showGlobalError('From Date cannot be later than To Date.');
-                                    return;
-                                }
-                                setDateTo(
-                                    e.target.value
-                                )
-                            }}
-                            min={dateFrom || undefined}
-                            max={
-                                new Date()
-                                    .toISOString()
-                                    .split('T')[0]
-                            }
-                            style={inputStyle}
-                        />
-
-                    </div>
-
                 </div>
-
-
-                {/* FILTER ACTIONS */}
-
-                <div
-                    style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        gap: '9px',
-                        marginTop: '17px'
-                    }}
-                >
-
-                    <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() =>
-                            setPage(1)
-                        }
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '7px'
-                        }}
-                    >
-
-                        <Search size={16} />
-
-                        Search
-
-                    </button>
-
-
-                    <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={
-                            handleReset
-                        }
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '7px'
-                        }}
-                    >
-
-                        <RotateCcw size={16} />
-
-                        Reset
-
-                    </button>
-
-                </div>
-
-            </div>
-
-
-            {/* =====================================================
-                TABLE CARD
-            ===================================================== */}
-
-            <div
-                className="card"
-                style={{
-                    padding: 0,
-                    overflow: 'hidden',
-                    borderRadius: '12px'
-                }}
-            >
-
-                {/* TOOLBAR */}
-
-                <div
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '15px 20px',
-                        borderBottom:
-                            '1px solid #e5e7eb'
-                    }}
-                >
-
-                    <div
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '7px',
-                            fontSize: '13px',
-                            color: '#475569'
-                        }}
-                    >
-
-                        <span>
-                            Show
-                        </span>
-
-                        <select
-                            value={pageSize}
-                            onChange={e =>
-                                setPageSize(
-                                    Number(
-                                        e.target.value
-                                    )
-                                )
-                            }
-                            style={{
-                                width: '62px',
-                                height: '34px',
-                                border:
-                                    '1px solid #dbe2ea',
-                                borderRadius: '6px',
-                                padding: '0 7px'
-                            }}
-                        >
-
-                            <option value={10}>
-                                10
-                            </option>
-
-                            <option value={25}>
-                                25
-                            </option>
-
-                            <option value={50}>
-                                50
-                            </option>
-
-                            <option value={100}>
-                                100
-                            </option>
-
-                        </select>
-
-                        <span>
-                            entries
-                        </span>
-
-                    </div>
-
-
-                    <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={
-                            handleExport
-                        }
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '7px'
-                        }}
-                    >
-
-                        <Download size={16} />
-
-                        Export
-
-                    </button>
-
-                </div>
-
 
                 {/* TABLE */}
-
-                <div
-                    style={{
-                        width: '100%',
-                        overflowX: 'auto'
-                    }}
-                >
-
-                    <table
-                        style={{
-                            width: '100%',
-                            minWidth: '1150px',
-                            borderCollapse:
-                                'collapse',
-                            fontSize: '13px'
-                        }}
-                    >
-
+                <div className="table-container">
+                    <table>
                         <thead>
-
                             <tr>
-
                                 {[
-                                    '#',
+                                    // '#',
                                     'Username',
                                     'Platform',
                                     'Primary Mobile No',
@@ -1270,457 +959,73 @@ const CustomerDetailsPage = () => {
                                     'Pending Amount',
                                     'Payment Status',
                                     'Actions'
-                                ].map(
-                                    heading => (
-
-                                        <th
-                                            key={
-                                                heading
-                                            }
-                                            style={{
-                                                height:
-                                                    '44px',
-                                                padding:
-                                                    '0 12px',
-                                                background:
-                                                    '#f8fafc',
-                                                borderBottom:
-                                                    '1px solid #e2e8f0',
-                                                color:
-                                                    '#475569',
-                                                fontSize:
-                                                    '12px',
-                                                fontWeight:
-                                                    700,
-                                                textAlign:
-                                                    'left',
-                                                whiteSpace:
-                                                    'nowrap'
-                                            }}
-                                        >
-                                            {heading}
-                                        </th>
-
-                                    )
-                                )}
-
+                                ].map(heading => (
+                                    <th key={heading}>{heading}</th>
+                                ))}
                             </tr>
-
                         </thead>
-
-
                         <tbody>
-
                             {loading ? (
-
                                 <tr>
-
-                                    <td
-                                        colSpan="12"
-                                        style={{
-                                            padding:
-                                                '50px',
-                                            textAlign:
-                                                'center',
-                                            color:
-                                                '#64748b'
-                                        }}
-                                    >
-                                        Loading customers...
-                                    </td>
-
+                                    <td colSpan="11" className="text-center">Loading customers...</td>
                                 </tr>
-
                             ) : paginatedCustomers.length === 0 ? (
-
                                 <tr>
-
-                                    <td
-                                        colSpan="12"
-                                        style={{
-                                            padding:
-                                                '50px',
-                                            textAlign:
-                                                'center',
-                                            color:
-                                                '#64748b'
-                                        }}
-                                    >
-                                        No customer records found.
-                                    </td>
-
+                                    <td colSpan="11" className="text-center empty-state">No customer records found.</td>
                                 </tr>
-
                             ) : (
-
-                                paginatedCustomers.map(
-                                    (item, index) => {
-
-                                        const id =
-                                            item.id ||
-                                            item.customer_id;
-
-                                        return (
-
-                                            <tr
-                                                key={id}
-                                            >
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        startIndex +
-                                                        index +
-                                                        1
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    <strong
-                                                        style={{
-                                                            color:
-                                                                '#0f172a'
-                                                        }}
-                                                    >
-                                                        {
-                                                            item.username ||
-                                                            '-'
-                                                        }
-                                                    </strong>
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.platform_name ||
-                                                        item.platform ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.primary_mobile_no ||
-                                                        item.mobile_no ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.location ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.vehicle_no ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.imei_no ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {
-                                                        item.sim_no ||
-                                                        item.sim_no_1 ||
-                                                        '-'
-                                                    }
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {getDisplayTotalAmount(item)}
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-                                                    {getDisplayPendingAmount(item)}
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-
-                                                    <span
-                                                        style={
-                                                            paymentBadge(
-                                                                item.payment_status
-                                                            )
-                                                        }
-                                                    >
-                                                        {
-                                                            item.payment_status ||
-                                                            'Pending'
-                                                        }
-                                                    </span>
-
-                                                </td>
-
-                                                <td
-                                                    style={tdStyle}
-                                                >
-
-                                                    <div
-                                                        style={{
-                                                            display:
-                                                                'flex',
-                                                            alignItems:
-                                                                'center',
-                                                            gap:
-                                                                '5px'
-                                                        }}
-                                                    >
-
-                                                        <button
-                                                            type="button"
-                                                            title="View"
-                                                            onClick={() =>
-                                                                handleView(
-                                                                    id
-                                                                )
-                                                            }
-                                                            style={iconButton('#2563eb')}
-                                                        >
-                                                            <Eye
-                                                                size={
-                                                                    16
-                                                                }
-                                                            />
+                                paginatedCustomers.map((item, index) => {
+                                    const id = item.id || item.customer_id;
+                                    return (
+                                        <tr key={id}>
+                                            {/* <td>{startIndex + index + 1}</td> */}
+                                            <td><strong>{item.username || '-'}</strong></td>
+                                            <td>{item.platform_name || item.platform || '-'}</td>
+                                            <td>{item.primary_mobile_no || item.mobile_no || '-'}</td>
+                                            <td>{item.location || '-'}</td>
+                                            <td>{item.vehicle_no || '-'}</td>
+                                            <td>{item.imei_no || '-'}</td>
+                                            <td>{item.sim_no || item.sim_no_1 || '-'}</td>
+                                            <td>{getDisplayTotalAmount(item)}</td>
+                                            <td>{getDisplayPendingAmount(item)}</td>
+                                            <td>
+                                                <span style={paymentBadge(item.payment_status)}>
+                                                    {item.payment_status || 'Pending'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div className="action-buttons" style={{ flexWrap: 'nowrap' }}>
+                                                    <button type="button" className="icon-btn view" title="View" onClick={() => handleView(id)}>
+                                                        <Eye size={16} />
+                                                    </button>
+                                                    {canEdit && (
+                                                        <button type="button" className="icon-btn edit" title="Edit" onClick={() => handleEdit(id)}>
+                                                            <Pencil size={16} />
                                                         </button>
-
-
-                                                        {canEdit && (
-
-                                                            <button
-                                                                type="button"
-                                                                title="Edit"
-                                                                onClick={() =>
-                                                                    handleEdit(
-                                                                        id
-                                                                    )
-                                                                }
-                                                                style={iconButton('#2563eb')}
-                                                            >
-                                                                <Pencil
-                                                                    size={
-                                                                        16
-                                                                    }
-                                                                />
-                                                            </button>
-
-                                                        )}
-
-
-                                                        {canDelete && (
-
-                                                            <button
-                                                                type="button"
-                                                                title="Delete"
-                                                                onClick={() =>
-                                                                    handleDelete(
-                                                                        id
-                                                                    )
-                                                                }
-                                                                style={iconButton('#ef4444')}
-                                                            >
-                                                                <Trash2
-                                                                    size={
-                                                                        16
-                                                                    }
-                                                                />
-                                                            </button>
-
-                                                        )}
-
-                                                    </div>
-
-                                                </td>
-
-                                            </tr>
-
-                                        );
-
-                                    }
-                                )
-
+                                                    )}
+                                                    {canDelete && (
+                                                        <button type="button" className="icon-btn delete" title="Delete" onClick={() => handleDelete(id)}>
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
-
                         </tbody>
-
                     </table>
-
                 </div>
 
-
-                {/* PAGINATION */}
-
-                <div
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent:
-                            'space-between',
-                        gap: '15px',
-                        padding:
-                            '14px 20px',
-                        borderTop:
-                            '1px solid #e5e7eb'
-                    }}
-                >
-
-                    <span
-                        style={{
-                            fontSize: '12px',
-                            color: '#64748b'
-                        }}
-                    >
-
-                        Showing{' '}
-
-                        {filteredCustomers.length === 0
-                            ? 0
-                            : startIndex + 1}
-
-                        {' '}to{' '}
-
-                        {Math.min(
-                            startIndex +
-                            pageSize,
-                            filteredCustomers.length
-                        )}
-
-                        {' '}of{' '}
-
-                        {filteredCustomers.length}
-
-                        {' '}entries
-
-                    </span>
-
-
-                    <div
-                        style={{
-                            display: 'flex',
-                            gap: '5px'
-                        }}
-                    >
-
-                        <button
-                            type="button"
-                            disabled={
-                                currentPage === 1
-                            }
-                            onClick={() =>
-                                setPage(
-                                    currentPage - 1
-                                )
-                            }
-                            style={
-                                paginationButton(
-                                    false,
-                                    currentPage === 1
-                                )
-                            }
-                        >
-                            Previous
-                        </button>
-
-
-                        {Array.from(
-                            {
-                                length:
-                                    totalPages
-                            },
-                            (_, index) =>
-                                index + 1
-                        )
-                            .slice(
-                                Math.max(
-                                    0,
-                                    currentPage - 3
-                                ),
-                                currentPage + 2
-                            )
-                            .map(
-                                pageNumber => (
-
-                                    <button
-                                        key={
-                                            pageNumber
-                                        }
-                                        type="button"
-                                        onClick={() =>
-                                            setPage(
-                                                pageNumber
-                                            )
-                                        }
-                                        style={
-                                            paginationButton(
-                                                currentPage ===
-                                                pageNumber,
-                                                false
-                                            )
-                                        }
-                                    >
-                                        {
-                                            pageNumber
-                                        }
-                                    </button>
-
-                                )
-                            )}
-
-
-                        <button
-                            type="button"
-                            disabled={
-                                currentPage ===
-                                totalPages
-                            }
-                            onClick={() =>
-                                setPage(
-                                    currentPage + 1
-                                )
-                            }
-                            style={
-                                paginationButton(
-                                    false,
-                                    currentPage ===
-                                    totalPages
-                                )
-                            }
-                        >
-                            Next
-                        </button>
-
-                    </div>
-
-                </div>
-
+                <Pagination
+                    currentPage={page}
+                    pageSize={pageSize}
+                    totalItems={filteredCustomers.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    itemName="entries"
+                />
             </div>
 
             {isUploadModalOpen && (
@@ -1738,63 +1043,7 @@ const CustomerDetailsPage = () => {
 };
 
 
-// ============================================================
-// TABLE STYLE HELPERS
-// ============================================================
 
-const tdStyle = {
-    height: '50px',
-    padding: '8px 12px',
-    borderBottom:
-        '1px solid #eef2f7',
-    color: '#334155',
-    whiteSpace: 'nowrap'
-};
-
-
-const iconButton = (color) => ({
-    width: '30px',
-    height: '30px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 0,
-    border: 'none',
-    background: 'transparent',
-    color,
-    borderRadius: '6px',
-    cursor: 'pointer'
-});
-
-
-const paginationButton = (
-    active,
-    disabled
-) => ({
-    minWidth: '34px',
-    height: '34px',
-    padding: '0 9px',
-    border:
-        active
-            ? '1px solid #2563eb'
-            : '1px solid #dbe2ea',
-    borderRadius: '6px',
-    background:
-        active
-            ? '#2563eb'
-            : '#ffffff',
-    color:
-        active
-            ? '#ffffff'
-            : disabled
-                ? '#cbd5e1'
-                : '#475569',
-    cursor:
-        disabled
-            ? 'not-allowed'
-            : 'pointer',
-    fontSize: '12px'
-});
 
 
 export default CustomerDetailsPage;

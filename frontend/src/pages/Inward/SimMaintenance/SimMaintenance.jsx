@@ -96,14 +96,21 @@ const SimMaintenance = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>SIM Maintenance</h2>
+                <div>
+                    <h2>SIM Maintenance</h2>
+                    <p className="page-subtitle">Receive, track, and manage SIM inventory.</p>
+                </div>
                 <div className="header-actions">
-                    <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
-                        <Upload size={16} /> Upload Excel
-                    </button>
-                    <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
-                        <Plus size={16} /> Add SIM
-                    </button>
+                    {hasPermission('sims.add') && (
+                        <>
+                            <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
+                                <Upload size={16} /> Upload Excel
+                            </button>
+                            <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
+                                <Plus size={16} /> Add SIM
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -118,6 +125,7 @@ const SimMaintenance = () => {
     showStatus
     statusOptions={['Available', 'Allocated', 'Used']}
     searchPlaceholder="Search by SIM number, type, or notes..."
+    gridCols={5}
 />
 
                 <div className="table-container">
@@ -174,7 +182,7 @@ const SimMaintenance = () => {
                 />
             </div>
 
-            {isAddModalOpen && (
+            {isAddModalOpen && hasPermission('sims.add') && (
                 <AddSimModal 
                     onClose={() => setIsAddModalOpen(false)} 
                     onSuccess={() => {
@@ -184,7 +192,7 @@ const SimMaintenance = () => {
                 />
             )}
 
-            {isExcelModalOpen && (
+            {isExcelModalOpen && hasPermission('sims.add') && (
                 <SimExcelUploadModal 
                     onClose={() => setIsExcelModalOpen(false)} 
                     onSuccess={() => {
@@ -194,7 +202,7 @@ const SimMaintenance = () => {
                 />
             )}
 
-            {editingSim && (
+            {editingSim && hasPermission('sims.edit') && (
                 <EditSimModal
                     sim={editingSim}
                     onClose={() => setEditingSim(null)}
@@ -207,7 +215,7 @@ const SimMaintenance = () => {
 
             {viewingSim && <RecordViewModal isOpen onClose={() => setViewingSim(null)} title="SIM Details" record={viewingSim} fetchRecord={async (row) => (await api.get('/sims/list.php')).data.data.sims.find((sim) => String(sim.id) === String(row.id)) || row} fields={[{ label: 'SIM No', key: 'sim_no' }, { label: 'SIM Type', key: 'sim_type' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
 
-            {deleteTarget && (
+            {deleteTarget && hasPermission('sims.delete') && (
                 <Modal
                     isOpen={Boolean(deleteTarget)}
                     onClose={() => setDeleteTarget(null)}

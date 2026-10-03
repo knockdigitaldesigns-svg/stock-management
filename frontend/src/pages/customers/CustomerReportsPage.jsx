@@ -6,6 +6,7 @@ import usePagination from '../../hooks/usePagination';
 import { exportToExcel, exportToPDF } from '../../utils/export';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
+import { PAYMENT_STATUS_FILTERS } from '../../constants/paymentStatuses';
 
 const emptyFilters = () => ({
     search: '',
@@ -53,11 +54,11 @@ const SearchableDropdown = ({ label, value, options, onChange }) => {
     };
 
     return (
-        <div ref={containerRef} style={{ position: 'relative', zIndex: open ? 20 : 1 }}>
-            <label className="form-label">{label}</label>
+        <div ref={containerRef} className="filter-group" style={{ position: 'relative', zIndex: open ? 20 : 1 }}>
+            <label className="filter-label">{label}</label>
             <button
                 type="button"
-                className="form-control"
+                className="form-control filter-input"
                 onClick={() => setOpen(current => !current)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
@@ -109,7 +110,7 @@ const SearchableDropdown = ({ label, value, options, onChange }) => {
                         }}
                         style={{ marginBottom: '8px' }}
                     />
-                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    <div style={{ maxHeight: '148px', overflowY: 'auto' }}>
                         {filteredOptions.length > 0 ? filteredOptions.map(option => (
                             <button
                                 type="button"
@@ -216,7 +217,10 @@ const CustomerReportsPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Customer Reports</h2>
+                <div>
+                    <h2>Customer Reports</h2>
+                    <p className="page-subtitle">Review customer information and export detailed reports.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={handleExportExcel} disabled={loading || reports.length === 0}>
                         <Download size={16} /> Export Excel
@@ -227,55 +231,100 @@ const CustomerReportsPage = () => {
                 </div>
             </div>
 
-            <div className="card" style={{ marginBottom: '16px', padding: '16px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', alignItems: 'end' }}>
-                    <div style={{ gridColumn: 'span 2' }}>
-                        <label className="form-label">Search</label>
-                        <div style={{ position: 'relative' }}>
-                            <Search size={16} style={{ position: 'absolute', left: '10px', top: '11px', color: '#64748b' }} />
-                            <input className="form-control" style={{ paddingLeft: '32px' }} placeholder="Username, mobile, vehicle, IMEI or SIM" value={filters.search} onChange={e => updateFilter('search', e.target.value)} />
-                        </div>
-                    </div>
-                    <SearchableDropdown label="Location" value={filters.location} options={[{ value: '', label: 'All' }, ...options.locations.map(location => ({ value: location, label: location }))]} onChange={value => updateFilter('location', value)} />
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label className="form-label" style={{ marginBottom: 0 }}>Date From</label>
-                        <input type="date" className="form-control" value={filters.dateFrom} onChange={e => {
-                            if (filters.dateTo && e.target.value > filters.dateTo) {
-                                showGlobalError('From Date cannot be later than To Date.');
-                                return;
-                            }
-                            updateFilter('dateFrom', e.target.value);
-                        }} style={{ height: '38px' }} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label className="form-label" style={{ marginBottom: 0 }}>Date To</label>
-                        <input type="date" className="form-control" value={filters.dateTo} onChange={e => {
-                            if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
-                                showGlobalError('From Date cannot be later than To Date.');
-                                return;
-                            }
-                            updateFilter('dateTo', e.target.value);
-                        }} style={{ height: '38px' }} />
-                    </div>
-                    <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />
-                    <SearchableDropdown label="Lead Closure" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosures.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
-                    <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, { value: 'paid', label: 'Paid' }, { value: 'partially_paid', label: 'Partially Paid' }, { value: 'not_paid', label: 'Not Paid' }]} onChange={value => updateFilter('payment', value)} />
-                    <SearchableDropdown label="Device Type" value={filters.deviceType} options={[{ value: '', label: 'All' }, ...options.deviceTypes.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('deviceType', value)} />
-                    <SearchableDropdown label="Validity" value={filters.validity} options={[{ value: '', label: 'All' }, ...options.validities.map(value => ({ value, label: `${value} Months` }))]} onChange={value => updateFilter('validity', value)} />
-                    <button className="btn btn-secondary" onClick={() => setFilters(emptyFilters())}><RotateCcw size={16} /> Reset Filters</button>
-                </div>
-            </div>
-
             <div className="card">
+                <div className="table-filter-card" style={{ border: 'none', boxShadow: 'none', padding: '20px 22px 20px 22px', borderBottom: '1px solid #e2e8f0', marginBottom: '10px' }}>
+                    <div className="table-filter-grid">
+                        <div className="filter-group">
+                            <label className="filter-label">Search</label>
+                            <div className="search-input-wrapper">
+                                <Search size={16} className="search-icon" />
+                                <input className="form-control filter-input has-icon table-filter-search" placeholder="Username, mobile, vehicle, IMEI or SIM" value={filters.search} onChange={e => updateFilter('search', e.target.value)} />
+                            </div>
+                        </div>
+                        <SearchableDropdown label="Location" value={filters.location} options={[{ value: '', label: 'All' }, ...options.locations.map(location => ({ value: location, label: location }))]} onChange={value => updateFilter('location', value)} />
+                        <div className="filter-group">
+                            <label className="filter-label">From Date</label>
+                            <input type="date" className="form-control filter-input" value={filters.dateFrom} onChange={e => {
+                                if (filters.dateTo && e.target.value > filters.dateTo) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                updateFilter('dateFrom', e.target.value);
+                            }} />
+                        </div>
+                        <div className="filter-group">
+                            <label className="filter-label">To Date</label>
+                            <input type="date" className="form-control filter-input" value={filters.dateTo} onChange={e => {
+                                if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                                    showGlobalError('From Date cannot be later than To Date.');
+                                    return;
+                                }
+                                updateFilter('dateTo', e.target.value);
+                            }} />
+                        </div>
+                        <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />
+                        <SearchableDropdown label="Lead Closure" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosures.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
+                        <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, ...PAYMENT_STATUS_FILTERS]} onChange={value => updateFilter('payment', value)} />
+                        <SearchableDropdown label="Device Type" value={filters.deviceType} options={[{ value: '', label: 'All' }, ...options.deviceTypes.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('deviceType', value)} />
+                        <SearchableDropdown label="Validity" value={filters.validity} options={[{ value: '', label: 'All' }, ...options.validities.map(value => ({ value, label: `${value} Months` }))]} onChange={value => updateFilter('validity', value)} />
+                    </div>
+                    
+                    <div className="table-filter-actions">
+                        <button className="btn btn-primary table-filter-btn" onClick={fetchReports}><Search size={16} /> Search</button>
+                        <button className="btn btn-secondary table-filter-btn" onClick={() => setFilters(emptyFilters())}><RotateCcw size={16} /> Reset</button>
+                    </div>
+                </div>
+
                 <div className="table-container">
                     <table>
-                        <thead><tr><th>#</th><th>Username</th><th>Mobile No</th><th>Location</th><th>Vehicle No</th><th>Device / IMEI</th><th>SIM No</th><th>Installation Person</th><th>Installation Date</th><th>Lead Closure</th><th>Payment</th><th>Validity</th></tr></thead>
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Mobile No</th>
+                                <th>Location</th>
+                                <th>Vehicle No</th>
+                                <th>Device / IMEI</th>
+                                <th>SIM No</th>
+                                <th>Installation Person</th>
+                                <th>Installation Date</th>
+                                <th>Lead Closure</th>
+                                <th>Payment</th>
+                                <th>Validity</th>
+                            </tr>
+                        </thead>
                         <tbody>
-                            {loading ? <tr><td colSpan="12" className="text-center">Loading customer reports...</td></tr> : pagination.paginatedItems.length === 0 ? <tr><td colSpan="12" className="text-center empty-state">No customer reports found.</td></tr> : pagination.paginatedItems.map((row, index) => <tr key={row.id}><td>{(pagination.page - 1) * pagination.pageSize + index + 1}</td><td>{row.username || '-'}</td><td>{row.primary_mobile_no || '-'}</td><td>{row.location || '-'}</td><td>{row.vehicle_no || '-'}</td><td>{[row.device_type, row.imei_no].filter(Boolean).join(' / ') || '-'}</td><td>{[row.sim_no_1, row.sim_no_2].filter(Boolean).join(' / ') || '-'}</td><td>{row.installation_person || '-'}</td><td>{row.installation_date ? formatDate(row.installation_date) : '-'}</td><td>{row.lead_closure || '-'}</td><td>{row.payment_status || '-'}</td><td>{row.validity_months ? `${row.validity_months} Months` : '-'}</td></tr>)}
+                            {loading ? (
+                                <tr><td colSpan="11" className="text-center">Loading customer reports...</td></tr>
+                            ) : pagination.paginatedItems.length === 0 ? (
+                                <tr><td colSpan="11" className="text-center empty-state">No customer reports found.</td></tr>
+                            ) : (
+                                pagination.paginatedItems.map((row) => (
+                                    <tr key={row.id}>
+                                        <td>{row.username || '-'}</td>
+                                        <td>{row.primary_mobile_no || '-'}</td>
+                                        <td>{row.location || '-'}</td>
+                                        <td>{row.vehicle_no || '-'}</td>
+                                        <td>{[row.device_type, row.imei_no].filter(Boolean).join(' / ') || '-'}</td>
+                                        <td>{[row.sim_no_1, row.sim_no_2].filter(Boolean).join(' / ') || '-'}</td>
+                                        <td>{row.installation_person || '-'}</td>
+                                        <td>{row.installation_date ? formatDate(row.installation_date) : '-'}</td>
+                                        <td>{row.lead_closure || '-'}</td>
+                                        <td>{row.payment_status || '-'}</td>
+                                        <td>{row.validity_months ? `${row.validity_months} Months` : '-'}</td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
-                <Pagination page={pagination.page} setPage={pagination.setPage} pageSize={pagination.pageSize} setPageSize={pagination.setPageSize} totalItems={pagination.totalItems} />
+                <Pagination
+                    currentPage={pagination.page}
+                    pageSize={pagination.pageSize}
+                    totalItems={pagination.totalItems}
+                    onPageChange={pagination.setPage}
+                    onPageSizeChange={pagination.setPageSize}
+                    itemName="entries"
+                />
             </div>
         </div>
     );

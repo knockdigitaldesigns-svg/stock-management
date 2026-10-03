@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Eye, Edit, Trash2 } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
@@ -393,7 +393,7 @@ const SaleAmountsPage = () => {
                 <div>
                     <h2>Sale Amount</h2>
 
-                    <p>
+                    <p className="page-subtitle">
                         Manage sale amount options
                         for customer payments.
                     </p>
@@ -447,63 +447,59 @@ const SaleAmountsPage = () => {
             <div className="card">
 
                 {/* FILTERS */}
+                <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
+                    <div className="table-filter-grid">
 
-                <div className="table-filter-bar">
+                        {/* SEARCH */}
+                        <div className="filter-group">
+                            <label className="filter-label">Search</label>
+                            <div className="search-input-wrapper">
+                                <Search size={16} className="search-icon" />
+                                <input
+                                    type="text"
+                                    placeholder="Search Sale Amount"
+                                    value={search}
+                                    onChange={(event) => {
+                                        setSearch(event.target.value);
+                                        setPage(1);
+                                    }}
+                                    className="form-control filter-input has-icon table-filter-search"
+                                />
+                            </div>
+                        </div>
 
-                    {/* SEARCH */}
+                        {/* STATUS */}
+                        <div className="filter-group">
+                            <label className="filter-label">Status</label>
+                            <select
+                                value={statusFilter}
+                                onChange={(event) => {
+                                    setStatusFilter(event.target.value);
+                                    setPage(1);
+                                }}
+                                className="form-control filter-input"
+                            >
+                                <option value="">All Statuses</option>
+                                <option value="Active">Active</option>
+                                <option value="Inactive">Inactive</option>
+                            </select>
+                        </div>
 
-                    <input
-                        type="text"
-                        placeholder="Search Sale Amount"
-                        value={search}
-                        onChange={(event) => {
-                            setSearch(
-                                event.target.value
-                            );
-                            setPage(1);
-                        }}
-                        className="form-control table-filter-search"
-                    />
-
-                    {/* STATUS */}
-
-                    <select
-                        value={statusFilter}
-                        onChange={(event) => {
-                            setStatusFilter(
-                                event.target.value
-                            );
-                            setPage(1);
-                        }}
-                        className="form-control"
-                    >
-
-                        <option value="">
-                            All Statuses
-                        </option>
-
-                        <option value="Active">
-                            Active
-                        </option>
-
-                        <option value="Inactive">
-                            Inactive
-                        </option>
-
-                    </select>
-
-                    {/* RESET */}
-
-                    <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={
-                            resetFilters
-                        }
-                    >
-                        Reset Filters
-                    </button>
-
+                    </div>
+                    
+                    {/* RESET & SEARCH */}
+                    <div className="table-filter-actions">
+                        <button type="button" className="btn btn-primary table-filter-btn" onClick={() => setPage(1)}>
+                            <Search size={16} /> Search
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-secondary table-filter-btn"
+                            onClick={resetFilters}
+                        >
+                            <RotateCcw size={16} /> Reset
+                        </button>
+                    </div>
                 </div>
 
                 {/* =================================================

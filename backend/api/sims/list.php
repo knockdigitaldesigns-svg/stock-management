@@ -26,8 +26,10 @@ if (!$conn) {
 */
 
 $where = [];
-$params = [];
-$types = '';
+$customerId = max(0, (int) ($_GET['customer_id'] ?? 0));
+$vehicleId = max(0, (int) ($_GET['vehicle_id'] ?? 0));
+$params = [$customerId, $customerId, $customerId, $vehicleId, $vehicleId];
+$types = 'iiiii';
 
 /*
  * Search
@@ -146,9 +148,26 @@ $sql = '
             ELSE s.status
         END AS status,
 
+                EXISTS (
+                        SELECT 1
+                        FROM customer_vehicle_details assigned
+                        WHERE (assigned.sim_id_1 = s.id OR assigned.sim_id_2 = s.id)
+                            AND (? = 0 OR assigned.customer_id <> ?)
+                ) AS is_assigned_to_another_customer,
+
+                EXISTS (
+                        SELECT 1
+                        FROM customer_vehicle_details assigned
+                        WHERE (assigned.sim_id_1 = s.id OR assigned.sim_id_2 = s.id)
+                            AND assigned.customer_id = ?
+                            AND ? > 0
+                            AND assigned.id = ?
+                ) AS is_assigned_to_current_customer,
+
         sa.allocation_date,
         sa.owner_type,
         sa.owner_id,
+                dl.installation_status AS owner_installation_status,
         sa.payment_status,
         sa.software,
 

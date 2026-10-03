@@ -74,11 +74,12 @@
     table-layout: fixed;
 }
 
-.history-table th:nth-child(1) { width: 150px; }
+.history-table th:nth-child(1) { width: 185px; }
 .history-table th:nth-child(2) { width: 150px; }
-.history-table th:nth-child(3) { width: 90px; }
-.history-table th:nth-child(4) { width: 320px; }
-.history-table th:nth-child(7) { width: 140px; }
+.history-table th:nth-child(3) { width: 110px; }
+.history-table th:nth-child(4) { width: 300px; }
+.history-table th:nth-child(5) { width: 150px; }
+.history-table th:nth-child(6) { width: 90px; }
 
 .history-date {
     white-space: nowrap;

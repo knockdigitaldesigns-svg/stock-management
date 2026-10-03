@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import api from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -33,7 +34,20 @@ export const AuthProvider = ({ children }) => {
         setPermissions(permissionList);
     };
 
-    const logout = () => {
+    const updatePermissions = useCallback((permissionList) => {
+        setPermissions(Array.isArray(permissionList) ? permissionList : []);
+    }, []);
+
+    const logout = async () => {
+        const token = localStorage.getItem('token');
+        try {
+            if (token) {
+                await api.post('/auth/logout.php', {}, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    skipGlobalError: true
+                });
+            }
+        } catch {}
         setUser(null);
         setPermissions([]);
         localStorage.removeItem('token');
@@ -41,11 +55,29 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('permissions');
     };
 
-    const hasPermission = (permissionKey) => {
+    const hasPermission = useCallback((permissionKey) => {
         if (!permissionKey) return true;
-        if (!permissions || !Array.isArray(permissions)) return false;
-        return permissions.includes(permissionKey);
-    };
+        const requested = String(permissionKey).trim();
+        const allowed = Array.isArray(permissions) ? permissions.map((item) => String(item).trim()) : [];
+
+        if (!requested || !allowed.length) {
+            return false;
+        }
+
+        if (allowed.includes(requested)) {
+            return true;
+        }
+
+        const [module, action] = requested.split('.');
+        if (!module || !action) {
+            return false;
+        }
+
+        const singularModule = module.endsWith('s') ? module.slice(0, -1) : module;
+        const pluralModule = module.endsWith('s') ? module : `${module}s`;
+
+        return allowed.includes(`${singularModule}.${action}`) || allowed.includes(`${pluralModule}.${action}`);
+    }, [permissions]);
 
     const isAuthenticated = Boolean(user && localStorage.getItem('token'));
 
@@ -55,10 +87,11 @@ export const AuthProvider = ({ children }) => {
         isAuthenticated,
         login,
         logout,
+        updatePermissions,
         hasPermission,
         role: user?.role ?? null,
         currentUser: user
-    }), [user, permissions, isAuthenticated]);
+    }), [user, permissions, isAuthenticated, updatePermissions, hasPermission]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

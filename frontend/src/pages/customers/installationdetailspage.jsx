@@ -18,6 +18,8 @@ const initialForm = {
     installation_date: ''
 };
 
+const ownerMismatchMessage = 'Device and SIM are allocated to different persons. Please use Stock Transfer to move them to the same person before installation.';
+
 const extractList = (response, keys = []) => {
     const responseData = response?.data;
 
@@ -70,6 +72,9 @@ const InstallationDetailsPage = () => {
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
     const [currentOwnerLoading, setCurrentOwnerLoading] = useState(false);
     const [currentOwnerResolved, setCurrentOwnerResolved] = useState(false);
+    const [sameAllocatedOwner, setSameAllocatedOwner] = useState(false);
+    const [currentOwnerName, setCurrentOwnerName] = useState('');
+    const [assetOwnerMismatch, setAssetOwnerMismatch] = useState(false);
 
     const [newVehicleFlow, setNewVehicleFlow] = useState(false);
     const isEditMode = Boolean(customerId) && !newVehicleFlow;
@@ -260,12 +265,19 @@ const InstallationDetailsPage = () => {
     const loadSavedInstallationData = async () => {
         if (!customerId) {
             setCurrentOwnerResolved(false);
+            setSameAllocatedOwner(false);
+            setCurrentOwnerName('');
+            setAssetOwnerMismatch(false);
             setForm(initialForm);
             return;
         }
 
         try {
             setCurrentOwnerResolved(false);
+            setCurrentOwnerLoading(true);
+            setSameAllocatedOwner(false);
+            setCurrentOwnerName('');
+            setAssetOwnerMismatch(false);
             const stored = JSON.parse(
                 sessionStorage.getItem(
                     storageKey
@@ -274,27 +286,38 @@ const InstallationDetailsPage = () => {
 
             if (stored.new_vehicle_flow || stored.append_vehicle) {
                 setNewVehicleFlow(true);
-                setCurrentOwnerLoading(true);
+                const vehicleParam = stored.vehicle_record_id
+                    ? `&vehicle_id=${encodeURIComponent(stored.vehicle_record_id)}`
+                    : '';
                 const response = await api.get(
-                    `/customers/details.php?customer_id=${encodeURIComponent(customerId)}`
+                    `/customers/details.php?customer_id=${encodeURIComponent(customerId)}${vehicleParam}`
                 );
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Unable to load the selected customer vehicle.');
+                }
                 const vehicle = response.data?.data?.vehicle || {};
+                if (stored.vehicle_record_id && Number(vehicle.id) !== Number(stored.vehicle_record_id)) {
+                    setCurrentOwnerLoading(false);
+                    triggerError('Selected customer vehicle was not found.');
+                    return;
+                }
                 const deviceOwner = vehicle.device_owner_type && vehicle.device_owner_id
-                    ? { type: String(vehicle.device_owner_type).toLowerCase(), id: Number(vehicle.device_owner_id), status: vehicle.device_owner_installation_status }
+                    ? { type: String(vehicle.device_owner_type).toLowerCase(), id: Number(vehicle.device_owner_id), status: vehicle.device_owner_installation_status, name: vehicle.device_owner_name || '' }
                     : null;
                 const simOwner = vehicle.sim_owner_type && vehicle.sim_owner_id
-                    ? { type: String(vehicle.sim_owner_type).toLowerCase(), id: Number(vehicle.sim_owner_id), status: vehicle.sim_owner_installation_status }
+                    ? { type: String(vehicle.sim_owner_type).toLowerCase(), id: Number(vehicle.sim_owner_id), status: vehicle.sim_owner_installation_status, name: vehicle.sim_owner_name || '' }
                     : null;
 
                 if (deviceOwner && simOwner && (deviceOwner.type !== simOwner.type || deviceOwner.id !== simOwner.id)) {
                     setCurrentOwnerLoading(false);
-                    setCurrentOwnerResolved(false);
+                    setCurrentOwnerResolved(true);
+                    setAssetOwnerMismatch(true);
                     setForm({ ...initialForm, ...(stored.step3 || {}), installation_person_type: '', installation_person_id: '' });
-                    triggerError('Device and SIM are allocated to different persons. Please transfer the device/SIM to the same owner before proceeding.');
+                    triggerError(ownerMismatchMessage);
                     return;
                 }
 
-                const currentOwner = deviceOwner || simOwner;
+                const currentOwner = deviceOwner && simOwner ? deviceOwner : null;
                 const ownerType = currentOwner
                     ? currentOwner.type === 'technician'
                         ? 'Technician'
@@ -302,12 +325,14 @@ const InstallationDetailsPage = () => {
                             ? 'Offsite Dealer'
                             : 'Onsite Dealer'
                     : '';
+                setSameAllocatedOwner(Boolean(currentOwner));
+                setCurrentOwnerName(currentOwner?.name || '');
                 setCurrentOwnerResolved(true);
                 setCurrentOwnerLoading(false);
                 setForm({
                     ...(stored.step3 || initialForm),
-                    installation_person_type: ownerType,
-                    installation_person_id: currentOwner ? String(currentOwner.id) : '',
+                    installation_person_type: ownerType || stored.step3?.installation_person_type || '',
+                    installation_person_id: currentOwner ? String(currentOwner.id) : stored.step3?.installation_person_id || '',
                     installation_date: '',
                     lead_closure_id: ''
                 });
@@ -323,12 +348,11 @@ const InstallationDetailsPage = () => {
              * Otherwise fetch from backend.
              */
             const response = await api.get(
-                `/customers/details.php?customer_id=${encodeURIComponent(
-                    customerId
-                )}`
+                `/customers/details.php?customer_id=${encodeURIComponent(customerId)}${stored.vehicle_record_id ? `&vehicle_id=${encodeURIComponent(stored.vehicle_record_id)}` : ''}`
             );
 
             if (!response.data?.success) {
+                setCurrentOwnerLoading(false);
                 return;
             }
 
@@ -336,21 +360,29 @@ const InstallationDetailsPage = () => {
                 response.data?.data?.installation ||
                 {};
             const vehicle = response.data?.data?.vehicle || {};
+            if (stored.vehicle_record_id && Number(vehicle.id) !== Number(stored.vehicle_record_id)) {
+                setCurrentOwnerLoading(false);
+                triggerError('Selected customer vehicle was not found.');
+                return;
+            }
             const deviceOwner = vehicle.device_owner_type && vehicle.device_owner_id
-                ? { type: String(vehicle.device_owner_type).toLowerCase(), id: Number(vehicle.device_owner_id), status: vehicle.device_owner_installation_status }
+                ? { type: String(vehicle.device_owner_type).toLowerCase(), id: Number(vehicle.device_owner_id), status: vehicle.device_owner_installation_status, name: vehicle.device_owner_name || '' }
                 : null;
             const simOwner = vehicle.sim_owner_type && vehicle.sim_owner_id
-                ? { type: String(vehicle.sim_owner_type).toLowerCase(), id: Number(vehicle.sim_owner_id), status: vehicle.sim_owner_installation_status }
+                ? { type: String(vehicle.sim_owner_type).toLowerCase(), id: Number(vehicle.sim_owner_id), status: vehicle.sim_owner_installation_status, name: vehicle.sim_owner_name || '' }
                 : null;
             if (deviceOwner && simOwner && (deviceOwner.type !== simOwner.type || deviceOwner.id !== simOwner.id)) {
-                setCurrentOwnerResolved(false);
-                triggerError(!deviceOwner || !simOwner
-                    ? 'Unable to determine the current Device/SIM owner.'
-                    : 'Device and SIM are allocated to different persons. Please transfer the device/SIM to the same owner before proceeding.');
+                setCurrentOwnerResolved(true);
+                setAssetOwnerMismatch(true);
+                setForm({ ...initialForm, ...(stored.step3 || {}), installation_person_type: '', installation_person_id: '' });
+                setCurrentOwnerLoading(false);
+                triggerError(ownerMismatchMessage);
                 return;
             }
             setCurrentOwnerResolved(true);
-            const currentOwner = deviceOwner || simOwner;
+            const currentOwner = deviceOwner && simOwner ? deviceOwner : null;
+            setSameAllocatedOwner(Boolean(currentOwner));
+            setCurrentOwnerName(currentOwner?.name || '');
             const selectedOwnerType = currentOwner?.type || '';
             const selectedOwnerId = currentOwner?.id || '';
             const ownerInstallationStatus = currentOwner?.status || '';
@@ -382,6 +414,7 @@ const InstallationDetailsPage = () => {
             };
 
             setForm(nextForm);
+            setCurrentOwnerLoading(false);
 
             sessionStorage.setItem(
                 storageKey,
@@ -395,6 +428,7 @@ const InstallationDetailsPage = () => {
         } catch (err) {
             setCurrentOwnerLoading(false);
             setCurrentOwnerResolved(false);
+            setSameAllocatedOwner(false);
             console.error(
                 'Saved installation data loading error:',
                 err
@@ -478,8 +512,11 @@ const InstallationDetailsPage = () => {
      * ---------------------------------------------------------
      */
     const validateForm = () => {
-        if (newVehicleFlow && !currentOwnerResolved) {
-            return 'Device and SIM are allocated to different persons. Please transfer the device/SIM to the same owner before proceeding.';
+        if (assetOwnerMismatch) {
+            return ownerMismatchMessage;
+        }
+        if (!currentOwnerResolved) {
+            return 'Unable to verify the current Device and SIM owners. Please retry before continuing.';
         }
         if (!form.installation_person_type) {
             return 'Installation Type is required.';
@@ -609,9 +646,7 @@ const InstallationDetailsPage = () => {
 
             const payload = {
                 customer_id: Number(customerId),
-                vehicle_id: stored.new_vehicle_flow
-                    ? Number(stored.vehicle_record_id || 0)
-                    : 0,
+                vehicle_id: Number(stored.vehicle_record_id || 0),
                 installation_person_type: form.installation_person_type,
                 installation_person_id: Number(form.installation_person_id),
                 lead_closure_id: Number(form.lead_closure_id),
@@ -887,7 +922,7 @@ const InstallationDetailsPage = () => {
                                 value={form.installation_person_type}
                                 onChange={handleInstallationTypeChange}
                                 className="form-control"
-                                disabled={loading || saving || currentOwnerLoading || (currentOwnerResolved && Boolean(form.installation_person_id))}
+                                disabled={loading || saving || currentOwnerLoading || sameAllocatedOwner}
                             >
                                 <option value="">Select Installation Type</option>
                                 <option value="Technician">Technician</option>
@@ -912,7 +947,7 @@ const InstallationDetailsPage = () => {
                                 value={form.installation_person_id}
                                 onChange={handleInstallationPersonChange}
                                 className="form-control"
-                                disabled={loading || saving || currentOwnerLoading || (currentOwnerResolved && Boolean(form.installation_person_id))}
+                                disabled={loading || saving || currentOwnerLoading || sameAllocatedOwner}
                             >
                                 <option value="">
                                     {getPersonPlaceholder()}
@@ -930,7 +965,7 @@ const InstallationDetailsPage = () => {
                                         (item) => String(item.id) === String(form.installation_person_id)
                                     ) && (
                                         <option value={form.installation_person_id}>
-                                            {getPersonLabel()} #{form.installation_person_id}
+                                            {currentOwnerName || `${getPersonLabel()} #${form.installation_person_id}`}
                                         </option>
                                     )}
                             </select>

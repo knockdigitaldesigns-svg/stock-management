@@ -10,6 +10,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 requirePermission('permissions.view');
+ensurePermissionDefinitions([
+    'courier.view', 'courier.add', 'courier.edit', 'courier.delete', 'courier.approve',
+    'stock_management.edit', 'stock_management.delete',
+    'stock_transfer.edit', 'stock_transfer.delete',
+    'reports.export', 'renewals.delete'
+]);
 
 $db = new Database();
 $conn = $db->getConnection();

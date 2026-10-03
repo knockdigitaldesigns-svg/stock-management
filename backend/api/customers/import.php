@@ -6,6 +6,7 @@ require_once '../../utils/validation.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
+require_once '../../utils/date.php';
 require_once '../../utils/payment_modes.php';
 
 handlePreflight();
@@ -423,30 +424,7 @@ if ($res) {
 */
 
 $normalizeDate = function ($rawDate) {
-    $raw = trim((string) $rawDate);
-    if ($raw === '') return '';
-    if (is_numeric($raw) && (float) $raw > 1000) {
-        return excelSerialDateToIso($raw);
-    }
-    // DD-MM-YYYY or DD/MM/YYYY
-    if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/', $raw, $m)) {
-        $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
-        $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
-        $year = $m[3];
-        if (checkdate((int) $month, (int) $day, (int) $year)) {
-            return "{$year}-{$month}-{$day}";
-        }
-    }
-    // YYYY-MM-DD
-    if (preg_match('/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/', $raw, $m)) {
-        $year = $m[1];
-        $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
-        $day = str_pad($m[3], 2, '0', STR_PAD_LEFT);
-        if (checkdate((int) $month, (int) $day, (int) $year)) {
-            return "{$year}-{$month}-{$day}";
-        }
-    }
-    return false;
+    return parseAndNormalizeDate($rawDate);
 };
 
 /*

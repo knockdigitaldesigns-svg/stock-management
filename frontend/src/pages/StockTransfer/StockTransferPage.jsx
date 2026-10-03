@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ArrowLeftRight, Eye, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
 import usePagination from '../../hooks/usePagination';
@@ -19,7 +19,7 @@ const emptyFilters = () => ({
 });
 
 const StockTransferPage = () => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, permissions } = useAuth();
 
     // --------------------------------------------------
     // TABLE STATE
@@ -276,7 +276,10 @@ const StockTransferPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Stock Transfer</h2>
+                <div>
+                    <h2>Stock Transfer</h2>
+                    <p className="page-subtitle">Transfer devices and SIMs between stock owners.</p>
+                </div>
                 <div className="header-actions">
                     {canDoTransfer && (
                         <button className="btn btn-primary" onClick={openModal}>
@@ -286,115 +289,109 @@ const StockTransferPage = () => {
                 </div>
             </div>
 
-            {/* ---- FILTERS ---- */}
-            <div className="card stock-transfer-filter-card">
-                <div className="table-filter-bar stock-transfer-filters">
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Original Owner
-                        </label>
-                        <input
-                            className="form-control"
-                            placeholder="Original owner..."
-                            value={filters.fromOwner}
-                            onChange={e => setFilters(f => ({ ...f, fromOwner: e.target.value }))}
-                            style={{ minWidth: '160px' }}
-                        />
+            {/* ---- FILTERS + TABLE ---- */}
+            <div className="card">
+                <div className="table-filter-card">
+                    <div className="table-filter-grid">
+
+                        <div className="filter-group">
+                            <label className="filter-label">Original Owner</label>
+                            <input
+                                className="form-control filter-input"
+                                placeholder="Original owner..."
+                                value={filters.fromOwner}
+                                onChange={e => setFilters(f => ({ ...f, fromOwner: e.target.value }))}
+                            />
+                        </div>
+
+                        <div className="filter-group">
+                            <label className="filter-label">Search (Owner / IMEI / SIM)</label>
+                            <div className="search-input-wrapper">
+                                <Search size={16} className="search-icon" />
+                                <input
+                                    className="form-control filter-input has-icon table-filter-search"
+                                    placeholder="Search..."
+                                    value={filters.search}
+                                    onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="filter-group">
+                            <label className="filter-label">Original Owner Type</label>
+                            <select
+                                className="form-control filter-input"
+                                value={filters.fromOwnerType}
+                                onChange={e => setFilters(f => ({ ...f, fromOwnerType: e.target.value }))}
+                            >
+                                <option value="">All</option>
+                                <option value="technician">Technician</option>
+                                <option value="dealer">Dealer</option>
+                            </select>
+                        </div>
+
+                        <div className="filter-group">
+                            <label className="filter-label">Transfer To</label>
+                            <input
+                                className="form-control filter-input"
+                                placeholder="Transferred to..."
+                                value={filters.toOwner}
+                                onChange={e => setFilters(f => ({ ...f, toOwner: e.target.value }))}
+                            />
+                        </div>
+
+                        <div className="filter-group">
+                            <label className="filter-label">From Date</label>
+                            <input
+                                type="date"
+                                className="form-control filter-input"
+                                value={filters.dateFrom}
+                                onChange={e => {
+                                    if (filters.dateTo && e.target.value > filters.dateTo) {
+                                        showGlobalError('From Date cannot be later than To Date.');
+                                        return;
+                                    }
+                                    setFilters(f => ({ ...f, dateFrom: e.target.value }));
+                                }}
+                            />
+                        </div>
+
+                        <div className="filter-group">
+                            <label className="filter-label">To Date</label>
+                            <input
+                                type="date"
+                                className="form-control filter-input"
+                                value={filters.dateTo}
+                                onChange={e => {
+                                    if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                                        showGlobalError('From Date cannot be later than To Date.');
+                                        return;
+                                    }
+                                    setFilters(f => ({ ...f, dateTo: e.target.value }));
+                                }}
+                            />
+                        </div>
                     </div>
 
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Search (Owner / IMEI / SIM)
-                        </label>
-                        <input
-                            className="form-control"
-                            placeholder="Search..."
-                            value={filters.search}
-                            onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-                            style={{ minWidth: '200px' }}
-                        />
-                    </div>
-
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Original Owner Type
-                        </label>
-                        <select
-                            className="form-control"
-                            value={filters.fromOwnerType}
-                            onChange={e => setFilters(f => ({ ...f, fromOwnerType: e.target.value }))}
+                    <div className="table-filter-actions">
+                        <button className="btn btn-primary table-filter-btn" onClick={() => {}}>
+                            <Search size={16} /> Search
+                        </button>
+                        <button
+                            className="btn btn-secondary table-filter-btn"
+                            onClick={() => setFilters(emptyFilters())}
                         >
-                            <option value="">All</option>
-                            <option value="technician">Technician</option>
-                            <option value="dealer">Dealer</option>
-                        </select>
+                            <RotateCcw size={16} /> Reset
+                        </button>
                     </div>
-
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Transfer To
-                        </label>
-                        <input
-                            className="form-control"
-                            placeholder="Transferred to..."
-                            value={filters.toOwner}
-                            onChange={e => setFilters(f => ({ ...f, toOwner: e.target.value }))}
-                            style={{ minWidth: '160px' }}
-                        />
-                    </div>
-
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Date From
-                        </label>
-                        <input
-                            type="date"
-                            className="form-control"
-                            value={filters.dateFrom}
-                            onChange={e => {
-                                if (filters.dateTo && e.target.value > filters.dateTo) {
-                                    showGlobalError('From Date cannot be later than To Date.');
-                                    return;
-                                }
-                                setFilters(f => ({ ...f, dateFrom: e.target.value }));
-                            }}
-                        />
-                    </div>
-
-                    <div>
-                        <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#64748b' }}>
-                            Date To
-                        </label>
-                        <input
-                            type="date"
-                            className="form-control"
-                            value={filters.dateTo}
-                            onChange={e => {
-                                if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
-                                    showGlobalError('From Date cannot be later than To Date.');
-                                    return;
-                                }
-                                setFilters(f => ({ ...f, dateTo: e.target.value }));
-                            }}
-                        />
-                    </div>
-
-                    <button
-                        className="btn btn-secondary"
-                        onClick={() => setFilters(emptyFilters())}
-                    >
-                        Reset Filters
-                    </button>
                 </div>
-            </div>
 
             {/* ---- TABLE ---- */}
-            <div className="card">
                 <div className="table-container">
                     <table>
                         <thead>
                             <tr>
-                                <th>#</th>
+                                {/* <th>#</th> */}
                                 <th>Original Allocated Person</th>
                                 <th>Owner Type</th>
                                 <th>Device / IMEI No</th>
@@ -408,36 +405,40 @@ const StockTransferPage = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="9" className="text-center">Loading transfer records...</td>
+                                    <td colSpan="8" className="text-center">Loading transfer records...</td>
                                 </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="9" className="text-center empty-state">
+                                    <td colSpan="8" className="text-center empty-state">
                                         No stock transfer records found.
                                     </td>
                                 </tr>
                             ) : (
                                 paginatedItems.map((row, idx) => (
                                     <tr key={row.id}>
-                                        <td>{(page - 1) * pageSize + idx + 1}</td>
-                                        <td>{row.from_owner_name || '-'}</td>
-                                        <td style={{ textTransform: 'capitalize' }}>{row.from_owner_type || '-'}</td>
-                                        <td>{row.imei_no && row.imei_no !== '-' ? row.imei_no : '-'}</td>
-                                        <td>{row.sim_no && row.sim_no !== '-' ? row.sim_no : '-'}</td>
-                                        <td>{row.to_owner_name || '-'}</td>
+                                        {/* <td>{(page - 1) * pageSize + idx + 1}</td> */}
+                                        <td className="truncate-cell" title={row.from_owner_name}>{row.from_owner_name || '-'}</td>
+                                        <td>
+                                            <span className={`badge ${row.from_owner_type === 'dealer' ? 'badge-info' : 'badge-warning'}`} style={{ textTransform: 'capitalize' }}>
+                                                {row.from_owner_type || '-'}
+                                            </span>
+                                        </td>
+                                        <td className="truncate-cell" title={row.imei_no}>{row.imei_no && row.imei_no !== '-' ? row.imei_no : '-'}</td>
+                                        <td className="truncate-cell" title={row.sim_no}>{row.sim_no && row.sim_no !== '-' ? row.sim_no : '-'}</td>
+                                        <td className="truncate-cell" title={row.to_owner_name}>{row.to_owner_name || '-'}</td>
                                         <td>{row.transfer_date ? formatDate(row.transfer_date) : '-'}</td>
                                         <td>
-                                            <span className="badge badge-info">
+                                            <span className="badge badge-success">
                                                 {row.new_status || 'Allocated'}
                                             </span>
                                         </td>
                                         <td>
-                                            <div className="actions-cell">
+                                            <div className="action-buttons">
                                                 <button className="icon-btn view" title="View" onClick={() => setViewTarget(row)}><Eye size={16} /></button>
                                                 {hasPermission('stock_transfer.edit') && (
                                                     <button className="icon-btn edit" title="Edit" onClick={() => { setEditTarget(row); setEditNotes(row.notes || ''); }}><Edit size={16} /></button>
                                                 )}
-                                                {hasPermission('stock_transfer.delete') && (
+                                                {Array.isArray(permissions) && permissions.includes('stock_transfer.delete') && (
                                                     <button className="icon-btn delete" title="Delete" onClick={() => setDeleteTarget(row)}><Trash2 size={16} /></button>
                                                 )}
                                             </div>
@@ -450,11 +451,12 @@ const StockTransferPage = () => {
                 </div>
 
                 <Pagination
-                    page={page}
-                    setPage={setPage}
+                    currentPage={page}
                     pageSize={pageSize}
-                    setPageSize={setPageSize}
                     totalItems={totalItems}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    itemName="transfer records"
                 />
             </div>
 

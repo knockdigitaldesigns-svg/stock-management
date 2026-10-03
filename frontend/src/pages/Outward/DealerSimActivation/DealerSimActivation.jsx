@@ -108,107 +108,119 @@ const DealerSimActivation = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h1>Dealer SIM Activation</h1>
+                <div>
+                    <h1>Dealer SIM Activation</h1>
+                    <p className="page-subtitle">Review and manage SIM activation records for dealers.</p>
+                </div>
             </div>
 
-            <TableFilterBar
-                filters={filters}
-                onChange={handleFilterChange}
-                onReset={() => {
-                    setFilters({
-                        search: '',
-                        dealer_id: '',
-                        simType: '',
-                        status: '',
-                        given_date: '',
-                        given_date_operator: 'exact',
-                        activation_date: '',
-                        activation_date_operator: 'exact',
-                        simValidity: ''
-                    });
-                    setPage(1);
-                }}
-                searchPlaceholder="Search SIM Number..."
-                dealerOptions={masters.dealers.map(d => ({ value: d.id, label: d.dealer_name }))}
-                simTypeOptions={masters.simTypes.map(t => t.sim_type)}
-                statusOptions={['Available', 'Active', 'Deactive']}
-                simValidityOptions={masters.simValidities.map(v => `${v.months} Months`)}
-                customDateFilters={[
-                    { key: 'given_date', label: 'Given Date' },
-                    { key: 'activation_date', label: 'Activation Date' }
-                ]}
-            />
+            <div className="card">
+                <TableFilterBar
+                    filters={filters}
+                    onChange={handleFilterChange}
+                    onReset={() => {
+                        setFilters({
+                            search: '',
+                            dealer_id: '',
+                            simType: '',
+                            status: '',
+                            given_date: '',
+                            given_date_operator: 'exact',
+                            activation_date: '',
+                            activation_date_operator: 'exact',
+                            simValidity: ''
+                        });
+                        setPage(1);
+                    }}
+                    searchPlaceholder="Search SIM Number..."
+                    dealerOptions={masters.dealers.map(d => ({ value: d.id, label: d.dealer_name }))}
+                    simTypeOptions={masters.simTypes.map(t => t.sim_type)}
+                    statusOptions={['Available', 'Active', 'Deactive']}
+                    simValidityOptions={masters.simValidities.map(v => `${v.months} Months`)}
+                    customDateFilters={[
+                        { key: 'given_date', label: 'Given Date' },
+                        { key: 'activation_date', label: 'Activation Date' }
+                    ]}
+                />
 
-            {error && <div className="alert alert-danger">{error}</div>}
+                {error && <div className="alert alert-danger">{error}</div>}
 
-            <div className="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>S.No</th>
-                            <th>Dealer Name</th>
-                            <th>SIM Number</th>
-                            <th>Given Date</th>
-                            <th>Activation Date</th>
-                            <th>Expiry Date</th>
-                            <th>SIM Type</th>
-                            <th>Validity</th>
-                            <th>SIM Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
+                <div className="table-container">
+                    <table>
+                        <thead>
                             <tr>
-                                <td colSpan="10" className="text-center">Loading...</td>
+                                <th>S.No</th>
+                                <th>Dealer Name</th>
+                                <th>SIM Number</th>
+                                <th>Given Date</th>
+                                <th>Activation Date</th>
+                                <th>Expiry Date</th>
+                                <th>SIM Type</th>
+                                <th>Validity</th>
+                                <th>SIM Status</th>
+                                <th>Actions</th>
                             </tr>
-                        ) : sims.length === 0 ? (
-                            <tr>
-                                <td colSpan="10" className="text-center">No SIMs found</td>
-                            </tr>
-                        ) : (
-                            sims.map((sim, index) => (
-                                <tr key={sim.allocation_id}>
-                                    <td>{(page - 1) * pageSize + index + 1}</td>
-                                    <td>{sim.dealer_name}</td>
-                                    <td>{sim.sim_no}</td>
-                                    <td>{formatDate(sim.given_date)}</td>
-                                    <td>{formatDate(sim.activation_date)}</td>
-                                    <td>{formatDate(sim.expiry_date)}</td>
-                                    <td>{sim.sim_type || '-'}</td>
-                                    <td>{sim.validity_months ? `${sim.validity_months} Months` : '-'}</td>
-                                    <td>
-                                        <span className={`status-badge status-${(sim.sim_status || 'Available').toLowerCase()}`}>
-                                            {sim.sim_status || 'Available'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div className="action-buttons">
-                                            <Can permission="dealers.edit">
-                                                <button
-                                                    className="icon-btn edit"
-                                                    onClick={() => setEditingSim(sim)}
-                                                    title="Edit SIM Activation"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                            </Can>
-                                        </div>
-                                    </td>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="10" className="text-center">Loading SIMs...</td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                            ) : sims.length === 0 ? (
+                                <tr>
+                                    <td colSpan="10" className="text-center empty-state">No SIMs found</td>
+                                </tr>
+                            ) : (
+                                sims.map((sim, index) => (
+                                    <tr key={sim.allocation_id}>
+                                        <td>{(page - 1) * pageSize + index + 1}</td>
+                                        <td className="truncate-cell" title={sim.dealer_name}>{sim.dealer_name}</td>
+                                        <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
+                                        <td>{formatDate(sim.given_date)}</td>
+                                        <td>{formatDate(sim.activation_date)}</td>
+                                        <td>{formatDate(sim.expiry_date)}</td>
+                                        <td>{sim.sim_type || '-'}</td>
+                                        <td>{sim.validity_months ? `${sim.validity_months} Months` : '-'}</td>
+                                        <td>
+                                            <span className={`badge ${
+                                                (sim.sim_status || 'Available').toLowerCase() === 'active'
+                                                    ? 'badge-success'
+                                                    : (sim.sim_status || '').toLowerCase() === 'deactive'
+                                                        ? 'badge-danger'
+                                                        : 'badge-info'
+                                            }`}>
+                                                {sim.sim_status || 'Available'}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div className="action-buttons">
+                                                <Can permission="dealers.edit">
+                                                    <button
+                                                        className="icon-btn edit"
+                                                        onClick={() => setEditingSim(sim)}
+                                                        title="Edit SIM Activation"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                </Can>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
 
-            <Pagination
-                currentPage={page}
-                pageSize={pageSize}
-                totalItems={totalRecords}
-                onPageChange={setPage}
-                onPageSizeChange={setPageSize}
-            />
+                <Pagination
+                    currentPage={page}
+                    pageSize={pageSize}
+                    totalItems={totalRecords}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    itemName="SIMs"
+                />
+            </div>
 
             {editingSim && (
                 <DealerSimActivationEditModal

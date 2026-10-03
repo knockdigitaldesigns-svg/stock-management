@@ -61,6 +61,14 @@ $conn->query("CREATE TABLE IF NOT EXISTS cash_collection_settlement_allocations 
 	FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 $conn->query("ALTER TABLE customer_installations ADD COLUMN IF NOT EXISTS vehicle_id INT DEFAULT NULL AFTER customer_id");
+$installationPersonIdColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'installation_person_id'");
+if ($installationPersonIdColumn && ($column = $installationPersonIdColumn->fetch_assoc()) && $column['Null'] !== 'YES') {
+	$conn->query("ALTER TABLE customer_installations MODIFY COLUMN installation_person_id INT DEFAULT NULL");
+}
+$installationLeadClosureColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'lead_closure_id'");
+if ($installationLeadClosureColumn && ($column = $installationLeadClosureColumn->fetch_assoc()) && $column['Null'] !== 'YES') {
+	$conn->query("ALTER TABLE customer_installations MODIFY COLUMN lead_closure_id INT UNSIGNED DEFAULT NULL");
+}
 $conn->query("ALTER TABLE customer_payments ADD COLUMN IF NOT EXISTS vehicle_id INT DEFAULT NULL AFTER customer_id");
 $conn->query("ALTER TABLE customer_installations DROP INDEX IF EXISTS uq_customer_installation_customer");
 $conn->query("ALTER TABLE customer_payments DROP INDEX IF EXISTS uq_customer_payment_customer");

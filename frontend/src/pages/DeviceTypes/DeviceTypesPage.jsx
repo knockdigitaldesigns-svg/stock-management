@@ -127,7 +127,10 @@ const DeviceTypesPage = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Device Types</h2>
+                <div>
+                    <h2>Device Types</h2>
+                    <p className="page-subtitle">Manage the device categories used across inventory.</p>
+                </div>
                 <div className="header-actions">
                     {hasPermission('device_types.add') && (
                         <button className="btn btn-primary" onClick={() => openModal()}>
@@ -247,22 +250,22 @@ const DeviceTypesPage = () => {
                             className="form-control"
                             value={value}
                             onChange={(event) => setValue(event.target.value)}
+                            placeholder="Enter device type"
                             autoFocus
                         />
-                        <div className="form-group">
-    <label className="form-label">Status *</label>
-
-    <select
-        className="form-control"
-        value={status}
-        onChange={(event) => setStatus(event.target.value)}
-    >
-        <option value="Active">Active</option>
-        <option value="Inactive">Inactive</option>
-    </select>
-</div>
-                        {error && <div className="text-danger">{error}</div>}
                     </div>
+                    <div className="form-group">
+                        <label className="form-label">Status *</label>
+                        <select
+                            className="form-control"
+                            value={status}
+                            onChange={(event) => setStatus(event.target.value)}
+                        >
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+                    {error && <div className="text-danger" style={{ marginTop: '8px' }}>{error}</div>}
                 </Modal>
             )}
 

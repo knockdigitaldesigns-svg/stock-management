@@ -158,8 +158,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         try {
             const arrayBuffer = await file.arrayBuffer();
             workbook = XLSX.read(arrayBuffer, {
-                type: 'array',
-                cellDates: true
+                type: 'array'
             });
         } catch (err) {
             const msg = 'Invalid or corrupted Excel file.';

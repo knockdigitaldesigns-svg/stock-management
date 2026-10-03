@@ -7,7 +7,6 @@ import EditTechnicianModal from './EditTechnicianModal';
 import TechnicianExcelUploadModal from './TechnicianExcelUploadModal';
 import AddStockAllocationModal from '../../../components/AddStockAllocationModal/AddStockAllocationModal';
 import Modal from '../../../components/Modal/Modal';
-import Can from '../../../components/Can/Can';
 import Pagination from '../../../components/Pagination/Pagination';
 import usePagination from '../../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
@@ -120,16 +119,17 @@ const Technicians = () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Technician Management</h2>
+                <div>
+                    <h2>Technician Management</h2>
+                    <p className="page-subtitle">Manage technician profiles and their assigned inventory.</p>
+                </div>
                 <div className="header-actions">
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
                     </button>
-                    <Can permission="technicians.import">
                         <button className="btn btn-outline" onClick={() => setIsTechnicianUploadModalOpen(true)}>
                             <Upload size={16} /> Upload Excel
                         </button>
-                    </Can>
                     <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
                         <Plus size={16} /> Add Technician
                     </button>
@@ -153,6 +153,7 @@ const Technicians = () => {
                     showSimType
                     showSimValidity
                     showPaymentStatus
+                    gridCols={5}
                 />
 
                 <div className="table-container">

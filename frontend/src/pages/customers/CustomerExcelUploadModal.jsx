@@ -45,6 +45,39 @@ const normalizeHeader = (str) =>
         .trim()
         .replace(/[\s_\-.]+/g, '');
 
+const normalizeImportErrors = (payload, fallback) => {
+    let response = payload;
+    if (typeof response === 'string') {
+        try {
+            response = JSON.parse(response);
+        } catch {
+            return response.trim() ? response.trim().split('\n') : [fallback];
+        }
+    }
+
+    if (Array.isArray(response)) {
+        return response.map(String).filter(Boolean);
+    }
+
+    const errors = response?.data?.errors ?? response?.errors;
+    if (Array.isArray(errors)) {
+        return errors.map(String).filter(Boolean);
+    }
+    if (typeof errors === 'string' && errors.trim()) {
+        return errors.split('\n').map((error) => error.trim()).filter(Boolean);
+    }
+
+    const message = response?.message || response?.error;
+    if (Array.isArray(message)) {
+        return message.map(String).filter(Boolean);
+    }
+    if (typeof message === 'string' && message.trim()) {
+        return message.split('\n').map((error) => error.trim()).filter(Boolean);
+    }
+
+    return [fallback];
+};
+
 const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
 
@@ -56,7 +89,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
     const triggerErrors = (errs) => {
         const errList = Array.isArray(errs) ? errs : [errs];
         setErrors(errList);
-        showGlobalError(errList, 'Customer Upload Validation Error');
+        showGlobalError(errList.join('\n'), 'Customer Upload Validation Error');
     };
 
     const downloadTemplate = () => {
@@ -192,7 +225,8 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
             const formData = new FormData();
             formData.append('file', file);
             const response = await api.post('/customers/import.php', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: { 'Content-Type': 'multipart/form-data' },
+                skipGlobalError: true
             });
 
             if (response.data.success) {
@@ -202,19 +236,14 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                     onSuccess();
                 }, 1200);
             } else {
-                const backendErrors =
-                    response.data?.data?.errors ||
-                    response.data?.errors ||
-                    [response.data?.message || 'Failed to upload customers.'];
-                triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+                triggerErrors(normalizeImportErrors(response.data, 'Customer import failed without a validation message.'));
             }
         } catch (err) {
-            const serverData = err.response?.data;
-            const backendErrors =
-                serverData?.data?.errors ||
-                serverData?.errors ||
-                [serverData?.message || 'Network error occurred while uploading.'];
-            triggerErrors(Array.isArray(backendErrors) ? backendErrors : [backendErrors]);
+            const status = err.response?.status;
+            const fallback = status
+                ? `Customer import failed (HTTP ${status}) without a validation message.`
+                : err.message || 'Network error occurred while uploading.';
+            triggerErrors(normalizeImportErrors(err.response?.data, fallback));
         } finally {
             setLoading(false);
         }

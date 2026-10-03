@@ -202,7 +202,10 @@ const PlatformPage = () => {
                 PAGE HEADER
             ========================== */}
             <div className="page-header">
-                <h2>Platform</h2>
+                <div>
+                    <h2>Platform</h2>
+                    <p className="page-subtitle">Manage the platforms available for device records.</p>
+                </div>
                 <div className="header-actions">
                     {hasPermission('platforms.add') && (
                         <button

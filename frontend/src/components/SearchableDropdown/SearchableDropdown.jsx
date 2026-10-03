@@ -27,7 +27,7 @@ const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an
         const updateMenuPosition = () => {
             const rect = dropdownRef.current.getBoundingClientRect();
             const width = Math.max(rect.width, 220);
-            const menuHeight = 280;
+            const menuHeight = 200;
             const gap = 8;
             const spaceBelow = window.innerHeight - rect.bottom;
             const top = spaceBelow >= menuHeight ? rect.bottom + gap : Math.max(12, rect.top - menuHeight - gap);

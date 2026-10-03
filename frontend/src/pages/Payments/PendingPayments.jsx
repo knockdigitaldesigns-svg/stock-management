@@ -170,34 +170,16 @@ const PendingPayments = () => {
             </div>
 
             {/* Filters */}
-            <div className="card" style={{ marginBottom: '20px' }}>
-                <div
-                    style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr auto',
-                        gap: '12px',
-                        alignItems: 'end'
-                    }}
-                >
-                    <div className="form-group">
-                        <label className="form-label">Search</label>
-
-                        <div style={{ position: 'relative' }}>
-                            <Search
-                                size={17}
-                                style={{
-                                    position: 'absolute',
-                                    left: '12px',
-                                    top: '50%',
-                                    transform: 'translateY(-50%)',
-                                    color: 'var(--text-secondary)'
-                                }}
-                            />
-
+            <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
+                <div className="table-filter-grid">
+                    
+                    <div className="filter-group">
+                        <label className="filter-label">Search</label>
+                        <div className="search-input-wrapper">
+                            <Search size={16} className="search-icon" />
                             <input
                                 type="text"
-                                className="form-control"
-                                style={{ paddingLeft: '38px' }}
+                                className="form-control filter-input has-icon table-filter-search"
                                 placeholder="Search name / type / reference"
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
@@ -205,11 +187,10 @@ const PendingPayments = () => {
                         </div>
                     </div>
 
-                    <div className="form-group">
-                        <label className="form-label">Category</label>
-
+                    <div className="filter-group">
+                        <label className="filter-label">Category</label>
                         <select
-                            className="form-control"
+                            className="form-control filter-input"
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
                         >
@@ -220,11 +201,10 @@ const PendingPayments = () => {
                         </select>
                     </div>
 
-                    <div className="form-group">
-                        <label className="form-label">Payment Status</label>
-
+                    <div className="filter-group">
+                        <label className="filter-label">Payment Status</label>
                         <select
-                            className="form-control"
+                            className="form-control filter-input"
                             value={status}
                             onChange={(e) => setStatus(e.target.value)}
                         >
@@ -234,12 +214,11 @@ const PendingPayments = () => {
                         </select>
                     </div>
 
-                    <div className="form-group">
-                        <label className="form-label">Date From</label>
-
+                    <div className="filter-group">
+                        <label className="filter-label">Date From</label>
                         <input
                             type="date"
-                            className="form-control"
+                            className="form-control filter-input"
                             value={dateFrom}
                             onChange={(e) => {
                                 if (dateTo && e.target.value > dateTo) {
@@ -251,12 +230,11 @@ const PendingPayments = () => {
                         />
                     </div>
 
-                    <div className="form-group">
-                        <label className="form-label">Date To</label>
-
+                    <div className="filter-group">
+                        <label className="filter-label">Date To</label>
                         <input
                             type="date"
-                            className="form-control"
+                            className="form-control filter-input"
                             value={dateTo}
                             onChange={(e) => {
                                 if (dateFrom && e.target.value && e.target.value < dateFrom) {
@@ -267,20 +245,18 @@ const PendingPayments = () => {
                             }}
                         />
                     </div>
+                </div>
 
+                <div className="table-filter-actions">
+                    <button type="button" className="btn btn-primary table-filter-btn" onClick={() => {}}>
+                        <Search size={16} /> Search
+                    </button>
                     <button
                         type="button"
-                        className="btn btn-secondary"
+                        className="btn btn-secondary table-filter-btn"
                         onClick={resetFilters}
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            height: '42px'
-                        }}
                     >
-                        <RotateCcw size={16} />
-                        Reset
+                        <RotateCcw size={16} /> Reset
                     </button>
                 </div>
             </div>

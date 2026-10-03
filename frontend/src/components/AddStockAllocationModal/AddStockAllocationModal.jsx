@@ -348,18 +348,39 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
 
                 {allocationType !== 'sim' && <>
                     <h4>Device Allocation</h4>
-                    <div className="form-group" style={{ maxWidth: '200px' }}>
+                    <div className="form-group">
                         <label className="form-label">Device Count *</label>
                         <input type="number" min="1" max="50" className="form-control" value={deviceCount} onChange={(e) => setDeviceCount(e.target.value)} />
                     </div>
                     <div className="items-list" style={{ marginBottom: '1.5rem' }}>
                         {devices.map((item, index) => (
-                            <div key={item.id} className="device-row" style={{ gridTemplateColumns: '1fr 2fr 1fr auto' }}>
-                                <div className="form-group"><label className="form-label">Date *</label><DateInput className="form-control" value={item.date} onChange={(value) => handleItemChange('device', item.id, 'date', value)} required /></div>
-                                <div className="form-group"><label className="form-label">Device Model *</label><SearchableDropdown options={availableDevices} value={item.item_id} onChange={(value) => handleItemChange('device', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search IMEI / model...'} /></div>
-                                <div className="form-group"><label className="form-label">Device Amount</label><input type="number" step="0.01" className="form-control" value={item.amount} onChange={(e) => handleItemChange('device', item.id, 'amount', e.target.value)} placeholder="0.00" /></div>
-                                <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Notes</label><textarea className="form-control" rows="3" placeholder="Enter notes..." value={item.notes} onChange={(e) => handleItemChange('device', item.id, 'notes', e.target.value)} /></div>
-                                {devices.length > 1 && <button type="button" className="icon-btn delete" onClick={() => removeRow('device', item.id)} aria-label={`Remove device ${index + 1}`}><Trash2 size={18} /></button>}
+                            <div key={item.id} className="device-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', alignItems: 'start', marginBottom: '1.5rem' }}>
+                                {devices.length > 1 && (
+                                    <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '-0.25rem' }}>
+                                        <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                                            Device {index + 1}
+                                        </span>
+                                        <button type="button" className="icon-btn delete" onClick={() => removeRow('device', item.id)} aria-label={`Remove device ${index + 1}`}>
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Date *</label>
+                                    <DateInput className="form-control" value={item.date} onChange={(value) => handleItemChange('device', item.id, 'date', value)} required />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Device Model *</label>
+                                    <SearchableDropdown options={availableDevices} value={item.item_id} onChange={(value) => handleItemChange('device', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search IMEI / model...'} />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Device Amount</label>
+                                    <input type="number" step="0.01" className="form-control" value={item.amount} onChange={(e) => handleItemChange('device', item.id, 'amount', e.target.value)} placeholder="0.00" />
+                                </div>
+                                <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
+                                    <label className="form-label">Notes</label>
+                                    <textarea className="form-control" rows="3" placeholder="Enter notes..." value={item.notes} onChange={(e) => handleItemChange('device', item.id, 'notes', e.target.value)} />
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -367,18 +388,39 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
 
                 {allocationType !== 'device' && <>
                     <h4>SIM Allocation</h4>
-                    <div className="form-group" style={{ maxWidth: '200px' }}>
+                    <div className="form-group">
                         <label className="form-label">SIM Count *</label>
                         <input type="number" min="1" max="50" className="form-control" value={simCount} onChange={(e) => setSimCount(e.target.value)} />
                     </div>
                     <div className="items-list" style={{ marginBottom: '1.5rem' }}>
                         {sims.map((item, index) => (
-                            <div key={item.id} className="device-row" style={{ gridTemplateColumns: '1fr 2fr 1fr auto' }}>
-                                <div className="form-group"><label className="form-label">Date *</label><DateInput className="form-control" value={item.date} onChange={(value) => handleItemChange('sim', item.id, 'date', value)} required /></div>
-                                <div className="form-group"><label className="form-label">SIM No *</label><SearchableDropdown options={availableSims} value={item.item_id} onChange={(value) => handleItemChange('sim', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search SIM...'} /></div>
-                                <div className="form-group"><label className="form-label">SIM Amount</label><input type="number" step="0.01" className="form-control" value={item.amount} onChange={(e) => handleItemChange('sim', item.id, 'amount', e.target.value)} placeholder="0.00" /></div>
-                                <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Notes</label><textarea className="form-control" rows="3" placeholder="Enter notes..." value={item.notes} onChange={(e) => handleItemChange('sim', item.id, 'notes', e.target.value)} /></div>
-                                {sims.length > 1 && <button type="button" className="icon-btn delete" onClick={() => removeRow('sim', item.id)} aria-label={`Remove SIM ${index + 1}`}><Trash2 size={18} /></button>}
+                            <div key={item.id} className="device-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', alignItems: 'start', marginBottom: '1.5rem' }}>
+                                {sims.length > 1 && (
+                                    <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '-0.25rem' }}>
+                                        <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                                            SIM {index + 1}
+                                        </span>
+                                        <button type="button" className="icon-btn delete" onClick={() => removeRow('sim', item.id)} aria-label={`Remove SIM ${index + 1}`}>
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">Date *</label>
+                                    <DateInput className="form-control" value={item.date} onChange={(value) => handleItemChange('sim', item.id, 'date', value)} required />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">SIM No *</label>
+                                    <SearchableDropdown options={availableSims} value={item.item_id} onChange={(value) => handleItemChange('sim', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search SIM...'} />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label className="form-label">SIM Amount</label>
+                                    <input type="number" step="0.01" className="form-control" value={item.amount} onChange={(e) => handleItemChange('sim', item.id, 'amount', e.target.value)} placeholder="0.00" />
+                                </div>
+                                <div className="form-group" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
+                                    <label className="form-label">Notes</label>
+                                    <textarea className="form-control" rows="3" placeholder="Enter notes..." value={item.notes} onChange={(e) => handleItemChange('sim', item.id, 'notes', e.target.value)} />
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -389,7 +431,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                     <>
                         <hr style={{ margin: '1.5rem 0', borderColor: 'var(--border-color)' }} />
                         <h4>Payment Details</h4>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginTop: '1rem' }}>
                             <div className="form-group">
                                 <label className="form-label">Total Amount{dealerRequiresPayment ? ' *' : ''}</label>
                                 <input

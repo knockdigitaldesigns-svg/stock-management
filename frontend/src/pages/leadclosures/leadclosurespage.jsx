@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Eye, Edit, Trash2 } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
@@ -336,7 +336,7 @@ const LeadClosuresPage = () => {
             <div className="page-header">
                 <div>
                     <h2>Lead Closure</h2>
-                    <p>
+                    <p className="page-subtitle">
                         Manage lead closure persons
                         and their details.
                     </p>
@@ -371,48 +371,63 @@ const LeadClosuresPage = () => {
             )}
 
             {/* FILTERS */}
-            <div className="card">
-                <div className="table-filter-bar">
-                    <input
-                        type="text"
-                        placeholder="Search Lead Closure"
-                        value={search}
-                        onChange={(event) => {
-                            setSearch(event.target.value);
-                            setPage(1);
-                        }}
-                        className="form-control table-filter-search"
-                    />
+            <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
+                <div className="table-filter-grid">
 
-                    <select
-                        value={statusFilter}
-                        onChange={(event) => {
-                            setStatusFilter(event.target.value);
-                            setPage(1);
-                        }}
-                        className="form-control"
-                    >
-                        <option value="">
-                            All Statuses
-                        </option>
-                        <option value="Active">
-                            Active
-                        </option>
-                        <option value="Inactive">
-                            Inactive
-                        </option>
-                    </select>
+                    {/* SEARCH */}
+                    <div className="filter-group">
+                        <label className="filter-label">Search</label>
+                        <div className="search-input-wrapper">
+                            <Search size={16} className="search-icon" />
+                            <input
+                                type="text"
+                                placeholder="Search Lead Closure"
+                                value={search}
+                                onChange={(event) => {
+                                    setSearch(event.target.value);
+                                    setPage(1);
+                                }}
+                                className="form-control filter-input has-icon table-filter-search"
+                            />
+                        </div>
+                    </div>
 
+                    {/* STATUS */}
+                    <div className="filter-group">
+                        <label className="filter-label">Status</label>
+                        <select
+                            value={statusFilter}
+                            onChange={(event) => {
+                                setStatusFilter(event.target.value);
+                                setPage(1);
+                            }}
+                            className="form-control filter-input"
+                        >
+                            <option value="">All Statuses</option>
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+
+                </div>
+                
+                {/* RESET & SEARCH */}
+                <div className="table-filter-actions">
+                    <button type="button" className="btn btn-primary table-filter-btn" onClick={() => setPage(1)}>
+                        <Search size={16} /> Search
+                    </button>
                     <button
                         type="button"
-                        className="btn btn-outline"
+                        className="btn btn-secondary table-filter-btn"
                         onClick={resetFilters}
                     >
-                        Reset Filters
+                        <RotateCcw size={16} /> Reset
                     </button>
                 </div>
+            </div>
 
-                {/* TABLE */}
+            {/* TABLE */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: '12px' }}>
                 <div className="table-container">
                     <table>
                         <thead>

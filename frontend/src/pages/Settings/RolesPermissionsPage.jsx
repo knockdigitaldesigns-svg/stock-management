@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Plus, Eye, Save, Edit, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import Can from '../../components/Can/Can';
@@ -10,44 +10,289 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../compon
 import useModalScrollLock from '../../hooks/useModalScrollLock';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
+import { useAuth } from '../../context/AuthContext';
 
-const MODULE_LABELS = {
-    dashboard: 'Dashboard', devices: 'Device Maintenance', sims: 'SIM Maintenance', inward_reports: 'Inward Reports',
-    dealers: 'Dealer', technicians: 'Technician', outward_reports: 'Outward Reports', stock: 'Stock Management',
-    stock_transfer: 'Stock Transfer', device_alert: 'Device Alert', customers: 'Customer Details',
-    customer_reports: 'Customer Reports', customer_renewals: 'Renewals', roles: 'Roles', permissions: 'Permissions',
-    users: 'Users', history: 'History', password: 'Change Password', device_types: 'Device Types', sim_validity: 'SIM Validity',
-    platforms: 'Platform', vehicle_types: 'Vehicle Types', lead_closures: 'Lead Closure', sale_amounts: 'Sale Amount', support: 'Support'
+const PERMISSION_COLUMNS = ['view', 'add', 'edit', 'delete', 'export', 'update', 'approve'];
+
+const PERMISSION_COLUMN_LABELS = {
+    view: 'View',
+    add: 'Add',
+    edit: 'Edit',
+    delete: 'Delete',
+    export: 'Export',
+    update: 'Update',
+    approve: 'Approve'
 };
-const MODULE_ORDER = ['dashboard', 'history', 'support', 'devices', 'sims', 'inward_reports', 'dealers', 'technicians', 'outward_reports', 'stock', 'stock_transfer', 'device_alert', 'customers', 'customer_reports', 'customer_renewals', 'roles', 'permissions', 'users', 'password', 'device_types', 'sim_validity', 'platforms', 'vehicle_types', 'lead_closures', 'sale_amounts'];
-const ACTION_COLUMNS = ['view', 'add', 'edit', 'delete', 'export', 'update'];
-const buildPermissionMatrix = (permissions, assigned = []) => {
-    const groups = permissions.reduce((result, permission) => {
-        const module = permission.module || permission.permission_key.split('.')[0];
-        if (!result[module]) result[module] = [];
-        result[module].push(permission);
-        return result;
-    }, {});
-    return Object.keys(groups).sort((left, right) => {
-        const leftIndex = MODULE_ORDER.indexOf(left); const rightIndex = MODULE_ORDER.indexOf(right);
-        return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
-    }).map((module) => {
-        const permissionKeys = Object.fromEntries(groups[module].map((permission) => {
-            const action = String(permission.action || '').toLowerCase();
-            const column = action === 'change' ? 'update' : action;
-            return [column, permission.permission_key];
-        }));
+
+const EXACT_MODULE_PERMISSIONS = [
+    {
+        name: 'Dashboard',
+        actions: {
+            view: ['dashboard.view']
+        }
+    },
+    {
+        name: 'SIM Maintenance',
+        actions: {
+            view: ['sims.view'],
+            add: ['sims.add'],
+            edit: ['sims.edit'],
+            delete: ['sims.delete']
+        }
+    },
+    {
+        name: 'Device Maintenance',
+        actions: {
+            view: ['devices.view'],
+            add: ['devices.add'],
+            edit: ['devices.edit'],
+            delete: ['devices.delete']
+        }
+    },
+    {
+        name: 'Inward Reports',
+        actions: {
+            view: ['inward_reports.view'],
+            export: ['inward_reports.export']
+        }
+    },
+    {
+        name: 'Dealer',
+        actions: {
+            view: ['dealers.view'],
+            add: ['dealers.add'],
+            edit: ['dealers.edit'],
+            delete: ['dealers.delete']
+        }
+    },
+    {
+        name: 'Technician',
+        actions: {
+            view: ['technicians.view'],
+            add: ['technicians.add'],
+            edit: ['technicians.edit'],
+            delete: ['technicians.delete']
+        }
+    },
+    {
+        name: 'Dealer SIM Activation',
+        actions: {
+            view: ['dealer_sim_activation.view', 'dealers.view'],
+            edit: ['dealer_sim_activation.edit', 'dealers.edit']
+        }
+    },
+    {
+        name: 'Outward Reports',
+        actions: {
+            view: ['outward_reports.view'],
+            export: ['outward_reports.export']
+        }
+    },
+    {
+        name: 'Stock Management',
+        actions: {
+            view: ['stock_management.view', 'stock.view'],
+            edit: ['stock_management.edit'],
+            delete: ['stock_management.delete'],
+            update: ['stock_management.update', 'stock.update']
+        }
+    },
+    {
+        name: 'Stock Transfer',
+        actions: {
+            view: ['stock_transfer.view'],
+            add: ['stock_transfer.add'],
+            edit: ['stock_transfer.edit'],
+            delete: ['stock_transfer.delete']
+        }
+    },
+    {
+        name: 'Device Alert',
+        actions: {
+            view: ['device_alert.view'],
+            add: ['device_alert.add'],
+            edit: ['device_alert.edit'],
+            delete: ['device_alert.delete']
+        }
+    },
+    {
+        name: 'Courier',
+        actions: {
+            view: ['courier.view'],
+            add: ['courier.add'],
+            edit: ['courier.edit'],
+            delete: ['courier.delete'],
+            approve: ['courier.approve']
+        }
+    },
+    {
+        name: 'Customer Details',
+        actions: {
+            view: ['customers.view', 'customer_details.view'],
+            add: ['customers.add', 'customer_details.add'],
+            edit: ['customers.edit', 'customer_details.edit'],
+            delete: ['customers.delete', 'customer_details.delete'],
+            export: ['customers.export', 'customer_details.export']
+        }
+    },
+    {
+        name: 'Reports',
+        actions: {
+            view: ['reports.view', 'customer_reports.view'],
+            export: ['reports.export', 'customer_reports.export']
+        }
+    },
+    {
+        name: 'Renewals',
+        actions: {
+            view: ['renewals.view', 'customer_renewals.view'],
+            edit: ['renewals.edit', 'customer_renewals.edit'],
+            delete: ['renewals.delete', 'customer_renewals.delete']
+        }
+    },
+    {
+        name: 'History',
+        actions: {
+            view: ['history.view']
+        }
+    },
+    {
+        name: 'Support',
+        actions: {
+            view: ['support.view'],
+            add: ['support.add'],
+            edit: ['support.edit'],
+            delete: ['support.delete']
+        }
+    },
+    {
+        name: 'Platform',
+        actions: {
+            view: ['platforms.view', 'platform.view'],
+            add: ['platforms.add', 'platform.add'],
+            edit: ['platforms.edit', 'platform.edit'],
+            delete: ['platforms.delete', 'platform.delete']
+        }
+    },
+    {
+        name: 'Device Types',
+        actions: {
+            view: ['device_types.view'],
+            add: ['device_types.add'],
+            edit: ['device_types.edit'],
+            delete: ['device_types.delete']
+        }
+    },
+    {
+        name: 'Vehicle Types',
+        actions: {
+            view: ['vehicle_types.view'],
+            add: ['vehicle_types.add'],
+            edit: ['vehicle_types.edit'],
+            delete: ['vehicle_types.delete']
+        }
+    },
+    {
+        name: 'Lead Closure',
+        actions: {
+            view: ['lead_closures.view', 'lead_closure.view'],
+            add: ['lead_closures.add', 'lead_closure.add'],
+            edit: ['lead_closures.edit', 'lead_closure.edit'],
+            delete: ['lead_closures.delete', 'lead_closure.delete']
+        }
+    },
+    {
+        name: 'Sale Amount',
+        actions: {
+            view: ['sale_amounts.view', 'sale_amount.view'],
+            add: ['sale_amounts.add', 'sale_amount.add'],
+            edit: ['sale_amounts.edit', 'sale_amount.edit'],
+            delete: ['sale_amounts.delete', 'sale_amount.delete']
+        }
+    },
+    {
+        name: 'SIM Validity',
+        actions: {
+            view: ['sim_validity.view'],
+            add: ['sim_validity.add'],
+            edit: ['sim_validity.edit'],
+            delete: ['sim_validity.delete']
+        }
+    },
+    {
+        name: 'Roles',
+        actions: {
+            view: ['roles.view'],
+            add: ['roles.add'],
+            edit: ['roles.edit'],
+            delete: ['roles.delete']
+        }
+    },
+    {
+        name: 'Permissions',
+        actions: {
+            view: ['permissions.view'],
+            update: ['permissions.update', 'permissions.assign']
+        }
+    },
+    {
+        name: 'Add User',
+        actions: {
+            view: ['users.view', 'add_user.view'],
+            add: ['users.add', 'add_user.add'],
+            edit: ['users.edit', 'add_user.edit'],
+            delete: ['users.delete', 'add_user.delete']
+        }
+    },
+    {
+        name: 'Change Password',
+        actions: {
+            view: ['password.view', 'password.change'],
+            update: ['password.update', 'password.change']
+        }
+    },
+    {
+        name: 'SIM Lifecycle',
+        actions: {
+            view: ['sim_lifecycle.view'],
+            add: ['sim_lifecycle.add', 'sim_lifecycle.edit']
+        }
+    }
+];
+
+const buildPermissionMatrix = (definitions = [], assigned = []) => {
+    const defKeys = new Set((definitions || []).map((d) => d.permission_key));
+
+    return EXACT_MODULE_PERMISSIONS.map((modConfig) => {
+        const supportedActions = modConfig.actions;
+        const permissionKeys = {};
+
+        Object.entries(supportedActions).forEach(([action, keys]) => {
+            const dbKey = keys.find((k) => defKeys.has(k));
+            permissionKeys[action] = dbKey || keys[0];
+        });
+
+        const columnStates = {};
+        PERMISSION_COLUMNS.forEach((col) => {
+            if (supportedActions[col]) {
+                const isAssigned = supportedActions[col].some((k) => assigned.includes(k));
+                columnStates[col] = Boolean(isAssigned);
+            } else {
+                columnStates[col] = false;
+            }
+        });
+
         return {
-            module: MODULE_LABELS[module] || groups[module][0].module || module,
-            key: permissionKeys.view || groups[module][0].permission_key,
+            module: modConfig.name,
             permissionKeys,
-            extraKeys: groups[module].filter((permission) => !Object.values(permissionKeys).includes(permission.permission_key)).map((permission) => permission.permission_key),
-            ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, Boolean(permissionKeys[column] && assigned.includes(permissionKeys[column]))]))
+            supportedActions,
+            ...columnStates
         };
     });
 };
 
 const RolesPermissionsPage = () => {
+    const { currentUser, updatePermissions } = useAuth();
     const [tab, setTab] = useState('roles');
     const [roles, setRoles] = useState([]);
     const [filters, setFilters] = useState(emptyTableFilters);
@@ -116,6 +361,10 @@ const closeFeedback = () => {
             const assigned = response.data.data?.permissions || [];
             setAssignedPermissions(assigned);
             setMatrix(buildPermissionMatrix(definitions, assigned));
+            const currentRoleId = currentUser?.role?.id ?? currentUser?.role_id;
+            if (currentRoleId && String(roleId) === String(currentRoleId)) {
+                updatePermissions(assigned);
+            }
         } catch (error) {
             console.error('Failed to fetch permissions', error);
         }
@@ -127,23 +376,37 @@ const closeFeedback = () => {
     const selectedPermissions = [];
 
     matrix.forEach((row) => {
-        ACTION_COLUMNS.forEach((column) => {
-            if (row[column] && row.permissionKeys[column]) {
-                selectedPermissions.push(row.permissionKeys[column]);
-            }
-        });
-
-        row.extraKeys.forEach((permissionKey) => {
-            if (assignedPermissions.includes(permissionKey)) {
-                selectedPermissions.push(permissionKey);
+        PERMISSION_COLUMNS.forEach((column) => {
+            if (row[column] && row.supportedActions && row.supportedActions[column]) {
+                const keys = row.supportedActions[column];
+                const keyToSave = row.permissionKeys[column] || keys[0];
+                if (keyToSave) {
+                    selectedPermissions.push(keyToSave);
+                }
+                if (keys[0] && keys[0] !== keyToSave) {
+                    selectedPermissions.push(keys[0]);
+                }
             }
         });
     });
 
+    const allManagedPossibleKeys = new Set();
+    EXACT_MODULE_PERMISSIONS.forEach((mod) => {
+        Object.values(mod.actions).forEach((keys) => {
+            keys.forEach((k) => allManagedPossibleKeys.add(k));
+        });
+    });
+
+    const preservedExtraKeys = assignedPermissions.filter(
+        (permKey) => !allManagedPossibleKeys.has(permKey)
+    );
+
+    const finalPermissions = Array.from(new Set([...selectedPermissions, ...preservedExtraKeys]));
+
     try {
         const response = await api.post('/permissions/assign.php', {
             role_id: Number(selectedRoleId),
-            permissions: selectedPermissions
+            permissions: finalPermissions
         });
 
         if (response.data.success) {
@@ -327,11 +590,39 @@ const deleteRole = async () => {
         fetchPermissions();
     }, [selectedRoleId]);
 
-    const togglePermission = (rowIndex, field) => {
-        setMatrix((prev) => prev.map((row, index) => index === rowIndex ? { ...row, [field]: !row[field] } : row));
+    const togglePermission = (rowIndex, column) => {
+        setMatrix((prev) =>
+            prev.map((row, index) => {
+                if (index !== rowIndex) return row;
+                if (!row.supportedActions || !row.supportedActions[column]) return row;
+                return { ...row, [column]: !row[column] };
+            })
+        );
     };
-    const selectAllPermissions = () => setMatrix((prev) => prev.map((row) => ({ ...row, ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, Boolean(row.permissionKeys[column])])) })));
-    const clearAllPermissions = () => setMatrix((prev) => prev.map((row) => ({ ...row, ...Object.fromEntries(ACTION_COLUMNS.map((column) => [column, false])) })));
+
+    const selectAllPermissions = () => {
+        setMatrix((prev) =>
+            prev.map((row) => {
+                const updatedRow = { ...row };
+                PERMISSION_COLUMNS.forEach((column) => {
+                    updatedRow[column] = Boolean(row.supportedActions && row.supportedActions[column]);
+                });
+                return updatedRow;
+            })
+        );
+    };
+
+    const clearAllPermissions = () => {
+        setMatrix((prev) =>
+            prev.map((row) => {
+                const updatedRow = { ...row };
+                PERMISSION_COLUMNS.forEach((column) => {
+                    updatedRow[column] = false;
+                });
+                return updatedRow;
+            })
+        );
+    };
 
     const filteredRoles = filterTableRows(roles, filters, { dateKeys: ['created_at'], searchKeys: ['role_name', 'description', 'status'] });
 
@@ -347,7 +638,10 @@ const deleteRole = async () => {
     return (
         <div className="page-container">
             <div className="page-header">
-                <h2>Roles & Permissions</h2>
+                <div>
+                    <h2>Roles & Permissions</h2>
+                    <p className="page-subtitle">Manage user roles and control access to application features.</p>
+                </div>
                 <div className="header-actions">
                     <Can permission="roles.add">
                        <button
@@ -465,27 +759,46 @@ const deleteRole = async () => {
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Module</th>
-                                        <th>View</th>
-                                        <th>Add</th>
-                                        <th>Edit</th>
-                                        <th>Delete</th>
-                                        <th>Export</th>
-                                        <th>Update</th>
+                                        <th style={{ width: '220px', minWidth: '180px' }}>Module</th>
+                                        {PERMISSION_COLUMNS.map((column) => (
+                                            <th key={column} style={{ textAlign: 'center', minWidth: '85px' }}>
+                                                {PERMISSION_COLUMN_LABELS[column] || column.charAt(0).toUpperCase() + column.slice(1)}
+                                            </th>
+                                        ))}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {matrix.map((row, rowIndex) => (
-                                        <tr key={row.module}>
-                                            <td>{row.module}</td>
-                                            <td><input type="checkbox" checked={row.view} onChange={() => togglePermission(rowIndex, 'view')} /></td>
-                                            <td><input type="checkbox" checked={row.add} onChange={() => togglePermission(rowIndex, 'add')} /></td>
-                                            <td><input type="checkbox" checked={row.edit} onChange={() => togglePermission(rowIndex, 'edit')} /></td>
-                                            <td><input type="checkbox" checked={row.delete} onChange={() => togglePermission(rowIndex, 'delete')} /></td>
-                                            <td><input type="checkbox" checked={row.export} onChange={() => togglePermission(rowIndex, 'export')} /></td>
-                                            <td><input type="checkbox" checked={row.update} onChange={() => togglePermission(rowIndex, 'update')} /></td>
+                                    {matrix.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={PERMISSION_COLUMNS.length + 1} className="text-center empty-state">
+                                                No permissions found.
+                                            </td>
                                         </tr>
-                                    ))}
+                                    ) : (
+                                        matrix.map((row, rowIndex) => (
+                                            <tr key={row.module}>
+                                                <td style={{ fontWeight: 500 }}>{row.module}</td>
+                                                {PERMISSION_COLUMNS.map((column) => {
+                                                    const isSupported = Boolean(row.supportedActions && row.supportedActions[column]);
+                                                    return (
+                                                        <td key={column} style={{ textAlign: 'center' }}>
+                                                            {isSupported ? (
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={Boolean(row[column])}
+                                                                    onChange={() => togglePermission(rowIndex, column)}
+                                                                    aria-label={`${row.module} ${PERMISSION_COLUMN_LABELS[column] || column}`}
+                                                                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                                                                />
+                                                            ) : (
+                                                                <span style={{ color: '#cbd5e1', userSelect: 'none', fontWeight: 600 }}>—</span>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        ))
+                                    )}
                                 </tbody>
                             </table>
                         </div>

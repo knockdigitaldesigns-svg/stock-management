@@ -372,18 +372,15 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                     </div>
-                    <div style={{ alignSelf: 'end' }}>
+                    <div style={{ alignSelf: 'end', display: 'flex', gap: '8px' }}>
                         <button type="submit" className="btn btn-primary" disabled={searchLoading} style={{ width: '110px' }}>
                             {searchLoading ? 'Searching...' : 'Search'}
                         </button>
+                        <button type="button" className="btn btn-outline" onClick={clearSearchFlow} style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem' }}>
+                            Clear Search
+                        </button>
                     </div>
                 </form>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-outline" onClick={clearSearchFlow} style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem' }}>
-                        Clear Search
-                    </button>
-                </div>
 
                 {searchError && <div className="alert alert-danger">{searchError}</div>}
                 {updateError && <div className="alert alert-danger">{updateError}</div>}
