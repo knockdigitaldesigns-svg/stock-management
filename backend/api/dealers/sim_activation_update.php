@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/date.php';
+require_once '../../utils/dealer_sim_activation.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -73,12 +74,11 @@ try {
         $validityId = (int) ($data['sim_validity_id'] ?? 0);
         
         if ($activationDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $activationDate)) throw new Exception('Valid activation date is required');
-        if ($activationDate !== '' && isFutureDate($activationDate)) throw new Exception('Activation date cannot be in the future');
         if ($activationDate !== '' && $validityId <= 0) throw new Exception('Validity is required when activating');
         
         if ($activationDate !== '') {
             $months = getValidityMonths($conn, $validityId);
-            $newExpiry = (new DateTimeImmutable($activationDate))->modify('+' . $months . ' months')->format('Y-m-d');
+            $newExpiry = calculateDealerSimExpiryDate($activationDate, $months);
             $newStatus = 'Active';
             $newActivation = $activationDate;
             $newValidityId = $validityId;
@@ -101,7 +101,7 @@ try {
             
             // Calculate new expiry from OLD expiry
             if (!$oldExpiry) $oldExpiry = $renewalDate; // fallback
-            $newExpiry = (new DateTimeImmutable($oldExpiry))->modify('+' . $months . ' months')->format('Y-m-d');
+            $newExpiry = calculateDealerSimExpiryDate($oldExpiry, $months);
             $newStatus = 'Active';
             $newValidityId = $renewalValidityId;
             
@@ -141,7 +141,7 @@ try {
             if ($oldDeactivation && $reactivationDate < $oldDeactivation) throw new Exception('Reactivation date cannot be before deactivation date');
             
             $months = getValidityMonths($conn, $reactivationValidityId);
-            $newExpiry = (new DateTimeImmutable($reactivationDate))->modify('+' . $months . ' months')->format('Y-m-d');
+            $newExpiry = calculateDealerSimExpiryDate($reactivationDate, $months);
             
             $newStatus = 'Active';
             $newValidityId = $reactivationValidityId;
@@ -160,7 +160,7 @@ try {
             if ($activationDate !== $oldActivation || $validityId !== $oldValidityId) {
                 if ($activationDate !== '') {
                     $months = getValidityMonths($conn, $validityId);
-                    $newExpiry = (new DateTimeImmutable($activationDate))->modify('+' . $months . ' months')->format('Y-m-d');
+                    $newExpiry = calculateDealerSimExpiryDate($activationDate, $months);
                     $newActivation = $activationDate;
                     $newValidityId = $validityId;
                 }
@@ -178,30 +178,7 @@ try {
         'sim_status' => $newStatus
     ];
 
-    writeChangedFields($conn, $id, 'Stock Allocation SIM Lifecycle', $oldAllocation, $auditFields, $currentUser);
-
-    $updateSql = "UPDATE stock_allocations SET 
-                  sim_activation_date = ?, 
-                  sim_validity_id = ?, 
-                  sim_expiry_date = ?, 
-                  sim_deactivation_date = ?, 
-                  sim_status = ? 
-                  WHERE id = ?";
-                  
-    $updateStmt = $conn->prepare($updateSql);
-    $updateStmt->bind_param('sisssi', 
-        $newActivation, 
-        $newValidityId, 
-        $newExpiry, 
-        $newDeactivation, 
-        $newStatus, 
-        $id
-    );
-    
-    if (!$updateStmt->execute()) {
-        throw new Exception('Failed to update SIM lifecycle.');
-    }
-    $updateStmt->close();
+    saveDealerSimLifecycle($conn, $id, $oldAllocation, $auditFields, $currentUser);
     
     if ($actionTypeLog) {
         $oldValidityMonths = null;

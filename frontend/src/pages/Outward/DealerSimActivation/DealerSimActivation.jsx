@@ -7,8 +7,9 @@ import { formatDate } from '../../../utils/date';
 import TableFilterBar from '../../../components/TableFilterBar/TableFilterBar';
 import Pagination from '../../../components/Pagination/Pagination';
 import Can from '../../../components/Can/Can';
-import { Edit2 } from 'lucide-react';
+import { Edit2, Upload } from 'lucide-react';
 import DealerSimActivationEditModal from './DealerSimActivationEditModal';
+import DealerSimActivationBulkUploadModal from './DealerSimActivationBulkUploadModal';
 
 const DealerSimActivation = () => {
     const { hasPermission } = useAuth();
@@ -32,6 +33,8 @@ const DealerSimActivation = () => {
     });
 
     const [editingSim, setEditingSim] = useState(null);
+    const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+    const [uploadSuccess, setUploadSuccess] = useState('');
 
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
@@ -112,7 +115,14 @@ const DealerSimActivation = () => {
                     <h1>Dealer SIM Activation</h1>
                     <p className="page-subtitle">Review and manage SIM activation records for dealers.</p>
                 </div>
+                <Can permission="dealers.edit">
+                    <button type="button" className="btn btn-primary" onClick={() => setIsBulkUploadOpen(true)}>
+                        <Upload size={16} /> Upload Excel
+                    </button>
+                </Can>
             </div>
+
+            {uploadSuccess && <div className="alert alert-success">{uploadSuccess}</div>}
 
             <div className="card">
                 <TableFilterBar
@@ -228,6 +238,16 @@ const DealerSimActivation = () => {
                     onClose={() => setEditingSim(null)}
                     onSuccess={() => {
                         setEditingSim(null);
+                        fetchSims();
+                    }}
+                />
+            )}
+            {isBulkUploadOpen && (
+                <DealerSimActivationBulkUploadModal
+                    onClose={() => setIsBulkUploadOpen(false)}
+                    onSuccess={(count) => {
+                        setIsBulkUploadOpen(false);
+                        setUploadSuccess(`${count} SIMs activated successfully.`);
                         fetchSims();
                     }}
                 />

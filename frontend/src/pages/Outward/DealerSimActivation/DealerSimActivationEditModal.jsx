@@ -59,8 +59,8 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
         const validity = simValidities.find(v => String(v.id) === String(validityId));
         if (!validity) return '-';
         
-        const date = new Date(startDate);
-        date.setMonth(date.getMonth() + parseInt(validity.months, 10));
+        const date = new Date(`${startDate}T00:00:00.000Z`);
+        date.setUTCMonth(date.getUTCMonth() + parseInt(validity.months, 10));
         return formatDate(date.toISOString().split('T')[0]);
     };
 
