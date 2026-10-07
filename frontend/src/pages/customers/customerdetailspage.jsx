@@ -82,7 +82,19 @@ const CustomerDetailsPage = () => {
 
             setCustomers(
                 Array.isArray(list)
-                    ? list
+                    ? list.map((item) => ({
+                        ...item,
+                        vehicles: Array.isArray(item.vehicles)
+                            ? item.vehicles
+                            : item.vehicle_no
+                                ? [{
+                                    vehicle_no: item.vehicle_no,
+                                    imei_no: item.imei_no,
+                                    sim_no: item.sim_no,
+                                    sim_no_1: item.sim_no_1
+                                }]
+                                : []
+                    }))
                     : []
             );
 
@@ -194,17 +206,10 @@ const CustomerDetailsPage = () => {
                             ''
                         ).toLowerCase();
 
-                    const vehicleNo =
-                        String(
-                            item.vehicle_no ||
-                            ''
-                        ).toLowerCase();
-
-                    const imei =
-                        String(
-                            item.imei_no ||
-                            ''
-                        ).toLowerCase();
+                    const vehicleSearchValues = (item.vehicles || []).flatMap((vehicle) => [
+                        vehicle.vehicle_no || '',
+                        vehicle.imei_no || ''
+                    ]).map((value) => String(value).toLowerCase());
 
                     const platform =
                         String(
@@ -230,8 +235,7 @@ const CustomerDetailsPage = () => {
                         !searchText ||
                         username.includes(searchText) ||
                         mobile.includes(searchText) ||
-                        vehicleNo.includes(searchText) ||
-                        imei.includes(searchText);
+                        vehicleSearchValues.some((value) => value.includes(searchText));
 
 
                     const matchesPlatform =
@@ -388,11 +392,7 @@ const CustomerDetailsPage = () => {
     // ============================================================
 
     const handleView = (id) => {
-
-        navigate(
-            `/customer-management/details/${id}/view`
-        );
-
+        navigate(`/customer-management/details/${id}/view`);
     };
 
 
@@ -522,7 +522,7 @@ const CustomerDetailsPage = () => {
         if (Number.isNaN(num)) {
             return amount;
         }
-        return `₹${num.toLocaleString('en-IN')}`;
+        return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
     const getDisplayTotalAmount = (item) => {
@@ -599,39 +599,42 @@ const CustomerDetailsPage = () => {
             'Payment Status'
         ];
 
-        const rows = filteredCustomers.map((item) => [
-            item.username || '',
-            item.platform_name || item.platform || '',
-            item.primary_mobile_no || item.mobile_no || '',
-            item.secondary_mobile_no || '',
-            item.email || '',
-            item.location || '',
-            item.pincode || '',
-            item.status || 'Active',
-            item.vehicle_no || '',
-            item.vehicle_type || '',
-            item.device_model || item.device_type || '',
-            item.imei_no || '',
-            item.sim_no_1 || item.sim_no || '',
-            item.sim_no_2 || '',
-            item.validity_months ? (String(item.validity_months).includes('Month') ? item.validity_months : `${item.validity_months} Months`) : '',
-            item.installation_person_type || '',
-            item.installation_person || '',
-            item.lead_closure || '',
-            item.installation_date ? String(item.installation_date).slice(0, 10) : '',
-            item.total_sale_amount !== null && item.total_sale_amount !== undefined ? item.total_sale_amount : '',
-            item.transaction_id || '',
-            item.payment_mode || '',
-            item.device_charge !== null && item.device_charge !== undefined ? item.device_charge : '',
-            item.software_charge !== null && item.software_charge !== undefined ? item.software_charge : '',
-            item.technician_charge !== null && item.technician_charge !== undefined ? item.technician_charge : '',
-            item.sim_charge !== null && item.sim_charge !== undefined ? item.sim_charge : '',
-            item.courier_charge !== null && item.courier_charge !== undefined ? item.courier_charge : '',
-            item.total_amount !== null && item.total_amount !== undefined ? item.total_amount : '',
-            item.amount_paid !== null && item.amount_paid !== undefined ? item.amount_paid : '',
-            item.amount_pending !== null && item.amount_pending !== undefined ? item.amount_pending : '',
-            item.payment_status || 'Pending'
-        ]);
+        const rows = filteredCustomers.flatMap((item) => {
+            const vehicles = item.vehicles?.length ? item.vehicles : [{}];
+            return vehicles.map((vehicle) => [
+                item.username || '',
+                item.platform_name || item.platform || '',
+                item.primary_mobile_no || item.mobile_no || '',
+                item.secondary_mobile_no || '',
+                item.email || '',
+                item.location || '',
+                item.pincode || '',
+                item.status || 'Active',
+                vehicle.vehicle_no || '',
+                vehicle.vehicle_type || '',
+                vehicle.device_model || '',
+                vehicle.imei_no || '',
+                vehicle.sim_no_1 || '',
+                vehicle.sim_no_2 || '',
+                vehicle.validity_months ? (String(vehicle.validity_months).includes('Month') ? vehicle.validity_months : `${vehicle.validity_months} Months`) : '',
+                item.installation_person_type || '',
+                item.installation_person || '',
+                item.lead_closure || '',
+                item.installation_date ? String(item.installation_date).slice(0, 10) : '',
+                item.total_sale_amount !== null && item.total_sale_amount !== undefined ? item.total_sale_amount : '',
+                item.transaction_id || '',
+                item.payment_mode || '',
+                item.device_charge !== null && item.device_charge !== undefined ? item.device_charge : '',
+                item.software_charge !== null && item.software_charge !== undefined ? item.software_charge : '',
+                item.technician_charge !== null && item.technician_charge !== undefined ? item.technician_charge : '',
+                item.sim_charge !== null && item.sim_charge !== undefined ? item.sim_charge : '',
+                item.courier_charge !== null && item.courier_charge !== undefined ? item.courier_charge : '',
+                item.total_amount !== null && item.total_amount !== undefined ? item.total_amount : '',
+                item.amount_paid !== null && item.amount_paid !== undefined ? item.amount_paid : '',
+                item.amount_pending !== null && item.amount_pending !== undefined ? item.amount_pending : '',
+                item.payment_status || 'Pending'
+            ]);
+        });
 
 
         const csv = [
@@ -952,10 +955,10 @@ const CustomerDetailsPage = () => {
                                     'Platform',
                                     'Primary Mobile No',
                                     'Location',
-                                    'Vehicle No',
-                                    'IMEI No',
-                                    'SIM No',
+                                    'Vehicle Count',
+                                    'Vehicles',
                                     'Total Amount',
+                                    'Amount Paid',
                                     'Pending Amount',
                                     'Payment Status',
                                     'Actions'
@@ -983,10 +986,10 @@ const CustomerDetailsPage = () => {
                                             <td>{item.platform_name || item.platform || '-'}</td>
                                             <td>{item.primary_mobile_no || item.mobile_no || '-'}</td>
                                             <td>{item.location || '-'}</td>
-                                            <td>{item.vehicle_no || '-'}</td>
-                                            <td>{item.imei_no || '-'}</td>
-                                            <td>{item.sim_no || item.sim_no_1 || '-'}</td>
+                                            <td>{item.vehicles.length} {item.vehicles.length === 1 ? 'Vehicle' : 'Vehicles'}</td>
+                                            <td>{item.vehicles.map((vehicle) => vehicle.vehicle_no).filter(Boolean).join(', ') || '-'}</td>
                                             <td>{getDisplayTotalAmount(item)}</td>
+                                            <td>{formatCurrency(item.amount_paid)}</td>
                                             <td>{getDisplayPendingAmount(item)}</td>
                                             <td>
                                                 <span style={paymentBadge(item.payment_status)}>

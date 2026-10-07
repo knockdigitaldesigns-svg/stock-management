@@ -588,7 +588,7 @@ function App() {
                             <ProtectedRoute
                                 permission="customers.edit"
                             >
-                                <CustomerCreatePage />
+                                <CustomerViewPage />
                             </ProtectedRoute>
                         }
                     />

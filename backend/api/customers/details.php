@@ -85,6 +85,42 @@ try {
             cvd.validity_months,
             cvd.created_at,
             cvd.updated_at,
+            vci.id AS vehicle_installation_id,
+            vci.installation_person_type AS vehicle_installation_person_type,
+            vci.installation_person_id AS vehicle_installation_person_id,
+            vci.lead_closure_id AS vehicle_lead_closure_id,
+            CASE
+                WHEN vci.installation_person_type = 'Dealer' THEN vdlr.dealer_name
+                ELSE vtech.technician_name
+            END AS vehicle_installation_person,
+            CASE
+                WHEN vci.installation_person_type = 'Dealer' THEN CONCAT(COALESCE(vdlr.installation_status, 'Dealer'), ' Dealer')
+                ELSE vci.installation_person_type
+            END AS vehicle_installation_type,
+            vlc.lead_closure_name AS vehicle_lead_closure,
+            vci.installation_date AS vehicle_installation_date,
+            vcp.id AS vehicle_payment_id,
+            vcp.total_sale_amount AS vehicle_total_sale_amount,
+            vcp.transaction_id AS vehicle_transaction_id,
+            vcp.payment_mode AS vehicle_payment_mode,
+            vcp.device_charge AS vehicle_device_charge,
+            vcp.software_charge AS vehicle_software_charge,
+            vcp.technician_charge AS vehicle_technician_charge,
+            vcp.sim_charge AS vehicle_sim_charge,
+            vcp.courier_charge AS vehicle_courier_charge,
+            vcp.total_amount AS vehicle_total_amount,
+            vcp.amount_paid AS vehicle_amount_paid,
+            vcp.amount_pending AS vehicle_amount_pending,
+            vcp.payment_status AS vehicle_payment_status,
+            vcc.payment_mode AS vehicle_cash_payment_mode,
+            vcc.transaction_id AS vehicle_cash_transaction_id,
+            vcc.id AS vehicle_cash_collection_id,
+            vcc.recipient_type AS vehicle_cash_recipient_type,
+            CASE
+                WHEN vcc.recipient_type = 'Dealer' THEN vcc_dealer.dealer_name
+                WHEN vcc.recipient_type = 'Technician' THEN vcc_technician.technician_name
+                ELSE NULL
+            END AS vehicle_cash_recipient_name,
             sa.owner_type AS device_owner_type,
             sa.owner_id AS device_owner_id,
             CASE
@@ -106,6 +142,40 @@ try {
             ON vt.id = cvd.vehicle_type_id
          LEFT JOIN device_types dt
             ON dt.id = cvd.device_model_id
+         LEFT JOIN customer_installations vci
+            ON vci.id = (
+                SELECT latest_vci.id
+                FROM customer_installations latest_vci
+                WHERE latest_vci.vehicle_id = cvd.id
+                ORDER BY latest_vci.created_at DESC, latest_vci.id DESC
+                LIMIT 1
+            )
+         LEFT JOIN technicians vtech
+            ON vtech.id = vci.installation_person_id AND vci.installation_person_type = 'Technician'
+         LEFT JOIN dealers vdlr
+            ON vdlr.id = vci.installation_person_id AND vci.installation_person_type = 'Dealer'
+         LEFT JOIN lead_closures vlc
+            ON vlc.id = vci.lead_closure_id
+         LEFT JOIN customer_payments vcp
+            ON vcp.id = (
+                SELECT latest_vcp.id
+                FROM customer_payments latest_vcp
+                WHERE latest_vcp.vehicle_id = cvd.id
+                ORDER BY latest_vcp.created_at DESC, latest_vcp.id DESC
+                LIMIT 1
+            )
+         LEFT JOIN customer_cash_collections vcc
+            ON vcc.id = (
+                SELECT latest_vcc.id
+                FROM customer_cash_collections latest_vcc
+                WHERE latest_vcc.payment_id = vcp.id
+                ORDER BY latest_vcc.created_at DESC, latest_vcc.id DESC
+                LIMIT 1
+            )
+         LEFT JOIN dealers vcc_dealer
+            ON vcc_dealer.id = vcc.recipient_id AND vcc.recipient_type = 'Dealer'
+         LEFT JOIN technicians vcc_technician
+            ON vcc_technician.id = vcc.recipient_id AND vcc.recipient_type = 'Technician'
          LEFT JOIN devices d
             ON d.id = cvd.device_id
             LEFT JOIN stock_allocations sa
@@ -132,21 +202,178 @@ try {
                 ON simdlr.id = simsa.owner_id AND simsa.owner_type = 'dealer'
             LEFT JOIN technicians simtech
                 ON simtech.id = simsa.owner_id AND simsa.owner_type = 'technician'
-                 WHERE cvd.customer_id = ?
-                     AND (? = 0 OR cvd.id = ?)
-         ORDER BY cvd.created_at DESC, cvd.id DESC
-         LIMIT 1"
+         WHERE cvd.customer_id = ?
+         ORDER BY cvd.id ASC"
     );
 
     if (!$vehicleStmt) {
         throw new Exception('Failed to prepare vehicle query.');
     }
 
-    $vehicleStmt->bind_param('iii', $customerId, $requestedVehicleId, $requestedVehicleId);
+    $vehicleStmt->bind_param('i', $customerId);
     $vehicleStmt->execute();
     $vehicleResult = $vehicleStmt->get_result();
-    $vehicle = $vehicleResult->fetch_assoc();
+    $vehicles = [];
+    while ($vehicleRow = $vehicleResult->fetch_assoc()) {
+        $vehicles[] = $vehicleRow;
+    }
     $vehicleStmt->close();
+
+    $legacyInstallationStmt = $conn->prepare(
+        "SELECT
+            ci.id,
+            ci.customer_id,
+            ci.installation_person_type,
+            ci.installation_person_id,
+            CASE
+                WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name
+                ELSE t.technician_name
+            END AS installation_person,
+            CASE
+                WHEN ci.installation_person_type = 'Dealer' THEN CONCAT(COALESCE(d.installation_status, 'Dealer'), ' Dealer')
+                ELSE ci.installation_person_type
+            END AS installation_type,
+            ci.lead_closure_id,
+            lc.lead_closure_name AS lead_closure,
+            ci.installation_date
+         FROM customer_installations ci
+         LEFT JOIN technicians t
+            ON t.id = ci.installation_person_id AND ci.installation_person_type = 'Technician'
+         LEFT JOIN dealers d
+            ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
+         LEFT JOIN lead_closures lc
+            ON lc.id = ci.lead_closure_id
+         WHERE ci.customer_id = ? AND ci.vehicle_id IS NULL
+         ORDER BY ci.id ASC"
+    );
+    if (!$legacyInstallationStmt) {
+        throw new Exception('Failed to prepare legacy vehicle installation query.');
+    }
+    $legacyInstallationStmt->bind_param('i', $customerId);
+    $legacyInstallationStmt->execute();
+    $legacyInstallationResult = $legacyInstallationStmt->get_result();
+    $legacyInstallations = [];
+    while ($legacyInstallation = $legacyInstallationResult->fetch_assoc()) {
+        $legacyInstallations[] = $legacyInstallation;
+    }
+    $legacyInstallationStmt->close();
+
+    $vehiclesMissingInstallation = [];
+    foreach ($vehicles as $index => $vehicleRow) {
+        if (empty($vehicleRow['vehicle_installation_id'])) {
+            $vehiclesMissingInstallation[] = $index;
+        }
+    }
+    // Excel import writes one unlinked child row per vehicle in vehicle insertion order.
+    if (count($legacyInstallations) === count($vehiclesMissingInstallation)) {
+        foreach ($legacyInstallations as $index => $legacyInstallation) {
+            $vehicleIndex = $vehiclesMissingInstallation[$index];
+            $vehicles[$vehicleIndex] = array_merge($vehicles[$vehicleIndex], [
+                'vehicle_installation_id' => $legacyInstallation['id'],
+                'vehicle_installation_person_type' => $legacyInstallation['installation_person_type'],
+                'vehicle_installation_person_id' => $legacyInstallation['installation_person_id'],
+                'vehicle_installation_person' => $legacyInstallation['installation_person'],
+                'vehicle_installation_type' => $legacyInstallation['installation_type'],
+                'vehicle_lead_closure_id' => $legacyInstallation['lead_closure_id'],
+                'vehicle_lead_closure' => $legacyInstallation['lead_closure'],
+                'vehicle_installation_date' => $legacyInstallation['installation_date']
+            ]);
+        }
+    }
+
+    $legacyPaymentStmt = $conn->prepare(
+        "SELECT
+            cp.id,
+            cp.vehicle_id,
+            cp.total_sale_amount,
+            cp.transaction_id,
+            cp.payment_mode,
+            cp.device_charge,
+            cp.software_charge,
+            cp.technician_charge,
+            cp.sim_charge,
+            cp.courier_charge,
+            cp.total_amount,
+            cp.amount_paid,
+            cp.amount_pending,
+            cp.payment_status,
+            ccc.id AS cash_collection_id,
+            ccc.recipient_type AS cash_recipient_type,
+            CASE
+                WHEN ccc.recipient_type = 'Dealer' THEN d.dealer_name
+                WHEN ccc.recipient_type = 'Technician' THEN t.technician_name
+                ELSE NULL
+            END AS cash_recipient_name,
+            ccc.payment_mode AS cash_payment_mode,
+            ccc.transaction_id AS cash_transaction_id
+         FROM customer_payments cp
+         LEFT JOIN customer_cash_collections ccc
+            ON ccc.id = (
+                SELECT latest_ccc.id
+                FROM customer_cash_collections latest_ccc
+                WHERE latest_ccc.payment_id = cp.id
+                ORDER BY latest_ccc.created_at DESC, latest_ccc.id DESC
+                LIMIT 1
+            )
+         LEFT JOIN dealers d
+            ON d.id = ccc.recipient_id AND ccc.recipient_type = 'Dealer'
+         LEFT JOIN technicians t
+            ON t.id = ccc.recipient_id AND ccc.recipient_type = 'Technician'
+         WHERE cp.customer_id = ? AND cp.vehicle_id IS NULL
+         ORDER BY cp.id ASC"
+    );
+    if (!$legacyPaymentStmt) {
+        throw new Exception('Failed to prepare legacy vehicle payment query.');
+    }
+    $legacyPaymentStmt->bind_param('i', $customerId);
+    $legacyPaymentStmt->execute();
+    $legacyPaymentResult = $legacyPaymentStmt->get_result();
+    $legacyPayments = [];
+    while ($legacyPayment = $legacyPaymentResult->fetch_assoc()) {
+        $legacyPayments[] = $legacyPayment;
+    }
+    $legacyPaymentStmt->close();
+
+    $vehiclesMissingPayment = [];
+    foreach ($vehicles as $index => $vehicleRow) {
+        if (empty($vehicleRow['vehicle_payment_id'])) {
+            $vehiclesMissingPayment[] = $index;
+        }
+    }
+    if (count($legacyPayments) === count($vehiclesMissingPayment)) {
+        foreach ($legacyPayments as $index => $legacyPayment) {
+            $vehicleIndex = $vehiclesMissingPayment[$index];
+            $vehicles[$vehicleIndex] = array_merge($vehicles[$vehicleIndex], [
+                'vehicle_payment_id' => $legacyPayment['id'],
+                'vehicle_total_sale_amount' => $legacyPayment['total_sale_amount'],
+                'vehicle_transaction_id' => $legacyPayment['transaction_id'],
+                'vehicle_payment_mode' => $legacyPayment['payment_mode'],
+                'vehicle_device_charge' => $legacyPayment['device_charge'],
+                'vehicle_software_charge' => $legacyPayment['software_charge'],
+                'vehicle_technician_charge' => $legacyPayment['technician_charge'],
+                'vehicle_sim_charge' => $legacyPayment['sim_charge'],
+                'vehicle_courier_charge' => $legacyPayment['courier_charge'],
+                'vehicle_total_amount' => $legacyPayment['total_amount'],
+                'vehicle_amount_paid' => $legacyPayment['amount_paid'],
+                'vehicle_amount_pending' => $legacyPayment['amount_pending'],
+                'vehicle_payment_status' => $legacyPayment['payment_status'],
+                'vehicle_cash_collection_id' => $legacyPayment['cash_collection_id'],
+                'vehicle_cash_recipient_type' => $legacyPayment['cash_recipient_type'],
+                'vehicle_cash_recipient_name' => $legacyPayment['cash_recipient_name'],
+                'vehicle_cash_payment_mode' => $legacyPayment['cash_payment_mode'],
+                'vehicle_cash_transaction_id' => $legacyPayment['cash_transaction_id']
+            ]);
+        }
+    }
+
+    $vehicle = null;
+    foreach ($vehicles as $vehicleRow) {
+        if ($requestedVehicleId > 0 && (int) $vehicleRow['id'] !== $requestedVehicleId) {
+            continue;
+        }
+        $vehicle = $vehicleRow;
+        break;
+    }
 
 $installationStmt = $conn->prepare(
     "SELECT
@@ -170,7 +397,7 @@ $installationStmt = $conn->prepare(
         ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
     LEFT JOIN lead_closures lc
         ON lc.id = ci.lead_closure_id
-    WHERE ci.customer_id = ?
+    WHERE ci.id = ?
     LIMIT 1"
 );
 
@@ -179,7 +406,8 @@ $installationStmt = $conn->prepare(
         throw new Exception('Failed to prepare installation query.');
     }
 
-    $installationStmt->bind_param('i', $customerId);
+    $installationId = (int) ($vehicle['vehicle_installation_id'] ?? 0);
+    $installationStmt->bind_param('i', $installationId);
     $installationStmt->execute();
     $installationResult = $installationStmt->get_result();
     $installation = $installationResult->fetch_assoc();
@@ -204,15 +432,16 @@ $installationStmt = $conn->prepare(
             created_at,
             updated_at
          FROM customer_payments
-         WHERE customer_id = ?
-         ORDER BY created_at DESC, id DESC'
+         WHERE id = ?
+         LIMIT 1'
     );
 
     if (!$paymentStmt) {
         throw new Exception('Failed to prepare payment query.');
     }
 
-    $paymentStmt->bind_param('i', $customerId);
+    $selectedPaymentId = (int) ($vehicle['vehicle_payment_id'] ?? 0);
+    $paymentStmt->bind_param('i', $selectedPaymentId);
     $paymentStmt->execute();
     $paymentResult = $paymentStmt->get_result();
 
@@ -289,17 +518,22 @@ $installationStmt = $conn->prepare(
             ccc.transaction_id AS settlement_transaction_id,
             ccc.notes AS settlement_notes
          FROM customer_cash_collections ccc
-         WHERE ccc.customer_id = ?
+         WHERE ccc.payment_id = ?
+         ORDER BY ccc.created_at DESC, ccc.id DESC
          LIMIT 1'
     );
-    $collectionStmt->bind_param('i', $customerId);
+    $cashPaymentId = (int) ($vehicle['vehicle_payment_id'] ?? 0);
+    $collectionStmt->bind_param('i', $cashPaymentId);
     $collectionStmt->execute();
     $cashCollection = $collectionStmt->get_result()->fetch_assoc();
     $collectionStmt->close();
 
-    $validityId = null;
+    foreach ($vehicles as &$vehicleRow) {
+        if (empty($vehicleRow['validity_months'])) {
+            $vehicleRow['validity_id'] = null;
+            continue;
+        }
 
-    if ($vehicle && isset($vehicle['validity_months']) && $vehicle['validity_months']) {
         $validityStmt = $conn->prepare(
             'SELECT id
              FROM sim_validities
@@ -308,22 +542,73 @@ $installationStmt = $conn->prepare(
         );
 
         if ($validityStmt) {
-            $validityMonths = (int) $vehicle['validity_months'];
+            $validityMonths = (int) $vehicleRow['validity_months'];
             $validityStmt->bind_param('i', $validityMonths);
             $validityStmt->execute();
             $validityResult = $validityStmt->get_result();
             $validityRow = $validityResult->fetch_assoc();
             $validityStmt->close();
 
-            if ($validityRow) {
-                $validityId = (int) $validityRow['id'];
-            }
+            $vehicleRow['validity_id'] = $validityRow ? (int) $validityRow['id'] : null;
         }
     }
+    unset($vehicleRow);
 
     if ($vehicle) {
-        $vehicle['validity_id'] = $validityId;
+        foreach ($vehicles as $vehicleRow) {
+            if ((int) $vehicleRow['id'] === (int) $vehicle['id']) {
+                $vehicle = $vehicleRow;
+                break;
+            }
+        }
+
+        $installation = !empty($vehicle['vehicle_installation_id'])
+            ? [
+                'id' => $vehicle['vehicle_installation_id'],
+                'customer_id' => $customerId,
+                'vehicle_id' => $vehicle['id'],
+                'installation_person_type' => $vehicle['vehicle_installation_person_type'],
+                'installation_person_id' => $vehicle['vehicle_installation_person_id'],
+                'installation_person' => $vehicle['vehicle_installation_person'],
+                'installation_type' => $vehicle['vehicle_installation_type'],
+                'lead_closure_id' => $vehicle['vehicle_lead_closure_id'] ?? null,
+                'lead_closure' => $vehicle['vehicle_lead_closure'],
+                'installation_date' => $vehicle['vehicle_installation_date']
+            ]
+            : null;
+
+        $payment = !empty($vehicle['vehicle_payment_id'])
+            ? [
+                'id' => $vehicle['vehicle_payment_id'],
+                'customer_id' => $customerId,
+                'vehicle_id' => $vehicle['id'],
+                'total_sale_amount' => $vehicle['vehicle_total_sale_amount'],
+                'transaction_id' => $vehicle['vehicle_transaction_id'],
+                'payment_mode' => $vehicle['vehicle_payment_mode'],
+                'device_charge' => $vehicle['vehicle_device_charge'],
+                'software_charge' => $vehicle['vehicle_software_charge'],
+                'technician_charge' => $vehicle['vehicle_technician_charge'],
+                'sim_charge' => $vehicle['vehicle_sim_charge'],
+                'courier_charge' => $vehicle['vehicle_courier_charge'],
+                'total_amount' => $vehicle['vehicle_total_amount'],
+                'amount_paid' => $vehicle['vehicle_amount_paid'],
+                'amount_pending' => $vehicle['vehicle_amount_pending'],
+                'payment_status' => $vehicle['vehicle_payment_status']
+            ]
+            : null;
+
+        $cashCollection = !empty($vehicle['vehicle_cash_collection_id'])
+            ? [
+                'id' => $vehicle['vehicle_cash_collection_id'],
+                'recipient_type' => $vehicle['vehicle_cash_recipient_type'],
+                'recipient_name' => $vehicle['vehicle_cash_recipient_name'],
+                'payment_mode' => $vehicle['vehicle_cash_payment_mode'],
+                'transaction_id' => $vehicle['vehicle_cash_transaction_id']
+            ]
+            : null;
     }
+
+    $customer['vehicles'] = $vehicles;
 
     $paymentPart1 = [
         'total_sale_amount' => $payment ? (float) $payment['total_sale_amount'] : 0,
@@ -366,6 +651,7 @@ $installationStmt = $conn->prepare(
         [
             'customer' => $customer,
             'vehicle' => $vehicle,
+            'vehicles' => $vehicles,
             'installation' => $installation,
             'payment' => $payment,
             'payment_part1' => $paymentPart1,

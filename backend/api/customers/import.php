@@ -349,25 +349,36 @@ if ($res) {
 }
 
 // Preload Existing Customers
-$existingPlatformUsernames = [];
-$existingPrimaryMobiles = [];
-$res = $conn->query("SELECT platform_id, username, primary_mobile_no FROM customers");
+$existingCustomersByUsername = [];
+$existingUsernameMobileMap = [];
+$res = $conn->query("SELECT id, username, primary_mobile_no FROM customers ORDER BY id ASC");
 if ($res) {
     while ($r = $res->fetch_assoc()) {
-        $pKey = ((int) $r['platform_id']) . ':' . strtolower(trim($r['username']));
-        $existingPlatformUsernames[$pKey] = true;
-        $existingPrimaryMobiles[trim($r['primary_mobile_no'])] = true;
+        $usernameValue = strtolower(trim((string) $r['username']));
+        $mobileValue = trim((string) $r['primary_mobile_no']);
+
+        $existingCustomersByUsername[$usernameValue][] = [
+            'primary_mobile_no' => $mobileValue
+        ];
+
+        $customerKey = $usernameValue . '|' . $mobileValue;
+        if (!isset($existingUsernameMobileMap[$customerKey])) {
+            $existingUsernameMobileMap[$customerKey] = (int) $r['id'];
+        }
     }
 }
 
 // Preload Existing Customer Vehicle Details
 $existingVehicleNos = [];
+$existingVehicleCustomerIds = [];
 $assignedImeis = [];
 $assignedSims = [];
-$res = $conn->query("SELECT vehicle_no, imei_no, sim_no_1, sim_no_2 FROM customer_vehicle_details");
+$res = $conn->query("SELECT customer_id, vehicle_no, imei_no, sim_no_1, sim_no_2 FROM customer_vehicle_details");
 if ($res) {
     while ($r = $res->fetch_assoc()) {
-        $existingVehicleNos[strtoupper(trim($r['vehicle_no']))] = true;
+        $vehicleNoValue = strtoupper(trim($r['vehicle_no']));
+        $existingVehicleNos[$vehicleNoValue] = true;
+        $existingVehicleCustomerIds[$vehicleNoValue] = (int) $r['customer_id'];
         if (!empty($r['imei_no'])) $assignedImeis[trim($r['imei_no'])] = true;
         if (!empty($r['sim_no_1'])) $assignedSims[trim($r['sim_no_1'])] = true;
         if (!empty($r['sim_no_2'])) $assignedSims[trim($r['sim_no_2'])] = true;
@@ -436,9 +447,9 @@ $normalizeDate = function ($rawDate) {
 $allErrors = [];
 $validRows = [];
 
-$batchPlatformUsernames = [];
-$batchPrimaryMobiles = [];
+$batchUsernameMobiles = [];
 $batchVehicleNos = [];
+$batchVehicleOwners = [];
 $batchImeis = [];
 $batchSims = [];
 
@@ -510,17 +521,22 @@ foreach ($dataRows as $idx => $row) {
         $allErrors[] = "Row {$rowNumber}: Username - Username can contain only letters, numbers, dot, underscore and hyphen.";
     } else {
         $lowerUser = strtolower($username);
-        if ($platformId !== null) {
-            $batchKey = $platformId . ':' . $lowerUser;
-            if (isset($batchPlatformUsernames[$batchKey])) {
-                $allErrors[] = "Row {$rowNumber}: Username - Duplicate Username for this platform in uploaded Excel ({$username}).";
-            } else {
-                $batchPlatformUsernames[$batchKey] = true;
-            }
+        if (isset($batchUsernameMobiles[$lowerUser]) && $batchUsernameMobiles[$lowerUser] !== $primaryMobile) {
+            $allErrors[] = "Row {$rowNumber}: Username already exists with a different mobile number.";
+        } else {
+            $batchUsernameMobiles[$lowerUser] = $primaryMobile;
+        }
 
-            if (isset($existingPlatformUsernames[$batchKey])) {
-                $allErrors[] = "Row {$rowNumber}: Username - Username already exists for this platform.";
+        $dbUserMatches = $existingCustomersByUsername[$lowerUser] ?? [];
+        $hasDifferentUsernameMobile = false;
+        foreach ($dbUserMatches as $customer) {
+            if (trim((string) $customer['primary_mobile_no']) !== $primaryMobile) {
+                $hasDifferentUsernameMobile = true;
             }
+        }
+
+        if ($hasDifferentUsernameMobile) {
+            $allErrors[] = "Row {$rowNumber}: Username already exists with a different mobile number.";
         }
     }
 
@@ -529,16 +545,6 @@ foreach ($dataRows as $idx => $row) {
         $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Primary Mobile is required.";
     } elseif (!preg_match('/^[0-9]{10}$/', $primaryMobile)) {
         $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Primary Mobile must contain exactly 10 digits.";
-    } else {
-        if (isset($batchPrimaryMobiles[$primaryMobile])) {
-            $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Duplicate Primary Mobile in uploaded Excel ({$primaryMobile}).";
-        } else {
-            $batchPrimaryMobiles[$primaryMobile] = true;
-        }
-
-        if (isset($existingPrimaryMobiles[$primaryMobile])) {
-            $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Primary Mobile '{$primaryMobile}' already exists in database.";
-        }
     }
 
     // Secondary Mobile
@@ -588,14 +594,26 @@ foreach ($dataRows as $idx => $row) {
     if ($vehicleNo === '') {
         $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle No is required.";
     } else {
+        $customerKey = strtolower(trim($username)) . '|' . trim($primaryMobile);
         if (isset($batchVehicleNos[$vehicleNo])) {
-            $allErrors[] = "Row {$rowNumber}: Vehicle No - Duplicate Vehicle No in uploaded Excel ({$vehicleNo}).";
+            if (($batchVehicleOwners[$vehicleNo] ?? null) === $customerKey) {
+                $allErrors[] = "Row {$rowNumber}: Vehicle already exists under this customer.";
+            } else {
+                $allErrors[] = "Row {$rowNumber}: Vehicle No - Duplicate Vehicle No in uploaded Excel ({$vehicleNo}).";
+            }
         } else {
             $batchVehicleNos[$vehicleNo] = true;
+            $batchVehicleOwners[$vehicleNo] = $customerKey;
         }
 
         if (isset($existingVehicleNos[$vehicleNo])) {
-            $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle No '{$vehicleNo}' already exists in database.";
+            $existingCustomerId = $existingVehicleCustomerIds[$vehicleNo] ?? null;
+            $matchedCustomerId = $existingUsernameMobileMap[$customerKey] ?? null;
+            if ($matchedCustomerId !== null && $existingCustomerId === $matchedCustomerId) {
+                $allErrors[] = "Row {$rowNumber}: Vehicle already exists under this customer.";
+            } else {
+                $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle No '{$vehicleNo}' already exists in database.";
+            }
         }
     }
 
@@ -1187,23 +1205,38 @@ try {
         throw new Exception('Failed to prepare SIM stock transaction insert: ' . $conn->error);
     }
 
+    $customerKeyToId = [];
+    $reusedCustomerKeys = [];
+    $createdCustomerCount = 0;
+
     foreach ($validRows as $row) {
-        // A. Insert Customer
-        $custStmt->bind_param(
-            'isssssss',
-            $row['platform_id'],
-            $row['username'],
-            $row['primary_mobile_no'],
-            $row['secondary_mobile_no'],
-            $row['email'],
-            $row['location'],
-            $row['pincode'],
-            $row['customer_status']
-        );
-        if (!$custStmt->execute()) {
-            throw new Exception('Failed to insert customer ' . $row['username'] . ': ' . $custStmt->error);
+        $customerKey = strtolower(trim((string) $row['username'])) . '|' . trim((string) $row['primary_mobile_no']);
+
+        if (isset($customerKeyToId[$customerKey])) {
+            $customerId = (int) $customerKeyToId[$customerKey];
+        } elseif (isset($existingUsernameMobileMap[$customerKey])) {
+            $customerId = (int) $existingUsernameMobileMap[$customerKey];
+            $reusedCustomerKeys[$customerKey] = true;
+        } else {
+            // A. Insert Customer
+            $custStmt->bind_param(
+                'isssssss',
+                $row['platform_id'],
+                $row['username'],
+                $row['primary_mobile_no'],
+                $row['secondary_mobile_no'],
+                $row['email'],
+                $row['location'],
+                $row['pincode'],
+                $row['customer_status']
+            );
+            if (!$custStmt->execute()) {
+                throw new Exception('Failed to insert customer ' . $row['username'] . ': ' . $custStmt->error);
+            }
+            $customerId = (int) $conn->insert_id;
+            $customerKeyToId[$customerKey] = $customerId;
+            $createdCustomerCount++;
         }
-        $customerId = (int) $conn->insert_id;
 
         // B. Insert Vehicle Details
         $vehStmt->bind_param(
@@ -1344,12 +1377,20 @@ try {
     $conn->commit();
     $conn->close();
 
-    $count = count($validRows);
-    sendResponse(true, "{$count} customers imported successfully.", ['count' => $count]);
+    $vehiclesAdded = count($validRows);
+    $existingCustomersReused = count($reusedCustomerKeys);
+    sendResponse(
+        true,
+        'Customer Excel upload completed successfully.',
+        [
+            'customers_created' => $createdCustomerCount,
+            'existing_customers_reused' => $existingCustomersReused,
+            'vehicles_added' => $vehiclesAdded
+        ]
+    );
 
 } catch (Exception $e) {
     $conn->rollback();
     $conn->close();
     sendResponse(false, 'Failed to import customers: ' . $e->getMessage(), [], [], 500);
 }
-
