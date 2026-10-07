@@ -3,7 +3,6 @@ import * as XLSX from 'xlsx';
 import { Download, AlertCircle, CheckCircle, Upload } from 'lucide-react';
 import api from '../../services/api';
 import useModalScrollLock from '../../hooks/useModalScrollLock';
-import { showGlobalError } from '../../context/ErrorContext';
 
 export const CUSTOMER_COLUMNS = [
     { key: 'platform', header: 'Platform', required: true },
@@ -89,7 +88,6 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
     const triggerErrors = (errs) => {
         const errList = Array.isArray(errs) ? errs : [errs];
         setErrors(errList);
-        showGlobalError(errList.join('\n'), 'Customer Upload Validation Error');
     };
 
     const downloadTemplate = () => {
@@ -230,11 +228,16 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
             });
 
             if (response.data.success) {
-                setSuccessMsg(response.data.message || 'Customers uploaded successfully.');
+                const summary = response.data.data || {};
+                setSuccessMsg([
+                    `Customers Created: ${summary.customers_created ?? 0}`,
+                    `Existing Customers Reused: ${summary.existing_customers_reused ?? 0}`,
+                    `Vehicles Added: ${summary.vehicles_added ?? 0}`
+                ].join('\n'));
                 setErrors([]);
                 setTimeout(() => {
                     onSuccess();
-                }, 1200);
+                }, 3000);
             } else {
                 triggerErrors(normalizeImportErrors(response.data, 'Customer import failed without a validation message.'));
             }
@@ -263,7 +266,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                     {successMsg ? (
                         <div className="alert alert-success" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <CheckCircle size={18} />
-                            <span>{successMsg}</span>
+                            <span style={{ whiteSpace: 'pre-line' }}>{successMsg}</span>
                         </div>
                     ) : null}
 
