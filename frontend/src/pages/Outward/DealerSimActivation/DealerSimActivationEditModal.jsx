@@ -52,7 +52,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
             deactivate: form.deactivation_date,
             reactivate: form.reactivation_date
         }[action];
-        if (action && !requiredDate) {
+        if (requiredDate !== undefined && !requiredDate) {
             showGlobalError('Please select the action date.');
             return;
         }
