@@ -6,6 +6,15 @@ import { formatDate } from '../../../utils/date';
 
 const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
     const status = allocation.sim_status || 'Available';
+    const normalizedStatus = String(status).trim().toLowerCase().replace(/[\s_-]/g, '');
+    const displayedStatus = {
+        active: 'Active',
+        expired: 'Expired',
+        deactive: 'Deactive',
+        deactivated: 'Deactive',
+        safecustody: 'Safe Custody',
+        available: 'Available'
+    }[normalizedStatus] || status;
     
     const [action, setAction] = useState('');
     const [form, setForm] = useState({
@@ -14,8 +23,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
         renewal_validity_id: '',
         renewal_date: '',
         deactivation_date: '',
-        reactivation_date: '',
-        reactivation_validity_id: ''
+        reactivation_date: ''
     });
     
     const [simValidities, setSimValidities] = useState([]);
@@ -25,7 +33,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
     useEffect(() => {
         api.get('/sim_validities/list.php')
             .then(res => setSimValidities(res.data.data?.validities || []))
-            .catch(err => showGlobalError('Failed to load SIM validities'))
+            .catch(() => showGlobalError('Failed to load SIM validities'))
             .finally(() => setLoading(false));
     }, []);
 
@@ -35,6 +43,24 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
     };
 
     const handleSave = async () => {
+        if (normalizedStatus !== 'available' && !action) {
+            showGlobalError('Please select a lifecycle action.');
+            return;
+        }
+        const requiredDate = {
+            renew: form.renewal_date,
+            deactivate: form.deactivation_date,
+            reactivate: form.reactivation_date
+        }[action];
+        if (action && !requiredDate) {
+            showGlobalError('Please select the action date.');
+            return;
+        }
+        if (action === 'renew' && !form.renewal_validity_id) {
+            showGlobalError('Please select the renewal validity.');
+            return;
+        }
+
         setSaving(true);
         try {
             const res = await api.post('/dealers/sim_activation_update.php', {
@@ -65,19 +91,26 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
     };
 
     const getAvailableActions = () => {
-        const actions = [{ value: '', label: 'Update Details (No lifecycle change)' }];
-        if (status === 'Active' || status === 'Expired') {
-            actions.push({ value: 'renew', label: 'Renew SIM' });
-            actions.push({ value: 'deactivate', label: 'Deactivate SIM' });
-            actions.push({ value: 'safe_custody', label: 'Move to Safe Custody' });
-        } else if (status === 'Safe Custody') {
-            actions.push({ value: 'renew', label: 'Renew SIM' });
-            actions.push({ value: 'deactivate', label: 'Deactivate SIM' });
-        } else if (status === 'Deactive') {
-            actions.push({ value: 'reactivate', label: 'Reactivate SIM' });
+        if (['active', 'expired'].includes(normalizedStatus)) {
+            return [
+                { value: 'renew', label: 'Renew SIM' },
+                { value: 'deactivate', label: 'Deactivate SIM' },
+                { value: 'safe_custody', label: 'Safe Custody' }
+            ];
         }
-        return actions;
+        if (normalizedStatus === 'safecustody') {
+            return [
+                { value: 'renew', label: 'Renew SIM' },
+                { value: 'deactivate', label: 'Deactivate SIM' }
+            ];
+        }
+        if (['deactive', 'deactivated'].includes(normalizedStatus)) {
+            return [{ value: 'reactivate', label: 'Reactivate SIM' }];
+        }
+        return [];
     };
+
+    const lifecycleActions = getAvailableActions();
 
     return (
         <Modal 
@@ -88,7 +121,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
             footer={
                 <>
                     <button type="button" className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
-                    <button type="button" className="btn btn-primary" onClick={handleSave} disabled={loading || saving}>
+                    <button type="button" className="btn btn-primary" onClick={handleSave} disabled={loading || saving || (normalizedStatus !== 'available' && !action)}>
                         {saving ? 'Saving...' : 'Save Changes'}
                     </button>
                 </>
@@ -112,18 +145,23 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                         <label className="form-label">SIM Type</label>
                         <input className="form-control" value={allocation.sim_type || '-'} readOnly />
                     </div>
+                    <h4 style={{ gridColumn: '1 / -1', margin: '0.5rem 0 0' }}>Current Renewal Details</h4>
                     <div className="form-group">
-                        <label className="form-label">Current Status</label>
-                        <input className="form-control" value={status} readOnly />
+                        <label className="form-label">SIM Status</label>
+                        <input className="form-control" value={displayedStatus} readOnly />
                     </div>
                     <div className="form-group">
-                        <label className="form-label">Current Expiry</label>
+                        <label className="form-label">Next Renewal Date</label>
                         <input className="form-control" value={formatDate(allocation.expiry_date) || '-'} readOnly />
+                    </div>
+                    <div className="form-group">
+                        <label className="form-label">Validity</label>
+                        <input className="form-control" value={allocation.validity_months ? `${allocation.validity_months} Months` : '-'} readOnly />
                     </div>
                     
                     <hr style={{ gridColumn: '1 / -1', margin: '0.5rem 0' }} />
                     
-                    {status === 'Available' ? (
+                    {normalizedStatus === 'available' ? (
                         <>
                             <div className="form-group">
                                 <label className="form-label">Activation Date</label>
@@ -148,7 +186,8 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                                 <label className="form-label">Lifecycle Action</label>
                                 <select className="form-control" value={action} onChange={(e) => setAction(e.target.value)}>
-                                    {getAvailableActions().map(a => (
+                                    <option value="">Select an action</option>
+                                    {lifecycleActions.map(a => (
                                         <option key={a.value} value={a.value}>{a.label}</option>
                                     ))}
                                 </select>
@@ -158,7 +197,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                                 <>
                                     <div className="form-group">
                                         <label className="form-label">Renewal Date</label>
-                                        <input type="date" className="form-control" name="renewal_date" value={form.renewal_date} onChange={handleChange} />
+                                        <input type="date" className="form-control" name="renewal_date" value={form.renewal_date} onChange={handleChange} required />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Renewal Validity</label>
@@ -175,7 +214,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">New Expiry Date (Calc)</label>
-                                        <input className="form-control" value={calculateExpiry(allocation.expiry_date, form.renewal_validity_id)} readOnly />
+                                        <input className="form-control" value={calculateExpiry(form.renewal_date, form.renewal_validity_id)} readOnly />
                                     </div>
                                 </>
                             )}
@@ -183,7 +222,7 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                             {action === 'deactivate' && (
                                 <div className="form-group">
                                     <label className="form-label">Deactivation Date</label>
-                                    <input type="date" className="form-control" name="deactivation_date" value={form.deactivation_date} onChange={handleChange} />
+                                    <input type="date" className="form-control" name="deactivation_date" value={form.deactivation_date} onChange={handleChange} required />
                                 </div>
                             )}
 
@@ -194,49 +233,15 @@ const DealerSimActivationEditModal = ({ allocation, onClose, onSuccess }) => {
                             )}
 
                             {action === 'reactivate' && (
-                                <>
-                                    <div className="form-group">
-                                        <label className="form-label">Reactivation Date</label>
-                                        <input type="date" className="form-control" name="reactivation_date" value={form.reactivation_date} onChange={handleChange} />
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">New Validity</label>
-                                        <select className="form-control" name="reactivation_validity_id" value={form.reactivation_validity_id} onChange={handleChange}>
-                                            <option value="">Select Validity</option>
-                                            {simValidities.map(v => (
-                                                <option key={v.id} value={v.id}>{v.months} Months</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Calculated Expiry Date</label>
-                                        <input className="form-control" value={calculateExpiry(form.reactivation_date, form.reactivation_validity_id)} readOnly />
-                                    </div>
-                                </>
+                                <div className="form-group">
+                                    <label className="form-label">Reactivation Date</label>
+                                    <input type="date" className="form-control" name="reactivation_date" value={form.reactivation_date} onChange={handleChange} required />
+                                </div>
                             )}
                             
                             {action === '' && (
                                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                    <p className="text-muted">No lifecycle changes will be made. Only basic updates are allowed.</p>
-                                    <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: '1fr 1fr' }}>
-                                        <div className="form-group">
-                                            <label className="form-label">Activation Date</label>
-                                            <input type="date" className="form-control" name="activation_date" value={form.activation_date} onChange={handleChange} />
-                                        </div>
-                                        <div className="form-group">
-                                            <label className="form-label">SIM Validity</label>
-                                            <select className="form-control" name="sim_validity_id" value={form.sim_validity_id} onChange={handleChange}>
-                                                <option value="">Select Validity</option>
-                                                {simValidities.map(v => (
-                                                    <option key={v.id} value={v.id}>{v.months} Months</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="form-group">
-                                            <label className="form-label">Calculated Expiry Date</label>
-                                            <input className="form-control" value={calculateExpiry(form.activation_date, form.sim_validity_id)} readOnly />
-                                        </div>
-                                    </div>
+                                    <p className="text-muted">Select a lifecycle action to continue.</p>
                                 </div>
                             )}
                         </>

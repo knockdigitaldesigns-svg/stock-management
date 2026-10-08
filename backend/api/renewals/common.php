@@ -111,7 +111,7 @@ function renewalInitialize($conn, $settings) {
 }
 
 function renewalRowQuery() {
-    return "SELECT cr.*, COALESCE(cr.last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type IN ('Renew SIM', 'Reactivate SIM'))) AS last_renewed_date, c.id AS customer_record_id, c.platform_id, c.status AS customer_status, c.username, c.primary_mobile_no, c.secondary_mobile_no, c.email, c.location, c.pincode,
+    return "SELECT cr.*, COALESCE(cr.last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type IN ('Renew SIM', 'Reactivate SIM'))) AS last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type = 'Reactivate SIM') AS reactivation_date, c.id AS customer_record_id, c.platform_id, c.status AS customer_status, c.username, c.primary_mobile_no, c.secondary_mobile_no, c.email, c.location, c.pincode,
         p.platform_name, cv.id AS vehicle_record_id, cv.vehicle_type_id, cv.device_model_id, cv.device_id, cv.sim_id_1, cv.sim_id_2,
         cv.vehicle_no, cv.imei_no, cv.sim_no_1, cv.sim_no_2, cv.validity_months AS vehicle_validity_months,
         (SELECT sv.id FROM sim_validities sv WHERE sv.months = cv.validity_months LIMIT 1) AS validity_id,
@@ -135,14 +135,15 @@ function renewalRowQuery() {
         LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id";
 }
 
-function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newValidity, $newDate, $payment = [], $notes = null) {
+function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newValidity, $newDate, $payment = [], $notes = null, $actionDate = null) {
     $amount = (float)($payment['payment_amount'] ?? 0);
     $paid = (float)($payment['amount_paid'] ?? 0);
     $pending = (float)($payment['amount_pending'] ?? 0);
     $mode = $payment['payment_mode'] ?? null;
     $transaction = $payment['transaction_id'] ?? null;
-    $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, transaction_id, changed_by, notes) VALUES (?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->bind_param('iisssiissdddssis', $row['id'], $row['customer_id'], $action, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $transaction, $userId, $notes);
+    $actionDate = $actionDate ?: date('Y-m-d');
+    $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, transaction_id, changed_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->bind_param('iissssiissdddssis', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $transaction, $userId, $notes);
     $success = $stmt->execute();
     $stmt->close();
     return $success;

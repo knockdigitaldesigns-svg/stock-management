@@ -33,6 +33,7 @@ try {
     $newDate = $current['next_renewal_date'];
     $lastRenewedDate = $current['last_renewed_date'];
     $payment = [];
+    $historyActionDate = null;
     $notes = trim((string)($payload['notes'] ?? '')) ?: null;
 
     if ($action === 'Deactivate SIM') {
@@ -46,18 +47,17 @@ try {
     } elseif ($action === 'Reactivate SIM') {
         if ($current['sim_status'] !== 'Deactive') throw new Exception('Reactivate SIM is only available for Deactive SIMs.');
         $reactivationDate = trim((string)($payload['reactivation_date'] ?? ''));
-        $newValidity = (int)($payload['validity_months'] ?? 0);
+        $newValidity = (int)$current['validity_months'];
         $date = DateTime::createFromFormat('Y-m-d', $reactivationDate);
-        if (!$date || $date->format('Y-m-d') !== $reactivationDate || $newValidity <= 0) throw new Exception('Actual Reactivation Date and Validity are required.');
-        $validityCheck = $conn->prepare('SELECT months FROM sim_validities WHERE months = ? LIMIT 1'); $validityCheck->bind_param('i', $newValidity); $validityCheck->execute(); $validityExists = $validityCheck->get_result()->num_rows > 0; $validityCheck->close();
-        if (!$validityExists) throw new Exception('Selected validity is not available.');
+        if (!$date || $date->format('Y-m-d') !== $reactivationDate || $newValidity <= 0) throw new Exception('Actual Reactivation Date and current validity are required.');
         $date->modify('+' . $newValidity . ' months');
         $newDate = $date->format('Y-m-d');
         $lastRenewedDate = $reactivationDate;
+        $historyActionDate = $reactivationDate;
         $newStatus = 'Active';
     } elseif ($action === 'Renew SIM') {
         if (!in_array($current['sim_status'], ['Active', 'Expired', 'Safe Custody'], true)) throw new Exception('Renew SIM is not available for this status.');
-        $renewalDate = trim((string)($payload['renewal_date'] ?? date('Y-m-d')));
+        $renewalDate = trim((string)($payload['renewal_date'] ?? ''));
         $newValidity = (int)($payload['validity_months'] ?? 0);
         $date = DateTime::createFromFormat('Y-m-d', $renewalDate);
         if (!$date || $date->format('Y-m-d') !== $renewalDate || $newValidity <= 0) throw new Exception('Renewal Date and Validity are required.');
@@ -66,6 +66,7 @@ try {
         $date->modify('+' . $newValidity . ' months');
         $newDate = $date->format('Y-m-d');
         $lastRenewedDate = $renewalDate;
+        $historyActionDate = $renewalDate;
         $newStatus = 'Active';
         $total = (float)($payload['payment_amount'] ?? 0);
         $paid = (float)($payload['amount_paid'] ?? 0);
@@ -142,7 +143,7 @@ try {
         throw new Exception('Failed to update renewal: ' . $error);
     }
     $update->close();
-    if ($action !== '' && !renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes)) throw new Exception('Failed to save renewal history.');
+    if ($action !== '' && !renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes, $historyActionDate)) throw new Exception('Failed to save renewal history.');
     $conn->commit(); $conn->close();
     sendResponse(true, 'Renewal action completed successfully.', ['status' => $newStatus, 'next_renewal_date' => $newDate, 'last_renewed_date' => $lastRenewedDate, 'installation_date' => $newInstallationDate]);
 } catch (Throwable $error) {
