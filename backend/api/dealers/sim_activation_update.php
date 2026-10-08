@@ -99,9 +99,7 @@ try {
             
             $months = getValidityMonths($conn, $renewalValidityId);
             
-            // Calculate new expiry from OLD expiry
-            if (!$oldExpiry) $oldExpiry = $renewalDate; // fallback
-            $newExpiry = calculateDealerSimExpiryDate($oldExpiry, $months);
+            $newExpiry = calculateDealerSimExpiryDate($renewalDate, $months);
             $newStatus = 'Active';
             $newValidityId = $renewalValidityId;
             
@@ -134,17 +132,16 @@ try {
             if ($oldStatus !== 'Deactive') throw new Exception('Only deactivated SIMs can be reactivated');
             
             $reactivationDate = trim((string) ($data['reactivation_date'] ?? ''));
-            $reactivationValidityId = (int) ($data['reactivation_validity_id'] ?? 0);
             
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $reactivationDate)) throw new Exception('Valid reactivation date is required');
-            if ($reactivationValidityId <= 0) throw new Exception('Reactivation validity is required');
             if ($oldDeactivation && $reactivationDate < $oldDeactivation) throw new Exception('Reactivation date cannot be before deactivation date');
             
-            $months = getValidityMonths($conn, $reactivationValidityId);
+            if ($oldValidityId <= 0) throw new Exception('Existing SIM validity is required to reactivate this SIM');
+            $months = getValidityMonths($conn, $oldValidityId);
             $newExpiry = calculateDealerSimExpiryDate($reactivationDate, $months);
             
             $newStatus = 'Active';
-            $newValidityId = $reactivationValidityId;
+            $newActivation = $reactivationDate;
             
             $actionTypeLog = 'Reactivate SIM';
             $logActionDate = $reactivationDate;

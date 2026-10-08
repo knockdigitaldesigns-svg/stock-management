@@ -10,6 +10,23 @@ requireAnyPermission(['dealers.view']);
 $db = new Database();
 $conn = $db->getConnection();
 
+$expireStmt = $conn->prepare(
+    "UPDATE stock_allocations
+     SET sim_status = 'Expired'
+     WHERE owner_type = 'dealer'
+       AND sim_id IS NOT NULL
+       AND sim_status = 'Active'
+       AND sim_expiry_date IS NOT NULL
+       AND sim_expiry_date <= CURDATE()"
+);
+if (!$expireStmt || !$expireStmt->execute()) {
+    $error = $expireStmt ? $expireStmt->error : $conn->error;
+    if ($expireStmt) $expireStmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to update expired dealer SIM statuses: ' . $error, [], [], 500);
+}
+$expireStmt->close();
+
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
 $limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 10;
 $offset = ($page - 1) * $limit;
