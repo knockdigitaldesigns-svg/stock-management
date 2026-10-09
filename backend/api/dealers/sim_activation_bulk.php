@@ -12,7 +12,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $currentUser = authenticate();
-requireAnyPermission(['dealers.edit']);
+if (!isSuperAdminUser((int)($currentUser['user_id'] ?? 0))) {
+    sendResponse(false, 'Only Super Admin can bulk activate Dealer SIMs.', [], [], 403);
+}
 
 $data = json_decode(file_get_contents('php://input'), true);
 $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];

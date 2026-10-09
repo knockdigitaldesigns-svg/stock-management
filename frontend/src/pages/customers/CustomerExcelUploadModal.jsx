@@ -114,7 +114,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'Lead Closure By': 'Direct',
                 'Installation Date': '10-09-2026',
                 'Total Sale Amount': 5000,
-                'Transaction ID': 'TXN123',
+                'Transaction ID': '123456',
                 'Payment Mode': 'UPI',
                 'Device Charge': 3000,
                 'Software Charge': 1000,

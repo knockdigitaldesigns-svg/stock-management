@@ -108,13 +108,16 @@ const renderValidity = (months) => {
     return value.toLowerCase().includes('month') ? value : `${value} Months`;
 };
 
-const EditField = ({ label, value, onChange, type = 'text' }) => (
+const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         <input
             type={type}
             value={value ?? ''}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => onChange(digitsOnly ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value)}
+            inputMode={digitsOnly ? 'numeric' : undefined}
+            maxLength={digitsOnly ? 6 : undefined}
+            pattern={digitsOnly ? '[0-9]{6}' : undefined}
             style={inputStyle}
         />
     </div>
@@ -1038,7 +1041,7 @@ const CustomerViewPage = () => {
                                     {isEditMode ? (
                                         <>
                                             <EditField label="Total Sale Amount" value={vehicle.vehicle_total_sale_amount} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_total_sale_amount', value)} type="number" />
-                                            <EditField label="Transaction ID" value={vehicle.vehicle_transaction_id} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_transaction_id', value)} />
+                                            <EditField label="Transaction ID" value={vehicle.vehicle_transaction_id} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_transaction_id', value)} digitsOnly />
                                             <EditSelect
                                                 label="Payment Mode"
                                                 value={vehicle.vehicle_payment_mode}

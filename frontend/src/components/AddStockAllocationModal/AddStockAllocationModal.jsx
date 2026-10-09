@@ -42,6 +42,10 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     const [amountPaid, setAmountPaid] = useState('');
     const [paymentMode, setPaymentMode] = useState('');
     const [transactionId, setTransactionId] = useState('');
+    const [paymentDate, setPaymentDate] = useState(() => {
+        const today = new Date();
+        return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    });
     const [software, setSoftware] = useState('');
     const [availableDevices, setAvailableDevices] = useState([]);
     const [availableSims, setAvailableSims] = useState([]);
@@ -64,8 +68,9 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     const amountPaidEntered = String(amountPaid ?? '').trim() !== '';
     const pendingAmount = Math.max(0, Number(totalAmount || 0) - Number(amountPaid || 0));
     const paymentStatus = Number(totalAmount || 0) <= 0 ? '' : pendingAmount <= 0 ? 'Paid' : Number(amountPaid || 0) > 0 ? 'Partially Paid' : 'Not Paid';
-    const paymentFieldsComplete = (!dealerRequiresPayment || String(totalAmount ?? '').trim() !== '') && (!amountPaidEntered || String(paymentMode ?? '').trim() !== '');
-    const transactionRequired = amountPaidEntered && paymentMode && paymentMode !== 'Cash';
+    const paymentAmountIsPositive = Number(amountPaid || 0) > 0;
+    const paymentFieldsComplete = (!dealerRequiresPayment || String(totalAmount ?? '').trim() !== '') && (!paymentAmountIsPositive || (String(paymentMode ?? '').trim() !== '' && paymentDate !== ''));
+    const transactionRequired = paymentAmountIsPositive && paymentMode && paymentMode !== 'Cash';
     const paymentValuesAreValid = ownerType !== 'dealer' || (
         Number.isFinite(Number(totalAmount)) &&
         Number.isFinite(Number(pendingAmount)) &&
@@ -223,8 +228,11 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         }
         if (ownerType === 'dealer') {
             const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
-            if (amountPaidEntered && !paymentMode) {
-                return triggerError('Payment Mode is required when Amount Paid is entered.');
+            if (paymentAmountIsPositive && !paymentMode) {
+                return triggerError('Payment Mode is required when Amount Paid is greater than zero.');
+            }
+            if (paymentAmountIsPositive && !paymentDate) {
+                return triggerError('Payment Date is required when Amount Paid is greater than zero.');
             }
 
             if (dealer?.threshold_amount !== null && dealer?.threshold_amount !== '' && dealer?.threshold_amount !== undefined && activeDevices.length > 0) {
@@ -236,7 +244,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             }
 
             if (dealer?.installation_status === 'Not Willing') {
-                if (totalAmount === '' || (amountPaidEntered && !paymentMode)) {
+                if (totalAmount === '' || (paymentAmountIsPositive && !paymentMode)) {
                     return triggerError('Payment details are mandatory for Not Willing dealers.');
                 }
 
@@ -269,6 +277,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 pending_amount: currentPendingAmount,
                 payment_status: currentPaymentStatus,
                 payment_mode: paymentMode,
+                payment_date: paymentAmountIsPositive ? paymentDate : null,
                 transaction_id: transactionRequired ? transactionId.trim() : null,
                 software,
                 devices: activeDevices.map(i => ({ id: i.item_id, allocation_date: i.date, amount: parseFloat(i.amount) || 0, notes: i.notes })),
@@ -454,7 +463,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                                 <input className="form-control" value={paymentStatus || 'No Payment Required'} readOnly />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Payment Mode{amountPaidEntered ? ' *' : ''}</label>
+                                <label className="form-label">Payment Mode{paymentAmountIsPositive ? ' *' : ''}</label>
                                 <SearchableDropdown
                                     options={paymentModeOptions}
                                     value={paymentMode}
@@ -463,8 +472,12 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                                 />
                             </div>
                             <div className="form-group">
+                                <label className="form-label">Payment Date{paymentAmountIsPositive ? ' *' : ''}</label>
+                                <DateInput className="form-control" value={paymentDate} onChange={setPaymentDate} required={paymentAmountIsPositive} />
+                            </div>
+                            <div className="form-group">
                                 <label className="form-label">Transaction ID{transactionRequired ? ' *' : ''}</label>
-                                <input className="form-control" value={transactionId} onChange={e => setTransactionId(e.target.value)} placeholder={transactionRequired ? 'Enter transaction ID' : 'Not required for Cash'} />
+                                <input className="form-control" type="text" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={transactionId} onChange={e => setTransactionId(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={transactionRequired ? 'Enter 6-digit transaction ID' : 'Not required for Cash'} />
                             </div>
                         </div>
                     </>

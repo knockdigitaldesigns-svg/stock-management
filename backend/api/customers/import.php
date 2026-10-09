@@ -8,6 +8,7 @@ require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 require_once '../../utils/date.php';
 require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 
@@ -488,7 +489,10 @@ foreach ($dataRows as $idx => $row) {
 
     // 4. Payment Fields
     $totalSaleAmountRaw = $getVal('Total Sale Amount');
-    $transactionId = $getVal('Transaction ID');
+    $transactionIdColumn = $fieldToColIndex['Transaction ID'] ?? null;
+    $transactionId = ($transactionIdColumn !== null && isset($row[$transactionIdColumn]))
+        ? (string) $row[$transactionIdColumn]
+        : '';
     $paymentMode = $getVal('Payment Mode');
     $deviceChargeRaw = $getVal('Device Charge');
     $softwareChargeRaw = $getVal('Software Charge');
@@ -982,6 +986,10 @@ foreach ($dataRows as $idx => $row) {
         }
 
         // Payment Mode & Transaction ID
+        if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) {
+            $allErrors[] = "Row {$rowNumber}: Transaction ID - Transaction ID must be exactly 6 digits.";
+        }
+
         if ($transactionId !== '' && $paymentMode === '') {
             $allErrors[] = "Row {$rowNumber}: Payment Mode - Payment Mode is required when Transaction ID is entered.";
         }
@@ -1003,13 +1011,11 @@ foreach ($dataRows as $idx => $row) {
                 if ($matchedMode !== 'Cash') {
                     if ($transactionId === '') {
                         $allErrors[] = "Row {$rowNumber}: Transaction ID - Transaction ID is required for this payment mode.";
-                    } elseif (!preg_match('/^[A-Za-z0-9]{6}$/', $transactionId)) {
-                        $allErrors[] = "Row {$rowNumber}: Transaction ID - Transaction ID must be exactly 6 digits.";
-                    } else {
+                    } elseif (preg_match('/^[0-9]{6}$/', $transactionId)) {
                         $resolvedTransactionId = $transactionId;
                     }
                 } else {
-                    $resolvedTransactionId = $transactionId !== '' ? $transactionId : null;
+                    $resolvedTransactionId = $transactionId !== '' && preg_match('/^[0-9]{6}$/', $transactionId) ? $transactionId : null;
                 }
             }
         }
@@ -1290,6 +1296,7 @@ try {
         if (!$payStmt->execute()) {
             throw new Exception('Failed to insert payment details for ' . $row['username'] . ': ' . $payStmt->error);
         }
+        reserveTransactionId($conn, (string) ($row['transaction_id'] ?? ''), 'customer_payments', (string) $payStmt->insert_id);
 
         // E. Consume Device Stock Asset
         if (!empty($row['device_id'])) {
@@ -1389,6 +1396,10 @@ try {
         ]
     );
 
+} catch (InvalidArgumentException $e) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, 'Excel validation failed: ' . $e->getMessage(), [], [], 400);
 } catch (Exception $e) {
     $conn->rollback();
     $conn->close();

@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS stock_allocations (
     sim_validity_id INT DEFAULT NULL,
     sim_expiry_date DATE DEFAULT NULL,
     sim_deactivation_date DATE DEFAULT NULL,
+    sim_reactivation_date DATE DEFAULT NULL,
     sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available',
     device_amount DECIMAL(10,2) DEFAULT 0.00,
     sim_amount DECIMAL(10,2) DEFAULT 0.00,
@@ -186,8 +187,9 @@ CREATE TABLE IF NOT EXISTS stock_allocations (
     pending_amount DECIMAL(10,2) DEFAULT 0.00,
     software VARCHAR(50) DEFAULT NULL,
     payment_status ENUM('Paid', 'Partially Paid', 'Not Paid') DEFAULT 'Not Paid',
+    payment_date DATE DEFAULT NULL,
     payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL,
-    transaction_id VARCHAR(100) DEFAULT NULL,
+    transaction_id CHAR(6) DEFAULT NULL,
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -199,6 +201,38 @@ CREATE TABLE IF NOT EXISTS stock_allocations (
     FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL,
     FOREIGN KEY (sim_validity_id) REFERENCES sim_validities(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS dealer_sim_allocation_payments (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    allocation_id INT NOT NULL,
+    idempotency_key VARCHAR(64) NOT NULL,
+    total_amount_due DECIMAL(10,2) NOT NULL,
+    amount_paid DECIMAL(10,2) NOT NULL,
+    amount_pending DECIMAL(10,2) NOT NULL,
+    payment_mode VARCHAR(50) DEFAULT NULL,
+    transaction_id CHAR(6) DEFAULT NULL,
+    payment_date DATE DEFAULT NULL,
+    payment_status VARCHAR(30) NOT NULL,
+    remarks TEXT NULL,
+    is_legacy_snapshot TINYINT(1) NOT NULL DEFAULT 0,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_dealer_sim_payment_request (allocation_id, idempotency_key),
+    INDEX idx_dealer_sim_payments_allocation (allocation_id, id),
+    CONSTRAINT fk_dealer_sim_payment_allocation FOREIGN KEY (allocation_id) REFERENCES stock_allocations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS dealer_allocation_payment_requests (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    allocation_id INT NOT NULL,
+    request_key VARCHAR(64) NOT NULL,
+    payload_hash CHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
+    INDEX idx_dealer_allocation_payment_request_key (request_key),
+    CONSTRAINT fk_dealer_allocation_payment_request_allocation
+        FOREIGN KEY (allocation_id) REFERENCES stock_allocations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS stock_transactions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -664,7 +698,7 @@ CREATE TABLE IF NOT EXISTS customer_payments (
 
     total_sale_amount DECIMAL(12,2) NOT NULL,
 
-    transaction_id VARCHAR(6) DEFAULT NULL,
+    transaction_id CHAR(6) DEFAULT NULL,
 
     payment_mode VARCHAR(50) DEFAULT NULL,
 
@@ -742,7 +776,7 @@ CREATE TABLE IF NOT EXISTS customer_cash_collections (
     settlement_status ENUM('Pending', 'Partially Paid', 'Paid') NOT NULL DEFAULT 'Pending',
     settlement_date DATE DEFAULT NULL,
     payment_mode VARCHAR(50) DEFAULT NULL,
-    transaction_id VARCHAR(100) DEFAULT NULL,
+    transaction_id CHAR(6) DEFAULT NULL,
     notes TEXT DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -766,7 +800,7 @@ CREATE TABLE IF NOT EXISTS cash_collection_settlements (
     outstanding_after DECIMAL(12,2) NOT NULL,
     settlement_date DATE NOT NULL,
     payment_mode VARCHAR(50) NOT NULL,
-    transaction_id VARCHAR(100) DEFAULT NULL,
+    transaction_id CHAR(6) DEFAULT NULL,
     notes TEXT DEFAULT NULL,
     settled_by_user_id INT DEFAULT NULL,
     settled_by_name VARCHAR(150) DEFAULT NULL,
@@ -774,6 +808,14 @@ CREATE TABLE IF NOT EXISTS cash_collection_settlements (
     PRIMARY KEY (id),
     INDEX idx_cash_settlement_recipient (recipient_type, recipient_id),
     INDEX idx_cash_settlement_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS transaction_id_registry (
+    transaction_id CHAR(6) NOT NULL PRIMARY KEY,
+    source_type VARCHAR(64) NOT NULL,
+    source_id VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_transaction_registry_source (source_type, source_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS cash_collection_settlement_allocations (

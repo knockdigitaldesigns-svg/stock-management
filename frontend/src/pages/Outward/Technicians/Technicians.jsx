@@ -24,6 +24,7 @@ const Technicians = () => {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [viewingTechnician, setViewingTechnician] = useState(null);
     const [cashTechnician, setCashTechnician] = useState(null);
+    const [technicianDropdownResetKey, setTechnicianDropdownResetKey] = useState(0);
     const [masterData, setMasterData] = useState({
         platforms: [],
         deviceModels: [],
@@ -105,7 +106,9 @@ const Technicians = () => {
     const filteredTechnicians = filterTableRows(technicians, filters, {
         dateKeys: ['enrolled_date'],
         searchKeys: ['technician_name', 'mobile_no', 'location', 'notes']
-    });
+    }).filter((technician) =>
+        !filters.technician_id || String(technician.id) === String(filters.technician_id)
+    );
 
     const {
         page,
@@ -140,7 +143,10 @@ const Technicians = () => {
                 <TableFilterBar
                     filters={filters}
                     onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
+                    onReset={() => {
+                        setFilters(emptyTableFilters());
+                        setTechnicianDropdownResetKey((key) => key + 1);
+                    }}
                     items={technicians}
                     dateKeys={['enrolled_date']}
                     searchPlaceholder="Search by name, mobile, location, or notes..."
@@ -148,6 +154,12 @@ const Technicians = () => {
                     deviceModelOptions={masterData.deviceModels}
                     simTypeOptions={masterData.simTypes}
                     simValidityOptions={masterData.simValidities}
+                    technicianOptions={technicians.map((technician) => ({
+                        value: String(technician.id),
+                        label: technician.technician_name
+                    }))}
+                    technicianDropdownResetKey={technicianDropdownResetKey}
+                    showTechnician
                     showPlatform
                     showDeviceModel
                     showSimType
@@ -197,8 +209,8 @@ const Technicians = () => {
                                         </td>
                                         <td>
                                             <div className="action-buttons">
-                                                <button className="icon-btn view" type="button" aria-label="View technician" title="View" onClick={() => setViewingTechnician(tech)}><Eye size={16} /></button>
                                                 <button className="btn btn-outline" type="button" onClick={() => setCashTechnician(tech)}>Cash</button>
+                                                <button className="icon-btn view" type="button" aria-label="View technician" title="View" onClick={() => setViewingTechnician(tech)}><Eye size={16} /></button>
                                                 <button className="icon-btn edit" type="button" aria-label="Edit technician" onClick={() => setEditingTechnician(tech)}><Edit size={16} /></button>
                                                 <button className="icon-btn delete" type="button" aria-label="Delete technician" onClick={() => setDeleteTarget(tech)}><Trash2 size={16} /></button>
                                             </div>

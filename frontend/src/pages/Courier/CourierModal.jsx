@@ -152,6 +152,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
         if (name === 'pincode') {
             val = String(value).replace(/\D/g, '').slice(0, 6);
         }
+        if (name === 'payment_step4_transaction_id' || name === 'payment_step5_transaction_id') {
+            val = String(value).replace(/\D/g, '').slice(0, 6);
+        }
         if (name === 'username') {
             val = String(value).replace(/\s/g, '').slice(0, 100);
         }
@@ -1082,6 +1085,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                             placeholder="Transaction ID"
                                             value={newCustomerForm.payment_step4_transaction_id}
                                             onChange={handleNewCustomerChange}
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            pattern="[0-9]{6}"
                                             disabled={saving}
                                         />
                                     </div>
@@ -1264,6 +1270,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                             placeholder="Transaction ID"
                                             value={newCustomerForm.payment_step5_transaction_id}
                                             onChange={handleNewCustomerChange}
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            pattern="[0-9]{6}"
                                             disabled={saving}
                                         />
                                     </div>

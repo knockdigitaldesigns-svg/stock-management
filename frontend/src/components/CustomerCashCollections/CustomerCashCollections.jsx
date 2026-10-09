@@ -236,7 +236,10 @@ const CustomerCashCollections = ({ ownerId, recipientType, onSaved }) => {
                                 className="form-control"
                                 placeholder={paymentMode !== 'Cash' ? 'Enter TXN ID' : 'Optional for Cash'}
                                 value={transactionId}
-                                onChange={(e) => setTransactionId(e.target.value)}
+                                onChange={(e) => setTransactionId(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                inputMode="numeric"
+                                maxLength={6}
+                                pattern="[0-9]{6}"
                                 disabled={saving || totalPending <= 0}
                             />
                         </div>
@@ -426,7 +429,11 @@ const CustomerCashCollections = ({ ownerId, recipientType, onSaved }) => {
                             <input
                                 className="form-control"
                                 value={singleTxId}
-                                onChange={(event) => setSingleTxId(event.target.value)}
+                                onChange={(event) => setSingleTxId(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={6}
+                                pattern="[0-9]{6}"
                                 placeholder={singleMode !== 'Cash' ? 'Enter TXN ID' : 'Optional for Cash'}
                             />
                         </div>

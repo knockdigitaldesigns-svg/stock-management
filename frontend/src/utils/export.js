@@ -60,7 +60,10 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
 
 export const exportToPDF = (data, filename, title, columns, options = {}) => {
     const rawData = data || [];
-    const doc = new jsPDF();
+    const doc = new jsPDF({
+        orientation: options.orientation || 'portrait',
+        format: options.format || 'a4'
+    });
     doc.setFontSize(16);
     doc.text(title, 14, 20);
     doc.setFontSize(10);
@@ -124,8 +127,10 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
         head: [tableColumn],
         body: tableRows,
         startY: nextY,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [55, 48, 163] }
+        margin: options.margin,
+        styles: { fontSize: 8, ...(options.styles || {}) },
+        headStyles: { fillColor: [55, 48, 163], ...(options.headStyles || {}) },
+        columnStyles: options.columnStyles
     });
 
     doc.save(`${filename}.pdf`);

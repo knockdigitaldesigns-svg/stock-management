@@ -5,6 +5,7 @@ require_once '../../utils/audit.php';
 require_once '../../utils/date.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $_SERVER['REQUEST_METHOD'] !== 'PUT') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -28,7 +29,7 @@ $validityId = (int) ($data['sim_validity_id'] ?? 0);
 $deactivationDate = trim((string) ($data['deactivation_date'] ?? ''));
 $lifecycleUpdateRequested = array_key_exists('activation_date', $data) || array_key_exists('sim_validity_id', $data) || array_key_exists('deactivation_date', $data);
 $paymentMode = trim((string) ($data['payment_mode'] ?? ''));
-$transactionId = trim((string) ($data['transaction_id'] ?? ''));
+$transactionId = (string) ($data['transaction_id'] ?? '');
 $activationDate = trim((string) ($data['activation_date'] ?? ''));
 $validityId = (int) ($data['sim_validity_id'] ?? 0);
 $deactivationDate = trim((string) ($data['deactivation_date'] ?? ''));
@@ -42,6 +43,7 @@ $status = $total <= 0 ? 'Not Paid' : ($pending <= 0 ? 'Paid' : ($paid > 0 ? 'Par
 $validModes = getPaymentModes();
 $paymentMode = in_array($paymentMode, $validModes, true) ? $paymentMode : null;
 if ($paymentMode !== null && $paymentMode !== 'Cash' && $transactionId === '') sendResponse(false, 'Transaction ID is required for the selected Payment Mode.', [], [], 400);
+if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) sendResponse(false, 'Transaction ID must contain exactly 6 digits.', [], [], 400);
 if ($paymentMode === 'Cash') $transactionId = '';
 
 $db = new Database();
@@ -54,6 +56,17 @@ if (!$oldAllocation) { $conn->rollback(); $conn->close(); sendResponse(false, 'S
 $stmt->close();
 
 $isSimAllocation = !empty($oldAllocation['sim_id']);
+$isDealerSimAllocation = ($oldAllocation['owner_type'] ?? '') === 'dealer' && $isSimAllocation;
+if ($isDealerSimAllocation && (
+    round($total, 2) !== round((float) $oldAllocation['total_amount'], 2)
+    || round($paid, 2) !== round((float) $oldAllocation['amount_paid'], 2)
+    || ($paymentMode ?? '') !== (string) ($oldAllocation['payment_mode'] ?? '')
+    || $transactionId !== (string) ($oldAllocation['transaction_id'] ?? '')
+)) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, 'Dealer SIM payment totals cannot be edited here. Record each payment from the Dealer SIM Activation page.', [], [], 400);
+}
 $calculatedExpiryDate = $oldAllocation['sim_expiry_date'] ?? null;
 $lifecycleStatus = $oldAllocation['sim_status'] ?: 'Available';
 if ($isSimAllocation && $lifecycleUpdateRequested) {
@@ -102,8 +115,14 @@ try {
 		$stmt->bind_param('sisssdddssssi', $ownerType, $ownerId, $allocationType, $allocationDate, $software, $total, $paid, $pending, $status, $paymentMode, $transactionId, $notes, $id);
 	}
 if (!$stmt->execute()) throw new RuntimeException('Unable to update stock allocation');
+reserveTransactionId($conn, $transactionId, 'stock_allocations', (string) $id);
 $stmt->close(); $conn->commit(); $conn->close();
 sendResponse(true, 'Stock allocation updated', ['allocation_id' => $id, 'amount_paid' => $paid, 'pending_amount' => $pending, 'payment_status' => $status]);
+} catch (InvalidArgumentException $e) {
+	$conn->rollback();
+	if (isset($stmt) && $stmt instanceof mysqli_stmt) $stmt->close();
+	$conn->close();
+	sendResponse(false, $e->getMessage(), [], [], 400);
 } catch (Throwable $e) {
 	$conn->rollback();
 	if (isset($stmt) && $stmt instanceof mysqli_stmt) $stmt->close();

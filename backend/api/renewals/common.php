@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../utils/response.php';
 require_once __DIR__ . '/../../middleware/auth.php';
+require_once __DIR__ . '/../../utils/transaction_ids.php';
 
 function ensureRenewalTables($conn) {
     $conn->query("CREATE TABLE IF NOT EXISTS renewal_settings (
@@ -55,11 +56,20 @@ function ensureRenewalTables($conn) {
         amount_paid DECIMAL(10,2) DEFAULT 0.00,
         amount_pending DECIMAL(10,2) DEFAULT 0.00,
         payment_mode VARCHAR(50) DEFAULT NULL,
-        transaction_id VARCHAR(100) DEFAULT NULL,
+        payment_date DATE DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
         changed_by INT DEFAULT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $paymentDateCheck = $conn->query("SHOW COLUMNS FROM renewal_history LIKE 'payment_date'");
+    if (!$paymentDateCheck) {
+        throw new RuntimeException('Unable to check renewal payment date schema: ' . $conn->error);
+    }
+    if ($paymentDateCheck->num_rows === 0 && !$conn->query("ALTER TABLE renewal_history ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_mode")) {
+        throw new RuntimeException('Unable to add renewal payment date field: ' . $conn->error);
+    }
 }
 
 function renewalSettings($conn) {
@@ -79,6 +89,26 @@ function renewalBind($stmt, $types, $values) {
     $bindings = [$types];
     foreach ($values as $key => $value) $bindings[] = &$values[$key];
     call_user_func_array([$stmt, 'bind_param'], $bindings);
+}
+
+function renewalAddCalendarMonths(string $dateValue, int $months): string
+{
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $dateValue);
+    $dateErrors = DateTimeImmutable::getLastErrors();
+    if (!$date
+        || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))
+        || $date->format('Y-m-d') !== $dateValue
+        || $months <= 0) {
+        throw new InvalidArgumentException('A valid date and positive validity are required to calculate the next renewal date.');
+    }
+
+    $targetMonth = ((int) $date->format('n') - 1) + $months;
+    $year = (int) $date->format('Y') + intdiv($targetMonth, 12);
+    $month = ($targetMonth % 12) + 1;
+    $daysInTargetMonth = (int) (new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('t');
+    $day = min((int) $date->format('j'), $daysInTargetMonth);
+
+    return sprintf('%04d-%02d-%02d', $year, $month, $day);
 }
 
 function renewalInitialize($conn, $settings) {
@@ -115,6 +145,16 @@ function renewalRowQuery() {
         p.platform_name, cv.id AS vehicle_record_id, cv.vehicle_type_id, cv.device_model_id, cv.device_id, cv.sim_id_1, cv.sim_id_2,
         cv.vehicle_no, cv.imei_no, cv.sim_no_1, cv.sim_no_2, cv.validity_months AS vehicle_validity_months,
         (SELECT sv.id FROM sim_validities sv WHERE sv.months = cv.validity_months LIMIT 1) AS validity_id,
+        COALESCE(payment_summary.total_payment_amount, 0) AS total_payment_amount,
+        COALESCE(payment_summary.total_amount_paid, 0) AS total_amount_paid,
+        COALESCE(payment_summary.total_amount_pending, 0) AS total_amount_pending,
+        CASE
+            WHEN payment_summary.renewal_id IS NULL THEN NULL
+            WHEN payment_summary.total_payment_amount <= 0 THEN 'Not Paid'
+            WHEN payment_summary.total_amount_pending <= 0 THEN 'Paid'
+            WHEN payment_summary.total_amount_paid > 0 THEN 'Partially Paid'
+            ELSE 'Not Paid'
+        END AS payment_status,
         dt.device_type AS device_model, vt.vehicle_type, ci.id AS installation_record_id,
         ci.installation_person_id, ci.lead_closure_id, ci.installation_date,
         ci.installation_person_type, lc.lead_closure_name AS lead_closure,
@@ -132,7 +172,16 @@ function renewalRowQuery() {
         )
         LEFT JOIN technicians t ON t.id = ci.installation_person_id AND ci.installation_person_type = 'Technician'
         LEFT JOIN dealers d ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
-        LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id";
+        LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
+        LEFT JOIN (
+            SELECT renewal_id,
+                   SUM(payment_amount) AS total_payment_amount,
+                   SUM(amount_paid) AS total_amount_paid,
+                   SUM(amount_pending) AS total_amount_pending
+            FROM renewal_history
+            WHERE action_type IN ('Renew SIM', 'Reactivate SIM')
+            GROUP BY renewal_id
+        ) payment_summary ON payment_summary.renewal_id = cr.id";
 }
 
 function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newValidity, $newDate, $payment = [], $notes = null, $actionDate = null) {
@@ -140,11 +189,17 @@ function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newVal
     $paid = (float)($payment['amount_paid'] ?? 0);
     $pending = (float)($payment['amount_pending'] ?? 0);
     $mode = $payment['payment_mode'] ?? null;
-    $transaction = $payment['transaction_id'] ?? null;
+    $paymentDate = $payment['payment_date'] ?? null;
+    $transaction = normalizeTransactionId($payment['transaction_id'] ?? '');
+    $transaction = $transaction !== '' ? $transaction : null;
     $actionDate = $actionDate ?: date('Y-m-d');
-    $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, transaction_id, changed_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->bind_param('iissssiissdddssis', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $transaction, $userId, $notes);
+    $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->bind_param('iissssiissdddsssis', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $paymentDate, $transaction, $userId, $notes);
     $success = $stmt->execute();
+    $historyId = $success ? (string) $stmt->insert_id : '';
+    if ($success) {
+        reserveTransactionId($conn, (string) ($transaction ?? ''), 'renewal_history', $historyId);
+    }
     $stmt->close();
     return $success;
 }

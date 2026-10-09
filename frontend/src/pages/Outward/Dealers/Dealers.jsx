@@ -13,8 +13,11 @@ import PaymentModal from '../../../components/PaymentModal/PaymentModal';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
+import { useAuth } from '../../../context/AuthContext';
 
 const Dealers = () => {
+    const { hasPermission } = useAuth();
+    const canManagePayments = hasPermission('dealers.edit') || hasPermission('stock.update');
     const [dealers, setDealers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
@@ -27,11 +30,13 @@ const Dealers = () => {
     const [paymentDealer, setPaymentDealer] = useState(null);
     const [viewingDealer, setViewingDealer] = useState(null);
     const [cashDealer, setCashDealer] = useState(null);
+    const [dealerDropdownResetKey, setDealerDropdownResetKey] = useState(0);
     const [masterData, setMasterData] = useState({
         platforms: [],
         deviceModels: [],
         simTypes: [],
-        simValidities: []
+        simValidities: [],
+        dealers: []
     });
 
     const fetchDealers = async () => {
@@ -46,6 +51,7 @@ const Dealers = () => {
                 sim_validity: filters.simValidity || '',
                 installation_status: filters.installationStatus || '',
                 payment_status: filters.paymentStatus || '',
+                dealer_id: filters.dealer_id || '',
                 year: filters.year || '',
                 month: filters.month || ''
             };
@@ -67,11 +73,12 @@ const Dealers = () => {
 
     const fetchFilterMasters = async () => {
         try {
-            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes] = await Promise.all([
+            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes, dealersRes] = await Promise.all([
                 api.get('/platforms/list.php'),
                 api.get('/device_types/list.php'),
                 api.get('/sim_validities/list.php'),
-                api.get('/sim_types/list.php')
+                api.get('/sim_types/list.php'),
+                api.get('/dealers/list.php')
             ]);
 
             const rawPlatforms = platformsRes.data?.data?.platforms || [];
@@ -89,12 +96,17 @@ const Dealers = () => {
 
             const rawSimTypes = simTypesRes.data?.data?.sim_types || [];
             const simTypes = [...new Set(rawSimTypes.map((st) => st.sim_type).filter(Boolean))];
+            const dealers = (dealersRes.data?.data?.dealers || []).map((dealer) => ({
+                value: String(dealer.id),
+                label: dealer.dealer_name
+            }));
 
             setMasterData({
                 platforms: activePlatforms,
                 deviceModels,
                 simValidities,
-                simTypes
+                simTypes,
+                dealers
             });
         } catch (err) {
             console.error('Failed to load filter masters', err);
@@ -119,7 +131,7 @@ const Dealers = () => {
 
     useEffect(() => {
         fetchDealers();
-    }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.year, filters.month]);
+    }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.dealer_id, filters.year, filters.month]);
 
     useEffect(() => {
         fetchFilterMasters();
@@ -164,7 +176,11 @@ const Dealers = () => {
                 <TableFilterBar
                     filters={filters}
                     onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
+                    onReset={() => {
+                        setFilters(emptyTableFilters());
+                        setDealerDropdownResetKey((key) => key + 1);
+                    }}
+                    onSearch={fetchDealers}
                     items={dealers}
                     dateKeys={['enrolled_date']}
                     searchPlaceholder="Search by name, mobile, location, or notes..."
@@ -172,11 +188,15 @@ const Dealers = () => {
                     deviceModelOptions={masterData.deviceModels}
                     simTypeOptions={masterData.simTypes}
                     simValidityOptions={masterData.simValidities}
+                    dealerOptions={masterData.dealers}
+                    dealerDropdownResetKey={dealerDropdownResetKey}
+                    showDealer
                     showPlatform
                     showDeviceModel
                     showSimType
                     showSimValidity
                     showInstallationStatus
+                    installationStatusNextRow={false}
                     showPaymentStatus
                     gridCols={5}
                     className="dealer-filter-card"
@@ -240,11 +260,11 @@ const Dealers = () => {
                                         <td>₹{Number(dealer.total_amount || 0).toFixed(2)}</td>
                                         <td>₹{Number(dealer.amount_paid || 0).toFixed(2)}</td>
                                         <td>₹{Number(dealer.pending_amount || 0).toFixed(2)}</td>
-                                        <td><button type="button" className="btn btn-outline" onClick={() => setPaymentDealer(dealer)}>Payment</button></td>
+                                        <td>{canManagePayments && <button type="button" className="btn btn-outline" onClick={() => setPaymentDealer(dealer)}>Payment</button>}</td>
                                         <td>
                                             <div className="action-buttons dealer-actions">
-                                                <button className="icon-btn view" type="button" aria-label="View dealer" title="View" onClick={() => setViewingDealer(dealer)}><Eye size={16} /></button>
                                                 <button className="btn btn-outline" type="button" onClick={() => setCashDealer(dealer)}>Cash</button>
+                                                <button className="icon-btn view" type="button" aria-label="View dealer" title="View" onClick={() => setViewingDealer(dealer)}><Eye size={16} /></button>
                                                 <button className="icon-btn edit" type="button" aria-label="Edit dealer" onClick={() => setEditingDealer(dealer)}><Edit size={16} /></button>
                                                 <button className="icon-btn delete" type="button" aria-label="Delete dealer" onClick={() => setDeleteTarget(dealer)}><Trash2 size={16} /></button>
                                             </div>

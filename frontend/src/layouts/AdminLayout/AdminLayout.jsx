@@ -113,6 +113,9 @@ const AdminLayout = () => {
     const canViewDealer =
         hasPermission('dealers.view');
 
+    const canViewDealerSimActivation =
+        hasPermission('dealer_sim_activation.view') || hasPermission('dealers.view');
+
     const canViewTechnician =
         hasPermission('technicians.view');
 
@@ -328,6 +331,7 @@ const showCustomerManagement =
                     ========================================= */}
 
                     {(canViewDealer ||
+                        canViewDealerSimActivation ||
                         canViewTechnician ||
                         canViewOutwardReports) && (
 
@@ -375,7 +379,7 @@ const showCustomerManagement =
                                         </NavLink>
                                     )}
 
-                                    {canViewDealer && (
+                                    {canViewDealerSimActivation && (
                                         <NavLink
                                             to="/outward/dealer-sim-activation"
                                             className={({ isActive }) =>

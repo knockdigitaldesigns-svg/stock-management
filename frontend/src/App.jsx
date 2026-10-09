@@ -251,7 +251,7 @@ function App() {
                         path="outward/dealer-sim-activation"
                         element={
                             <ProtectedRoute
-                                permission="dealers.view"
+                                permission={['dealer_sim_activation.view', 'dealers.view']}
                             >
                                 <DealerSimActivation />
                             </ProtectedRoute>

@@ -78,7 +78,8 @@ const EXACT_MODULE_PERMISSIONS = [
         name: 'Dealer SIM Activation',
         actions: {
             view: ['dealer_sim_activation.view', 'dealers.view'],
-            edit: ['dealer_sim_activation.edit', 'dealers.edit']
+            edit: ['dealer_sim_activation.edit', 'dealers.edit'],
+            delete: ['dealer_sim_activation.delete', 'dealers.delete']
         }
     },
     {

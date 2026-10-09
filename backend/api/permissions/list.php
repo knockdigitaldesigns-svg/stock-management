@@ -14,7 +14,8 @@ ensurePermissionDefinitions([
     'courier.view', 'courier.add', 'courier.edit', 'courier.delete', 'courier.approve',
     'stock_management.edit', 'stock_management.delete',
     'stock_transfer.edit', 'stock_transfer.delete',
-    'reports.export', 'renewals.delete'
+    'reports.export', 'renewals.delete',
+    'dealer_sim_activation.view', 'dealer_sim_activation.edit', 'dealer_sim_activation.delete'
 ]);
 
 $db = new Database();

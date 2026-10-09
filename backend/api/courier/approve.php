@@ -3,6 +3,8 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 
@@ -315,7 +317,10 @@ try {
         $step5 = $newCustomerData['step5'] ?? [];
         $totalSaleAmount = !empty($step4['totalSaleAmount']) ? (float)$step4['totalSaleAmount'] : (!empty($step5['totalAmount']) ? (float)$step5['totalAmount'] : 0.0);
         $pMode = !empty($step5['paymentMode']) ? trim($step5['paymentMode']) : (!empty($step4['paymentMode']) ? trim($step4['paymentMode']) : null);
-        $txId = !empty($step5['transactionId']) ? trim($step5['transactionId']) : (!empty($step4['transactionId']) ? trim($step4['transactionId']) : null);
+        $txId = normalizeTransactionId(!empty($step5['transactionId']) ? $step5['transactionId'] : ($step4['transactionId'] ?? ''));
+        if ($pMode && !in_array($pMode, getPaymentModes(), true)) throw new Exception('Invalid payment mode.');
+        if ($txId !== '' && !$pMode) throw new Exception('Payment Mode is required when Transaction ID is entered.');
+        if ($pMode && $pMode !== 'Cash' && $txId === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
         $amountPaid = !empty($step5['amountPaid']) ? (float)$step5['amountPaid'] : 0.0;
         $amountPending = !empty($step5['amountPending']) ? (float)$step5['amountPending'] : max(0.0, $totalSaleAmount - $amountPaid);
         $pStatus = !empty($step5['paymentStatus']) ? trim($step5['paymentStatus']) : ($amountPaid >= $totalSaleAmount && $totalSaleAmount > 0 ? 'Paid' : ($amountPaid > 0 ? 'Partial' : 'Not Paid'));
@@ -329,7 +334,8 @@ try {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ");
                 $insPay->bind_param("idddsss", $owner_id, $totalSaleAmount, $amountPaid, $amountPending, $pStatus, $pMode, $txId);
-                $insPay->execute();
+                if (!$insPay->execute()) throw new Exception('Failed to create customer payment details: ' . $insPay->error);
+                reserveTransactionId($conn, $txId, 'customer_payments', (string) $insPay->insert_id);
                 $insPay->close();
             }
         }
@@ -412,6 +418,10 @@ try {
 
     sendResponse(true, "Courier request approved successfully and asset allocated to " . ucfirst($owner_type) . ".");
 
+} catch (InvalidArgumentException $e) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 400);
 } catch (Exception $e) {
     $conn->rollback();
     $conn->close();

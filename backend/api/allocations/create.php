@@ -5,6 +5,7 @@ require_once '../../utils/date.php';
 require_once '../../utils/dealer_threshold.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
+$currentUser = authenticate();
 requireAnyPermission([
     'dealers.edit',
     'dealers.add',
@@ -20,6 +22,7 @@ requireAnyPermission([
     'stock.update',
     'stock_transfer.add'
 ]);
+$userId = (int) ($currentUser['user_id'] ?? 0);
 
 $data = json_decode(file_get_contents("php://input"));
 
@@ -50,20 +53,27 @@ try {
     $pending_amount_raw = isset($data->pending_amount) ? $data->pending_amount : null;
     $payment_status_raw = isset($data->payment_status) ? trim((string) $data->payment_status) : '';
     $payment_mode_raw = isset($data->payment_mode) ? trim((string) $data->payment_mode) : '';
-    $transaction_id = isset($data->transaction_id) ? trim((string) $data->transaction_id) : '';
+    $transaction_id = normalizeTransactionId($data->transaction_id ?? '');
     $amount_paid_raw = isset($data->amount_paid) ? $data->amount_paid : null;
+    $payment_date = trim((string) ($data->payment_date ?? ''));
     $total_amount = is_numeric($total_amount_raw) ? (float) $total_amount_raw : 0.0;
     $amount_paid = is_numeric($amount_paid_raw) ? (float) $amount_paid_raw : 0.0;
     if ($amount_paid < 0 || $amount_paid > $total_amount) throw new Exception('Amount Paid cannot be greater than Total Amount.');
+    if ($payment_date !== '' && (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $payment_date, $paymentDateParts) || !checkdate((int) $paymentDateParts[2], (int) $paymentDateParts[3], (int) $paymentDateParts[1]))) {
+        throw new Exception('Please select a valid Payment Date.');
+    }
+    if ($owner_type === 'dealer' && $amount_paid > 0 && $payment_date === '') throw new Exception('Payment Date is required when Amount Paid is greater than zero.');
+    if ($payment_date === '') $payment_date = null;
     $pending_amount = max(0, $total_amount - $amount_paid);
     $payment_status = $total_amount <= 0 ? 'Not Paid' : ($pending_amount <= 0 ? 'Paid' : ($amount_paid > 0 ? 'Partially Paid' : 'Not Paid'));
     $payment_mode = $payment_mode_raw !== '' ? $payment_mode_raw : null;
     $allowedPaymentModes = getPaymentModes();
     if ($payment_mode !== null && !in_array($payment_mode, $allowedPaymentModes, true)) throw new Exception('Invalid payment mode.');
     $amount_paid_entered = $amount_paid_raw !== null && trim((string) $amount_paid_raw) !== '';
-    if ($amount_paid_entered && $payment_mode_raw === '') throw new Exception('Payment Mode is required when Amount Paid is entered.');
-    if ($payment_mode !== null && $payment_mode !== 'Cash' && $transaction_id === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
+    if ($amount_paid > 0 && $payment_mode_raw === '') throw new Exception('Payment Mode is required when Amount Paid is greater than zero.');
+    if ($amount_paid > 0 && $payment_mode !== null && $payment_mode !== 'Cash' && $transaction_id === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
     if ($payment_mode === 'Cash') $transaction_id = '';
+    $transactionIdStored = false;
     $software = isset($data->software) ? trim((string) $data->software) : '';
     $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
 
@@ -125,7 +135,7 @@ try {
         if (!$ownerResult) throw new Exception("Dealer not found");
 
         if ($ownerResult['installation_status'] === 'Not Willing') {
-            if ($total_amount_raw === null || trim((string) $total_amount_raw) === '' || ($amount_paid_entered && $payment_mode_raw === '')) {
+            if ($total_amount_raw === null || trim((string) $total_amount_raw) === '' || ($amount_paid > 0 && $payment_mode_raw === '')) {
                 throw new Exception("Payment details are mandatory for Not Willing dealers.");
             }
 
@@ -185,10 +195,16 @@ try {
 
             // 2. Insert Allocation
             $rowPaid = min($remaining_paid, $device_amount); $remaining_paid -= $rowPaid; $rowPending = $device_amount - $rowPaid; $rowStatus = $device_amount <= 0 ? 'Not Paid' : ($rowPending <= 0 ? 'Paid' : ($rowPaid > 0 ? 'Partially Paid' : 'Not Paid'));
-            $allocStmt = $conn->prepare("INSERT INTO stock_allocations (owner_type, owner_id, device_id, allocation_type, allocation_date, device_amount, total_amount, amount_paid, pending_amount, payment_status, payment_mode, transaction_id, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $allocStmt->bind_param("siissddddsssss", $owner_type, $owner_id, $device_id, $allocation_type, $device_allocation_date, $device_amount, $device_amount, $rowPaid, $rowPending, $rowStatus, $payment_mode, $transaction_id, $software, $notes);
+            $rowTransactionId = $transactionIdStored ? '' : $transaction_id;
+            $allocStmt = $conn->prepare("INSERT INTO stock_allocations (owner_type, owner_id, device_id, allocation_type, allocation_date, device_amount, total_amount, amount_paid, pending_amount, payment_status, payment_date, payment_mode, transaction_id, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $allocStmt->bind_param("siissddddssssss", $owner_type, $owner_id, $device_id, $allocation_type, $device_allocation_date, $device_amount, $device_amount, $rowPaid, $rowPending, $rowStatus, $payment_date, $payment_mode, $rowTransactionId, $software, $notes);
             if (!$allocStmt->execute()) throw new Exception("Failed to allocate device $device_id: " . $allocStmt->error);
+            $allocationId = (string) $allocStmt->insert_id;
             $allocStmt->close();
+            if ($rowTransactionId !== '') {
+                reserveTransactionId($conn, $rowTransactionId, 'stock_allocations', $allocationId);
+                $transactionIdStored = true;
+            }
 
             // 3. Update Device Status
             $updDev = $conn->prepare("UPDATE devices SET status = 'allocated' WHERE id = ?");
@@ -230,10 +246,29 @@ try {
             $sim_expiry_date = null;
             $sim_deactivation_date = null;
             $sim_lifecycle_status = 'Available';
-            $allocStmt = $conn->prepare("INSERT INTO stock_allocations (owner_type, owner_id, sim_id, allocation_type, allocation_date, sim_given_date, sim_activation_date, sim_validity_id, sim_expiry_date, sim_deactivation_date, sim_status, sim_amount, total_amount, amount_paid, pending_amount, payment_status, payment_mode, transaction_id, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $allocStmt->bind_param("siissssisssddddsssss", $owner_type, $owner_id, $sim_id, $allocation_type, $sim_allocation_date, $sim_given_date, $sim_activation_date, $sim_validity_id, $sim_expiry_date, $sim_deactivation_date, $sim_lifecycle_status, $sim_amount, $sim_amount, $rowPaid, $rowPending, $rowStatus, $payment_mode, $transaction_id, $software, $notes);
+            $rowTransactionId = $transactionIdStored ? '' : $transaction_id;
+            $allocStmt = $conn->prepare("INSERT INTO stock_allocations (owner_type, owner_id, sim_id, allocation_type, allocation_date, sim_given_date, sim_activation_date, sim_validity_id, sim_expiry_date, sim_deactivation_date, sim_status, sim_amount, total_amount, amount_paid, pending_amount, payment_status, payment_date, payment_mode, transaction_id, software, notes) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $allocStmt->bind_param("siissssisssddddssssss", $owner_type, $owner_id, $sim_id, $allocation_type, $sim_allocation_date, $sim_given_date, $sim_activation_date, $sim_validity_id, $sim_expiry_date, $sim_deactivation_date, $sim_lifecycle_status, $sim_amount, $sim_amount, $rowPaid, $rowPending, $rowStatus, $payment_date, $payment_mode, $rowTransactionId, $software, $notes);
             if (!$allocStmt->execute()) throw new Exception("Failed to allocate SIM $sim_id: " . $allocStmt->error);
+            $allocationId = (string) $allocStmt->insert_id;
             $allocStmt->close();
+            if ($rowTransactionId !== '') {
+                reserveTransactionId($conn, $rowTransactionId, 'stock_allocations', $allocationId);
+                $transactionIdStored = true;
+            }
+            if ($owner_type === 'dealer' && $rowPaid > 0) {
+                $initialPaymentKey = 'initial-payment-' . $allocationId;
+                $initialPayment = $conn->prepare(
+                    "INSERT INTO dealer_sim_allocation_payments
+                        (allocation_id, idempotency_key, total_amount_due, amount_paid, amount_pending,
+                         payment_mode, transaction_id, payment_date, payment_status, is_legacy_snapshot, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, 1, ?)"
+                );
+                if (!$initialPayment) throw new Exception('Unable to prepare initial SIM payment history: ' . $conn->error);
+                $initialPayment->bind_param('isdddssssi', $allocationId, $initialPaymentKey, $sim_amount, $rowPaid, $rowPending, $payment_mode, $rowTransactionId, $payment_date, $rowStatus, $userId);
+                if (!$initialPayment->execute()) throw new Exception('Unable to save initial SIM payment history: ' . $initialPayment->error);
+                $initialPayment->close();
+            }
 
             // 3. Update SIM Status
             $updSim = $conn->prepare("UPDATE sims SET status = 'allocated' WHERE id = ?");
