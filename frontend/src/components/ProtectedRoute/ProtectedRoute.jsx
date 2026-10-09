@@ -9,7 +9,11 @@ const ProtectedRoute = ({ permission, children }) => {
         return <Navigate to="/login" replace />;
     }
 
-    if (permission && !hasPermission(permission)) {
+    const allowed = Array.isArray(permission)
+        ? permission.some((key) => hasPermission(key))
+        : hasPermission(permission);
+
+    if (permission && !allowed) {
         return <AccessDenied />;
     }
 

@@ -8,6 +8,7 @@ require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 
@@ -257,7 +258,10 @@ foreach ($rows as $index => $row) {
 
     // 7. Payment Mode & Transaction ID Validation
     $paymentMode = trim((string) ($row['Payment Mode'] ?? ''));
-    $transactionId = trim((string) ($row['Transaction ID'] ?? ''));
+    $transactionId = (string) ($row['Transaction ID'] ?? '');
+    if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) {
+        $rowErrors[] = "Row {$rowNumber}: Transaction ID must contain exactly 6 digits.";
+    }
 
     if ($paymentStatus === 'Partially Paid' || $paymentStatus === 'Paid') {
         if ($paymentMode === '') {
@@ -315,6 +319,7 @@ try {
         $dId = $item['dealer_id'];
         $mode = $item['payment_mode'];
         $tx = $item['transaction_id'];
+        $transactionIdStored = false;
         $sw = $item['software'];
         $remPaid = $item['amount_paid'];
 
@@ -348,9 +353,14 @@ try {
             $notes = $item['device_notes'];
             $date = $item['device_date'];
 
-            $devAllocStmt->bind_param('iissddddssss', $dId, $item['device_id'], $date, $devAmt, $devTot, $devPaid, $devPend, $devStatus, $mode, $tx, $sw, $notes);
+            $rowTransactionId = $transactionIdStored ? null : $tx;
+            $devAllocStmt->bind_param('iissddddssss', $dId, $item['device_id'], $date, $devAmt, $devTot, $devPaid, $devPend, $devStatus, $mode, $rowTransactionId, $sw, $notes);
             if (!$devAllocStmt->execute()) throw new Exception("Failed to allocate device: " . $devAllocStmt->error);
             $allocationId = (int) $conn->insert_id;
+            if ($rowTransactionId !== null && $rowTransactionId !== '') {
+                reserveTransactionId($conn, $rowTransactionId, 'stock_allocations', (string) $allocationId);
+                $transactionIdStored = true;
+            }
             $snapshotStmt = $conn->prepare('SELECT sa.*, d.imei_no, d.device_model_id, dt.device_type AS device_model, dl.dealer_name AS owner_name FROM stock_allocations sa LEFT JOIN devices d ON d.id = sa.device_id LEFT JOIN device_types dt ON dt.id = d.device_model_id LEFT JOIN dealers dl ON dl.id = sa.owner_id AND sa.owner_type = "dealer" WHERE sa.id = ? LIMIT 1');
             $snapshotStmt->bind_param('i', $allocationId);
             $snapshotStmt->execute();
@@ -372,9 +382,29 @@ try {
             $date = $item['sim_date'];
             $validityId = $item['sim_validity_id'];
 
-            $simAllocStmt->bind_param('iisssddddsssss', $dId, $item['sim_id'], $date, $date, $validityId, $simAmt, $simTot, $simPaid, $simPend, $simStatus, $mode, $tx, $sw, $notes);
+            $rowTransactionId = $transactionIdStored ? null : $tx;
+            $simAllocStmt->bind_param('iisssddddsssss', $dId, $item['sim_id'], $date, $date, $validityId, $simAmt, $simTot, $simPaid, $simPend, $simStatus, $mode, $rowTransactionId, $sw, $notes);
             if (!$simAllocStmt->execute()) throw new Exception("Failed to allocate SIM: " . $simAllocStmt->error);
             $allocationId = (int) $conn->insert_id;
+            if ($rowTransactionId !== null && $rowTransactionId !== '') {
+                reserveTransactionId($conn, $rowTransactionId, 'stock_allocations', (string) $allocationId);
+                $transactionIdStored = true;
+            }
+            if ($simPaid > 0) {
+                $initialPaymentKey = 'initial-payment-' . $allocationId;
+                $paymentTransactionId = (string) ($rowTransactionId ?? '');
+                $createdBy = (int) ($currentUser['user_id'] ?? 0);
+                $initialPayment = $conn->prepare(
+                    "INSERT INTO dealer_sim_allocation_payments
+                        (allocation_id, idempotency_key, total_amount_due, amount_paid, amount_pending,
+                         payment_mode, transaction_id, payment_status, is_legacy_snapshot, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 1, ?)"
+                );
+                if (!$initialPayment) throw new Exception('Unable to prepare imported SIM payment history: ' . $conn->error);
+                $initialPayment->bind_param('isdddsssi', $allocationId, $initialPaymentKey, $simTot, $simPaid, $simPend, $mode, $paymentTransactionId, $simStatus, $createdBy);
+                if (!$initialPayment->execute()) throw new Exception('Unable to save imported SIM payment history: ' . $initialPayment->error);
+                $initialPayment->close();
+            }
             $snapshotStmt = $conn->prepare('SELECT sa.*, s.sim_no, s.sim_type, dl.dealer_name AS owner_name FROM stock_allocations sa LEFT JOIN sims s ON s.id = sa.sim_id LEFT JOIN dealers dl ON dl.id = sa.owner_id AND sa.owner_type = "dealer" WHERE sa.id = ? LIMIT 1');
             $snapshotStmt->bind_param('i', $allocationId);
             $snapshotStmt->execute();
@@ -394,6 +424,9 @@ try {
 
     $conn->commit();
     sendResponse(true, "Bulk stock allocation completed successfully for " . count($validRows) . " rows.", ['count' => count($validRows)]);
+} catch (InvalidArgumentException $ex) {
+    $conn->rollback();
+    sendResponse(false, 'Excel validation failed: ' . $ex->getMessage(), [], [], 400);
 } catch (Exception $ex) {
     $conn->rollback();
     sendResponse(false, 'Failed to import stock allocations: ' . $ex->getMessage(), [], [], 500);

@@ -5,6 +5,7 @@ require_once '../../../utils/response.php';
 require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 require_once '../../../utils/payment_modes.php';
+require_once '../../../utils/transaction_ids.php';
 
 handlePreflight();
 
@@ -47,9 +48,7 @@ $totalSaleAmount = isset($data->total_sale_amount)
     ? (float) $data->total_sale_amount
     : 0;
 
-$transactionId = trim(
-    (string) ($data->transaction_id ?? '')
-);
+$transactionId = (string) ($data->transaction_id ?? '');
 
 $paymentMode = trim(
     (string) ($data->payment_mode ?? '')
@@ -140,7 +139,7 @@ if ($totalSaleAmount <= 0) {
 
 if (
     $transactionId !== '' &&
-    !preg_match('/^[A-Za-z0-9]{1,12}$/', $transactionId)
+    !preg_match('/^[0-9]{6}$/', $transactionId)
 ) {
     sendResponse(
         false,
@@ -792,6 +791,7 @@ if ($existingPaymentId !== null) {
         throw new Exception('Failed to update payment details.');
     }
     $updateStmt->close();
+    reserveTransactionId($conn, (string) ($transactionIdValue ?? ''), 'customer_payments', (string) $existingPaymentId);
     if ($paymentStep === 2) {
         $syncCashCollection($conn, $customerId, $vehicleId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $currentUser);
         $completeCustomerStock($conn, $customerId, $vehicleId);
@@ -882,6 +882,7 @@ if ($existingPaymentId !== null) {
         $insertStmt->insert_id;
 
     $insertStmt->close();
+    reserveTransactionId($conn, (string) ($transactionIdValue ?? ''), 'customer_payments', (string) $paymentId);
 
     writeCreatedFields($conn, $paymentId, 'Customer Payment', [
         'customer_id' => $customerId,

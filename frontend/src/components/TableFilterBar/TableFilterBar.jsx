@@ -3,6 +3,8 @@ import { useError } from '../../context/ErrorContext';
 import './TableFilterBar.css';
 import { Search, RotateCcw } from 'lucide-react';
 import FilterSelect from '../FilterSelect/FilterSelect';
+import SearchableDropdown from '../SearchableDropdown/SearchableDropdown';
+import DateInput from '../DateInput';
 import { PAYMENT_STATUS_OPTIONS } from '../../constants/paymentStatuses';
 
 const MONTHS = [
@@ -218,6 +220,7 @@ const TableFilterBar = ({
     filters,
     onChange,
     onReset,
+    onSearch,
     items = [],
     dateKeys = [],
     searchPlaceholder = 'Search...',
@@ -240,6 +243,7 @@ const TableFilterBar = ({
     showAsset = false,
     showSoftware = false,
     showInstallationStatus = false,
+    installationStatusNextRow = true,
     showPaymentStatus = false,
     showStatus = false,
     showOwnerType = false,
@@ -250,11 +254,17 @@ const TableFilterBar = ({
     deviceOptions,
     simOptions,
     customDateFilters = [],
+    dateRangeFilters = [],
     showDateRange = false,
     dealerOptions,
+    dealerDropdownResetKey = 0,
     showDealer = false,
     gridCols = 4,
-    className = ''
+    statusPlaceholder = 'All Status',
+    className = '',
+    technicianOptions,
+    showTechnician = false,
+    technicianDropdownResetKey = 0
 }) => {
     const { showError } = useError();
     const years = useMemo(() => getAvailableYears(items, dateKeys), [items, dateKeys]);
@@ -305,7 +315,7 @@ const TableFilterBar = ({
     }, [paymentStatusOptions]);
 
     const resolvedStatuses = useMemo(() => {
-        if (statusOptions) return unique(statusOptions);
+        if (statusOptions) return [...new Set(statusOptions.filter(Boolean).map(String))];
         const statuses = unique(items.map((i) => i.status)).map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase());
         const defaultList = ['Available', 'Allocated', 'Used'];
         return unique([...defaultList, ...statuses]);
@@ -317,6 +327,10 @@ const TableFilterBar = ({
     }, [ownerTypeOptions]);
 
     const getCustomDateYears = (dateFilter) => {
+        if (Array.isArray(dateFilter.years)) {
+            return unique(dateFilter.years).sort((first, second) => Number(second) - Number(first));
+        }
+
         const values = items.flatMap((item) => {
             const nestedItems = dateFilter.nestedKey && Array.isArray(item[dateFilter.nestedKey])
                 ? item[dateFilter.nestedKey]
@@ -354,15 +368,32 @@ const TableFilterBar = ({
                 {(showDealer || dealerOptions) && (
                     <div className="filter-group">
                         <label className="filter-label">Dealer</label>
-                        <FilterSelect value={filters.dealer_id || ''} onChange={set('dealer_id')}>
-                            <option value="">All Dealers</option>
-                            {(dealerOptions || []).map((dealer) => (
-                                <option key={dealer.value} value={dealer.value}>{dealer.label}</option>
-                            ))}
-                            {!dealerOptions && unique(items.map(i => i.dealer_name)).map((dealer) => (
-                                <option key={dealer} value={dealer}>{dealer}</option>
-                            ))}
-                        </FilterSelect>
+                        <SearchableDropdown
+                            key={dealerDropdownResetKey}
+                            value={filters.dealer_id || ''}
+                            onChange={(value) => onChange({ ...filters, dealer_id: value })}
+                            placeholder="All Dealers"
+                            options={[
+                                { value: '', label: 'All Dealers' },
+                                ...(dealerOptions || unique(items.map((item) => item.dealer_name)).map((dealer) => ({ value: dealer, label: dealer })))
+                            ]}
+                        />
+                    </div>
+                )}
+
+                {showTechnician && (
+                    <div className="filter-group">
+                        <label className="filter-label">Technician</label>
+                        <SearchableDropdown
+                            key={technicianDropdownResetKey}
+                            value={filters.technician_id || ''}
+                            onChange={(value) => onChange({ ...filters, technician_id: value })}
+                            placeholder="All Technicians"
+                            options={[
+                                { value: '', label: 'All Technicians' },
+                                ...(technicianOptions || [])
+                            ]}
+                        />
                     </div>
                 )}
 
@@ -463,7 +494,7 @@ const TableFilterBar = ({
                     <div className="filter-group">
                         <label className="filter-label">Status</label>
                         <FilterSelect value={filters.status || ''} onChange={set('status')}>
-                            <option value="">All Status</option>
+                            <option value="">{statusPlaceholder}</option>
                             {resolvedStatuses.map((status) => (
                                 <option key={status} value={status}>{status}</option>
                             ))}
@@ -486,7 +517,7 @@ const TableFilterBar = ({
 
                 {/* 12. Installation Status (starts on next row) */}
                 {(showInstallationStatus || installationStatusOptions) && (
-                    <div className="filter-group filter-group--next-row">
+                    <div className={`filter-group${installationStatusNextRow ? ' filter-group--next-row' : ''}`}>
                         <label className="filter-label">Installation Status</label>
                         <FilterSelect value={filters.installationStatus || ''} onChange={set('installationStatus')}>
                             <option value="">All Installation Status</option>
@@ -548,6 +579,44 @@ const TableFilterBar = ({
                     </>
                 )}
 
+                {dateRangeFilters.map((dateFilter) => {
+                    const fromKey = `${dateFilter.key}_from`;
+                    const toKey = `${dateFilter.key}_to`;
+                    const fromDate = filters[fromKey] || '';
+                    const toDate = filters[toKey] || '';
+                    const hasInvalidRange = fromDate && toDate && toDate < fromDate;
+
+                    return (
+                        <div className="filter-date-range-group" key={dateFilter.key}>
+                            <div className="filter-group">
+                                <label className="filter-label">{dateFilter.label} From</label>
+                                <DateInput
+                                    className="form-control filter-input"
+                                    value={fromDate}
+                                    allowFuture
+                                    aria-label={`${dateFilter.label} From`}
+                                    onChange={(value) => onChange({ ...filters, [fromKey]: value })}
+                                />
+                            </div>
+                            <div className="filter-group">
+                                <label className="filter-label">{dateFilter.label} To</label>
+                                <DateInput
+                                    className="form-control filter-input"
+                                    value={toDate}
+                                    allowFuture
+                                    aria-label={`${dateFilter.label} To`}
+                                    onChange={(value) => onChange({ ...filters, [toKey]: value })}
+                                />
+                            </div>
+                            {hasInvalidRange && (
+                                <div className="text-danger" role="alert" style={{ gridColumn: '1 / -1' }}>
+                                    To Date must be on or after From Date.
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+
                 {/* 15. Extra Date Filters */}
                 {customDateFilters.length > 0 && customDateFilters.map((dateFilter) => (
                     <div key={dateFilter.key} className="filter-group">
@@ -593,7 +662,11 @@ const TableFilterBar = ({
                 <button
                     type="button"
                     className="btn btn-primary table-filter-btn"
-                    onClick={() => {}} /* Just for UI */
+                    onClick={onSearch}
+                    disabled={Boolean(dateRangeFilters.some(({ key }) =>
+                        filters[`${key}_from`] && filters[`${key}_to`] &&
+                        filters[`${key}_to`] < filters[`${key}_from`]
+                    ))}
                 >
                     <Search size={16} />
                     Search
@@ -624,15 +697,18 @@ export const emptyTableFilters = () => ({
     installationStatus: '',
     status: '',
     paymentStatus: '',
+    dealer_id: '',
+    technician_id: '',
     deviceType: '',
     ownerType: '',
     given_date: '',
     given_date_operator: 'exact',
     activation_date: '',
     activation_date_operator: 'exact',
+    activation_date_from: '',
+    activation_date_to: '',
     date_from: '',
     date_to: ''
 });
 
 export default TableFilterBar;
-

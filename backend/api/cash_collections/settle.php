@@ -5,6 +5,7 @@ require_once '../../utils/date.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/payment_modes.php';
+require_once '../../utils/transaction_ids.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -18,12 +19,13 @@ $collectionId = (int) ($data->collection_id ?? 0);
 $settlementAmountRaw = $data->settlement_amount ?? ($data->amount_remitted ?? null);
 $settlementDate = trim((string) ($data->settlement_date ?? date('Y-m-d')));
 $paymentMode = trim((string) ($data->payment_mode ?? 'Cash'));
-$transactionId = trim((string) ($data->transaction_id ?? ''));
+$transactionId = (string) ($data->transaction_id ?? '');
 $notes = trim((string) ($data->notes ?? ''));
 $allowedPaymentModes = getPaymentModes();
 
 if ($settlementDate === '' || !in_array($paymentMode, $allowedPaymentModes, true)) sendResponse(false, 'Valid settlement date and payment mode are required.', [], [], 400);
 if (isFutureDate($settlementDate)) sendResponse(false, 'Future settlement dates are not allowed.', [], [], 400);
+if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) sendResponse(false, 'Transaction ID must contain exactly 6 digits.', [], [], 400);
 if ($paymentMode !== 'Cash' && $transactionId === '') sendResponse(false, 'Transaction ID is required for non-cash payment modes.', [], [], 400);
 
 $conn = (new Database())->getConnection();
@@ -72,6 +74,7 @@ try {
     if (!$header->execute()) throw new Exception('Failed to create settlement history record.');
     $settlementId = $conn->insert_id;
     $header->close();
+    reserveTransactionId($conn, $transactionId, 'cash_collection_settlements', (string) $settlementId);
 
     $update = $conn->prepare("UPDATE customer_cash_collections SET amount_remitted = ?, pending_amount = ?, settlement_status = ?, settlement_date = ?, payment_mode = ?, transaction_id = NULLIF(?, ''), notes = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP WHERE id = ?");
     $allocation = $conn->prepare('INSERT INTO cash_collection_settlement_allocations (settlement_id, collection_id, customer_id, amount_allocated, outstanding_before, outstanding_after) VALUES (?, ?, ?, ?, ?, ?)');
@@ -87,6 +90,7 @@ try {
         $status = $after <= 0 ? 'Paid' : 'Partially Paid';
         $update->bind_param('ddsssssi', $newRemitted, $after, $status, $settlementDate, $paymentMode, $transactionId, $notes, $rowId);
         if (!$update->execute()) throw new Exception('Failed to update customer cash collection.');
+        reserveTransactionId($conn, '', 'customer_cash_collections', (string) $rowId);
         $customerId = (int) $row['customer_id'];
         $allocation->bind_param('iiiddd', $settlementId, $rowId, $customerId, $apply, $before, $after);
         if (!$allocation->execute()) throw new Exception('Failed to create settlement allocation.');

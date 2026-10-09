@@ -1,0 +1,77 @@
+.dealer-sim-activation-table {
+    min-width: 1450px;
+}
+
+.dealer-sim-activation-table th,
+.dealer-sim-activation-table td {
+    padding: 0.55rem 0.65rem;
+    white-space: nowrap;
+}
+
+.dealer-sim-activation-table .action-buttons {
+    gap: 0.2rem;
+}
+
+.sim-activation-modal-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.sim-activation-modal-section-title {
+    margin: 1.25rem 0 0.9rem;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+}
+
+.sim-activation-modal-full-width {
+    grid-column: 1 / -1;
+}
+
+.sim-activation-payment-history {
+    grid-column: 1 / -1;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.sim-activation-payment-history table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.sim-activation-payment-history th,
+.sim-activation-payment-history td {
+    padding: 0.55rem 0.7rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.sim-activation-payment-empty {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+}
+
+.sim-activation-close-payment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 1rem 0;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.sim-activation-close-payment input {
+    width: 1rem;
+    height: 1rem;
+}
+
+.sim-activation-new-payment {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}

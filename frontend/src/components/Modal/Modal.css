@@ -36,6 +36,16 @@
   animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.modal-shell.renewal-edit-modal {
+  width: min(95vw, 1100px);
+}
+
+.renewal-edit-modal .renewal-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .modal-content {
   width: min(95vw, 800px);
   max-height: 90vh;
@@ -121,6 +131,14 @@
     max-height: 92vh;
   }
 
+  .modal-shell.renewal-edit-modal {
+    width: min(96vw, 1100px);
+  }
+
+  .renewal-edit-modal .renewal-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .modal-content {
     width: min(96vw, 800px);
     max-height: 92vh;
@@ -140,5 +158,9 @@
     width: 100vw;
     max-height: 100vh;
     border-radius: 0;
+  }
+
+  .renewal-edit-modal .renewal-form-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

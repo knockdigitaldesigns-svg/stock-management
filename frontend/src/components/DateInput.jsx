@@ -1,13 +1,18 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { formatDate, getTodayDate, isFutureDate, parseDate } from '../utils/date';
 
-const DateInput = ({ value, onChange, ...props }) => {
+const DateInput = ({ value, onChange, allowFuture = false, ...props }) => {
     const [focused, setFocused] = useState(false);
     const [error, setError] = useState('');
     const handleChange = (event) => {
         const nextValue = parseDate(event.target.value);
+        if (!event.target.value) {
+            setError('');
+            onChange('');
+            return;
+        }
         if (!nextValue) return;
-        if (isFutureDate(nextValue)) {
+        if (!allowFuture && isFutureDate(nextValue)) {
             setError('Future dates are not allowed.');
             return;
         }
@@ -27,8 +32,8 @@ const DateInput = ({ value, onChange, ...props }) => {
                     {...props}
                     ref={dateInputRef}
                     type="date"
-                    max={getTodayDate()}
-                    defaultValue={parseDate(value) || ''}
+                    max={allowFuture ? undefined : getTodayDate()}
+                    value={parseDate(value) || ''}
                     aria-invalid={Boolean(error)}
                     onBlur={(event) => {
                         if (!event.target.value && value) onChange('');

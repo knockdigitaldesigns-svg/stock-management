@@ -28,6 +28,17 @@ $whereConditions = [];
 $params = [];
 $types = '';
 
+$dealerIdInput = trim((string)($_GET['dealer_id'] ?? ''));
+if ($dealerIdInput !== '') {
+    $dealerId = filter_var($dealerIdInput, FILTER_VALIDATE_INT);
+    if ($dealerId === false || $dealerId <= 0) {
+        sendResponse(false, 'Invalid dealer ID.', [], [], 400);
+    }
+    $whereConditions[] = 'd.id = ?';
+    $params[] = $dealerId;
+    $types .= 'i';
+}
+
 if (isset($_GET['for_alert']) && $_GET['for_alert'] === '1') {
     $whereConditions[] = "LOWER(TRIM(d.installation_status)) IN ('onsite', 'offsite')";
 } elseif (isset($_GET['installation_status']) && trim((string)$_GET['installation_status']) !== '') {
@@ -98,7 +109,7 @@ if (($simValidity = trim((string)($_GET['sim_validity'] ?? ''))) !== '') {
 }
 
 if (($paymentStatus = trim((string)($_GET['payment_status'] ?? ''))) !== '') {
-    $whereConditions[] = "CASE WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) <= 0 THEN 'No Payment Required' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) THEN 'Paid' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) > 0 THEN 'Partially Paid' ELSE 'Not Paid' END = ?";
+    $whereConditions[] = "CASE WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) <= 0 THEN 'No Payment Required' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) THEN 'Paid' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) > 0 THEN 'Partially Paid' ELSE 'Not Paid' END = ?";
     $params[] = $paymentStatus;
     $types .= 's';
 }
@@ -173,13 +184,13 @@ $sql = "
         COALESCE((SELECT COUNT(DISTINCT sa.sim_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1=sa.sim_id OR cvd.sim_id_2=sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id=sa.sim_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.sim_id=sa.sim_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0) as used_sim_count,
         GREATEST(0, COALESCE((SELECT COUNT(DISTINCT device_id) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND device_id IS NOT NULL), 0) - COALESCE((SELECT COUNT(DISTINCT sa.device_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.device_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id=sa.device_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id=sa.device_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.device_id=sa.device_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0)) as available_device_count,
         GREATEST(0, COALESCE((SELECT COUNT(DISTINCT sim_id) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND sim_id IS NOT NULL), 0) - COALESCE((SELECT COUNT(DISTINCT sa.sim_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1=sa.sim_id OR cvd.sim_id_2=sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id=sa.sim_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.sim_id=sa.sim_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0)) as available_sim_count,
-        COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) as total_amount,
-        COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) as amount_paid,
-        GREATEST(0, COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) - COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0)) as pending_amount,
+        COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) as total_amount,
+        COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) as amount_paid,
+        GREATEST(0, COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) - COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0)) as pending_amount,
         CASE
-            WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) <= 0 THEN 'No Payment Required'
-            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) THEN 'Paid'
-            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id), 0) > 0 THEN 'Partially Paid'
+            WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) <= 0 THEN 'No Payment Required'
+            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) THEN 'Paid'
+            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) > 0 THEN 'Partially Paid'
             ELSE 'Not Paid'
         END as payment_status,
         COALESCE((SELECT sas.minimum_device_count FROM stock_alert_settings sas WHERE sas.owner_type='dealer' AND sas.owner_id=d.id LIMIT 1), 0) as minimum_device_count,

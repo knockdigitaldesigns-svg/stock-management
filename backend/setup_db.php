@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/utils/transaction_ids.php';
+
 $host = "localhost";
 $username = "root";
 $password = "";
@@ -169,8 +171,9 @@ $tables = [
         pending_amount DECIMAL(10,2) DEFAULT 0.00,
         software VARCHAR(50) DEFAULT NULL,
         payment_status ENUM('Paid', 'Partially Paid', 'Not Paid') DEFAULT 'Not Paid',
+        payment_date DATE DEFAULT NULL,
         payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL,
-        transaction_id VARCHAR(100) DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -181,6 +184,35 @@ $tables = [
         FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE SET NULL,
         FOREIGN KEY (sim_id) REFERENCES sims(id) ON DELETE SET NULL
     )",
+    "CREATE TABLE IF NOT EXISTS dealer_sim_allocation_payments (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        allocation_id INT NOT NULL,
+        idempotency_key VARCHAR(64) NOT NULL,
+        total_amount_due DECIMAL(10,2) NOT NULL,
+        amount_paid DECIMAL(10,2) NOT NULL,
+        amount_pending DECIMAL(10,2) NOT NULL,
+        payment_mode VARCHAR(50) DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
+        payment_date DATE DEFAULT NULL,
+        payment_status VARCHAR(30) NOT NULL,
+        remarks TEXT NULL,
+        is_legacy_snapshot TINYINT(1) NOT NULL DEFAULT 0,
+        created_by INT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_dealer_sim_payment_request (allocation_id, idempotency_key),
+        INDEX idx_dealer_sim_payments_allocation (allocation_id, id),
+        CONSTRAINT fk_dealer_sim_payment_allocation FOREIGN KEY (allocation_id) REFERENCES stock_allocations(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    "CREATE TABLE IF NOT EXISTS dealer_allocation_payment_requests (
+        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        allocation_id INT NOT NULL,
+        request_key VARCHAR(64) NOT NULL,
+        payload_hash CHAR(64) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
+        INDEX idx_dealer_allocation_payment_request_key (request_key),
+        CONSTRAINT fk_dealer_allocation_payment_request_allocation FOREIGN KEY (allocation_id) REFERENCES stock_allocations(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     "CREATE TABLE IF NOT EXISTS stock_transfers (
         id INT AUTO_INCREMENT PRIMARY KEY,
         allocation_id INT DEFAULT NULL,
@@ -289,7 +321,7 @@ $tables = [
         settlement_status ENUM('Pending', 'Partially Paid', 'Paid') NOT NULL DEFAULT 'Pending',
         settlement_date DATE DEFAULT NULL,
         payment_mode VARCHAR(50) DEFAULT NULL,
-        transaction_id VARCHAR(100) DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
         notes TEXT DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -309,7 +341,7 @@ $tables = [
         outstanding_after DECIMAL(12,2) NOT NULL,
         settlement_date DATE NOT NULL,
         payment_mode VARCHAR(50) NOT NULL,
-        transaction_id VARCHAR(100) DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
         notes TEXT DEFAULT NULL,
         settled_by_user_id INT DEFAULT NULL,
         settled_by_name VARCHAR(150) DEFAULT NULL,
@@ -366,6 +398,7 @@ $tables = [
     "CREATE TABLE IF NOT EXISTS renewal_history (
         id INT AUTO_INCREMENT PRIMARY KEY,
         renewal_id INT NOT NULL,
+        allocation_id INT DEFAULT NULL,
         customer_id INT NOT NULL,
         action_type VARCHAR(50) NOT NULL,
         action_date DATE NOT NULL,
@@ -379,7 +412,8 @@ $tables = [
         amount_paid DECIMAL(10,2) DEFAULT 0.00,
         amount_pending DECIMAL(10,2) DEFAULT 0.00,
         payment_mode VARCHAR(50) DEFAULT NULL,
-        transaction_id VARCHAR(100) DEFAULT NULL,
+        payment_date DATE DEFAULT NULL,
+        transaction_id CHAR(6) DEFAULT NULL,
         changed_by INT DEFAULT NULL,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -419,14 +453,18 @@ $columnChecks = [
     ['dealers', 'software', "ALTER TABLE dealers ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER installation_status"],
     ['dealers', 'alternate_mobile_no', "ALTER TABLE dealers ADD COLUMN alternate_mobile_no VARCHAR(10) DEFAULT NULL AFTER mobile_no"],
     ['stock_allocations', 'amount_paid', "ALTER TABLE stock_allocations ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 AFTER total_amount"],
-    ['stock_allocations', 'transaction_id', "ALTER TABLE stock_allocations ADD COLUMN transaction_id VARCHAR(100) DEFAULT NULL AFTER payment_mode"],
+    ['stock_allocations', 'payment_date', "ALTER TABLE stock_allocations ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_status"],
+    ['stock_allocations', 'transaction_id', "ALTER TABLE stock_allocations ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payment_mode"],
     ['stock_allocations', 'software', "ALTER TABLE stock_allocations ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER pending_amount"],
     ['stock_allocations', 'sim_given_date', "ALTER TABLE stock_allocations ADD COLUMN sim_given_date DATE DEFAULT NULL AFTER allocation_date"],
     ['stock_allocations', 'sim_activation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_activation_date DATE DEFAULT NULL AFTER sim_given_date"],
     ['stock_allocations', 'sim_validity_id', "ALTER TABLE stock_allocations ADD COLUMN sim_validity_id INT DEFAULT NULL AFTER sim_activation_date"],
     ['stock_allocations', 'sim_expiry_date', "ALTER TABLE stock_allocations ADD COLUMN sim_expiry_date DATE DEFAULT NULL AFTER sim_validity_id"],
     ['stock_allocations', 'sim_deactivation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_deactivation_date DATE DEFAULT NULL AFTER sim_expiry_date"],
-    ['stock_allocations', 'sim_status', "ALTER TABLE stock_allocations ADD COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available' AFTER sim_deactivation_date"],
+    ['stock_allocations', 'sim_reactivation_date', "ALTER TABLE stock_allocations ADD COLUMN sim_reactivation_date DATE DEFAULT NULL AFTER sim_deactivation_date"],
+    ['stock_allocations', 'sim_status', "ALTER TABLE stock_allocations ADD COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available' AFTER sim_reactivation_date"],
+    ['renewal_history', 'allocation_id', "ALTER TABLE renewal_history ADD COLUMN allocation_id INT DEFAULT NULL AFTER renewal_id"],
+    ['renewal_history', 'payment_date', "ALTER TABLE renewal_history ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_mode"],
     ['technicians', 'notes', "ALTER TABLE technicians ADD COLUMN notes TEXT NULL AFTER enrolled_date"],
     ['technicians', 'alternate_mobile_no', "ALTER TABLE technicians ADD COLUMN alternate_mobile_no VARCHAR(10) DEFAULT NULL AFTER mobile_no"],
     ['stock_allocations', 'notes', "ALTER TABLE stock_allocations ADD COLUMN notes TEXT NULL AFTER payment_mode"],
@@ -435,6 +473,7 @@ $columnChecks = [
     ['customer_installations', 'vehicle_id', "ALTER TABLE customer_installations ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
+    ['dealer_allocation_payment_requests', 'payload_hash', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN payload_hash CHAR(64) NOT NULL DEFAULT '' AFTER request_key"],
 ];
 
 foreach ($columnChecks as [$table, $column, $alterSql]) {
@@ -467,8 +506,60 @@ if ($installationLeadClosureColumn && ($column = $installationLeadClosureColumn-
 }
 
 $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN sim_status ENUM('Available', 'Active', 'Deactive', 'Expired', 'Safe Custody') DEFAULT 'Available'");
-$conn->query("ALTER TABLE stock_allocations MODIFY COLUMN payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL");
+$paymentModeColumnUpdated = $conn->query("ALTER TABLE stock_allocations MODIFY COLUMN payment_mode ENUM('ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash', 'UPI', 'Bank Transfer', 'Card', 'Other') DEFAULT NULL");
+if (!$paymentModeColumnUpdated) {
+    echo "Error updating stock allocation payment modes: " . $conn->error . "\n";
+} else {
+    $paymentModeValues = "'ET Gpay', 'ET Phonepe', 'ET Paytm', 'ET Account', '8002 Gpay', '8002 Phonepe', '8002 Paytm', 'Wati Gpay', 'Wati Phonepe', 'Wati Paytm', 'PG Gateway', 'Cash'";
+    $paymentModeRepair = $conn->query(
+        "UPDATE stock_allocations sa
+         SET sa.payment_mode = (
+             SELECT h.new_value
+             FROM history h
+             WHERE h.customer_id = sa.id
+               AND h.module = 'Stock Allocation Payment'
+               AND h.field_changed = 'payment_mode'
+               AND h.new_value IN ($paymentModeValues)
+             ORDER BY h.id DESC
+             LIMIT 1
+         )
+         WHERE COALESCE(sa.payment_mode, '') = ''
+           AND EXISTS (
+               SELECT 1
+               FROM history h
+               WHERE h.customer_id = sa.id
+                 AND h.module = 'Stock Allocation Payment'
+                 AND h.field_changed = 'payment_mode'
+                 AND h.new_value IN ($paymentModeValues)
+           )"
+    );
+    if (!$paymentModeRepair) {
+        echo "Error restoring saved stock allocation payment modes: " . $conn->error . "\n";
+    }
+}
 $conn->query("UPDATE stock_allocations sa JOIN sims s ON s.id = sa.sim_id SET sa.sim_given_date = COALESCE(sa.sim_given_date, sa.allocation_date), sa.sim_validity_id = COALESCE(sa.sim_validity_id, s.sim_validity_id), sa.sim_status = COALESCE(sa.sim_status, 'Available') WHERE sa.sim_id IS NOT NULL");
+$legacySimPayments = $conn->query(
+    "INSERT INTO dealer_sim_allocation_payments
+        (allocation_id, idempotency_key, total_amount_due, amount_paid, amount_pending, payment_mode, transaction_id, payment_date, payment_status, is_legacy_snapshot)
+     SELECT sa.id, CONCAT('legacy-', sa.id), sa.total_amount, sa.amount_paid,
+            GREATEST(0, sa.total_amount - sa.amount_paid), sa.payment_mode, sa.transaction_id,
+            sa.payment_date,
+            CASE WHEN sa.total_amount <= 0 THEN 'Not Paid'
+                 WHEN sa.amount_paid >= sa.total_amount THEN 'Paid'
+                 WHEN sa.amount_paid > 0 THEN 'Partially Paid'
+                 ELSE 'Not Paid' END,
+            1
+     FROM stock_allocations sa
+     WHERE sa.owner_type = 'dealer' AND sa.sim_id IS NOT NULL AND sa.amount_paid > 0
+       AND NOT EXISTS (
+           SELECT 1 FROM dealer_sim_allocation_payments p WHERE p.allocation_id = sa.id
+       )"
+);
+if (!$legacySimPayments) {
+    $error = $conn->error;
+    $conn->close();
+    die("Error preserving existing SIM payment summaries: " . $error . "\n");
+}
 
 $installationCustomerSupportIndex = $conn->query("SHOW INDEX FROM customer_installations WHERE Key_name = 'idx_customer_installation_customer'");
 if (!$installationCustomerSupportIndex || $installationCustomerSupportIndex->num_rows === 0) {
@@ -630,6 +721,9 @@ $permissionDefinitions = [
     ['dealers.add', 'Dealer Add', 'dealers', 'ADD'],
     ['dealers.edit', 'Dealer Edit', 'dealers', 'EDIT'],
     ['dealers.delete', 'Dealer Delete', 'dealers', 'DELETE'],
+    ['dealer_sim_activation.view', 'Dealer SIM Activation View', 'dealer_sim_activation', 'VIEW'],
+    ['dealer_sim_activation.edit', 'Dealer SIM Activation Edit', 'dealer_sim_activation', 'EDIT'],
+    ['dealer_sim_activation.delete', 'Dealer SIM Activation Delete', 'dealer_sim_activation', 'DELETE'],
     ['dealers.import', 'Dealer Import', 'dealers', 'IMPORT'],
     ['dealers.export', 'Dealer Export', 'dealers', 'EXPORT'],
     ['technicians.view', 'Technician View', 'technicians', 'VIEW'],
@@ -750,6 +844,13 @@ $deviceTypes = ['Basic', 'Voice', 'AC', 'Dashcam', 'S20', 'S15', 'G60', 'OBD', '
 foreach ($deviceTypes as $model) {
     $safeModel = $conn->real_escape_string($model);
     $conn->query("INSERT INTO device_types (device_type) VALUES ('$safeModel') ON DUPLICATE KEY UPDATE device_type = VALUES(device_type)");
+}
+
+try {
+    backfillTransactionIdRegistry($conn);
+} catch (Throwable $error) {
+    $conn->close();
+    die("Transaction ID migration failed: " . $error->getMessage() . "\n");
 }
 
 $conn->close();

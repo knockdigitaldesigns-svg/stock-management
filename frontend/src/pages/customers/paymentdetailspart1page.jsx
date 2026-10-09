@@ -784,6 +784,7 @@ const PaymentDetailsPart1Page = () => {
                                 placeholder="Enter 6 digit transaction ID"
                                 maxLength={6}
                                 inputMode="numeric"
+                                pattern="[0-9]{6}"
                                 disabled={saving}
                             />
                             {paymentErrors.transactionId && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {paymentErrors.transactionId}</small>}

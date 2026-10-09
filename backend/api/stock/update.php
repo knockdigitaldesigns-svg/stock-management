@@ -310,14 +310,24 @@ try {
                 $rowPaid = (float) $amountPaid;
                 $rowPending = max(0, $rowTotal - $rowPaid);
                 $rowStatus = $rowTotal <= 0 ? 'Not Paid' : ($rowPending <= 0 ? 'Paid' : ($rowPaid > 0 ? 'Partially Paid' : 'Not Paid'));
-                $existingAllocId = $conn->prepare("SELECT id FROM stock_allocations WHERE sim_id = ? AND owner_type = ? AND owner_id = ? ORDER BY id DESC LIMIT 1");
+                $existingAllocId = $conn->prepare("SELECT id, total_amount, amount_paid FROM stock_allocations WHERE sim_id = ? AND owner_type = ? AND owner_id = ? ORDER BY id DESC LIMIT 1");
                 $existingAllocId->bind_param('isi', $simId, $ownerType, $ownerId);
                 $existingAllocId->execute();
                 $allocRow = $existingAllocId->get_result()->fetch_assoc();
                 $existingAllocId->close();
                 if ($allocRow) {
-                    $updatePayment = $conn->prepare("UPDATE stock_allocations SET total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, software = NULLIF(?, '') WHERE id = ?");
-                    $updatePayment->bind_param('dddssi', $rowTotal, $rowPaid, $rowPending, $rowStatus, $software, $allocRow['id']);
+                    if ($ownerType === 'dealer'
+                        && (round($rowTotal, 2) !== round((float) $allocRow['total_amount'], 2)
+                            || round($rowPaid, 2) !== round((float) $allocRow['amount_paid'], 2))) {
+                        throw new Exception('Dealer SIM payment totals cannot be edited here. Record each payment from the Dealer SIM Activation page.');
+                    }
+                    if ($ownerType === 'dealer') {
+                        $updatePayment = $conn->prepare("UPDATE stock_allocations SET software = NULLIF(?, '') WHERE id = ?");
+                        $updatePayment->bind_param('si', $software, $allocRow['id']);
+                    } else {
+                        $updatePayment = $conn->prepare("UPDATE stock_allocations SET total_amount = ?, amount_paid = ?, pending_amount = ?, payment_status = ?, software = NULLIF(?, '') WHERE id = ?");
+                        $updatePayment->bind_param('dddssi', $rowTotal, $rowPaid, $rowPending, $rowStatus, $software, $allocRow['id']);
+                    }
                     $updatePayment->execute();
                     $updatePayment->close();
                 }
@@ -350,7 +360,23 @@ try {
         if (!$insertAllocation->execute()) {
             throw new Exception("Failed to allocate SIM {$simRow['sim_no']}.");
         }
+        $allocationId = (int) $insertAllocation->insert_id;
         $insertAllocation->close();
+        if ($ownerType === 'dealer' && $rowPaid > 0) {
+            $initialPaymentKey = 'initial-payment-' . $allocationId;
+            $paymentMode = null;
+            $paymentStatus = $rowStatus;
+            $initialPayment = $conn->prepare(
+                "INSERT INTO dealer_sim_allocation_payments
+                    (allocation_id, idempotency_key, total_amount_due, amount_paid, amount_pending,
+                     payment_mode, payment_status, is_legacy_snapshot)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
+            );
+            if (!$initialPayment) throw new Exception('Unable to prepare SIM payment history: ' . $conn->error);
+            $initialPayment->bind_param('isdddss', $allocationId, $initialPaymentKey, $rowTotal, $rowPaid, $rowPending, $paymentMode, $paymentStatus);
+            if (!$initialPayment->execute()) throw new Exception('Unable to save SIM payment history: ' . $initialPayment->error);
+            $initialPayment->close();
+        }
 
         $updateSim = $conn->prepare("UPDATE sims SET status = 'allocated', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
         $updateSim->bind_param("i", $simId);

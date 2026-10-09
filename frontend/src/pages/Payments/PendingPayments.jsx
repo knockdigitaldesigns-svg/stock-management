@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, RotateCcw, Calendar, WalletCards } from 'lucide-react';
 import api from '../../services/api';
 import { formatDate } from '../../utils/date';
+import Pagination from '../../components/Pagination/Pagination';
 
 const PendingPayments = () => {
     const [rows, setRows] = useState([]);
@@ -12,6 +13,8 @@ const PendingPayments = () => {
     const [status, setStatus] = useState('All');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
 
     const fetchPendingPayments = async () => {
         try {
@@ -43,8 +46,7 @@ const PendingPayments = () => {
             const matchesSearch =
                 !text ||
                 String(row.name || '').toLowerCase().includes(text) ||
-                String(row.type || '').toLowerCase().includes(text) ||
-                String(row.reference || '').toLowerCase().includes(text);
+                String(row.type || '').toLowerCase().includes(text);
 
             const matchesCategory =
                 category === 'All' || row.category === category;
@@ -70,6 +72,10 @@ const PendingPayments = () => {
         });
     }, [rows, search, category, status, dateFrom, dateTo]);
 
+    const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+    const currentPage = Math.min(page, pageCount);
+    const paginatedRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
     const totals = useMemo(() => {
         return filteredRows.reduce(
             (acc, row) => {
@@ -87,11 +93,17 @@ const PendingPayments = () => {
     }, [filteredRows]);
 
     const resetFilters = () => {
+        setPage(1);
         setSearch('');
         setCategory('All');
         setStatus('All');
         setDateFrom('');
         setDateTo('');
+    };
+
+    const updateFilter = (setter, value) => {
+        setPage(1);
+        setter(value);
     };
 
     const getStatusClass = (statusValue) => {
@@ -180,9 +192,9 @@ const PendingPayments = () => {
                             <input
                                 type="text"
                                 className="form-control filter-input has-icon table-filter-search"
-                                placeholder="Search name / type / reference"
+                                placeholder="Search name / type"
                                 value={search}
-                                onChange={(e) => setSearch(e.target.value)}
+                                onChange={(e) => updateFilter(setSearch, e.target.value)}
                             />
                         </div>
                     </div>
@@ -192,7 +204,7 @@ const PendingPayments = () => {
                         <select
                             className="form-control filter-input"
                             value={category}
-                            onChange={(e) => setCategory(e.target.value)}
+                            onChange={(e) => updateFilter(setCategory, e.target.value)}
                         >
                             <option value="All">All</option>
                             <option value="Customer">Customer</option>
@@ -206,7 +218,7 @@ const PendingPayments = () => {
                         <select
                             className="form-control filter-input"
                             value={status}
-                            onChange={(e) => setStatus(e.target.value)}
+                            onChange={(e) => updateFilter(setStatus, e.target.value)}
                         >
                             <option value="All">All</option>
                             <option value="Pending">Pending</option>
@@ -225,7 +237,7 @@ const PendingPayments = () => {
                                     alert('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                setDateFrom(e.target.value);
+                                updateFilter(setDateFrom, e.target.value);
                             }}
                         />
                     </div>
@@ -241,7 +253,7 @@ const PendingPayments = () => {
                                     alert('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                setDateTo(e.target.value);
+                                updateFilter(setDateTo, e.target.value);
                             }}
                         />
                     </div>
@@ -290,7 +302,6 @@ const PendingPayments = () => {
                                 <th>Category</th>
                                 <th>Name</th>
                                 <th>Type</th>
-                                <th>Reference</th>
                                 <th>Total Amount</th>
                                 <th>Amount Paid</th>
                                 <th>Pending Amount</th>
@@ -301,20 +312,20 @@ const PendingPayments = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="10" className="text-center">
+                                    <td colSpan="9" className="text-center">
                                         Loading pending payments...
                                     </td>
                                 </tr>
                             ) : filteredRows.length === 0 ? (
                                 <tr>
-                                    <td colSpan="10" className="text-center">
+                                    <td colSpan="9" className="text-center">
                                         No pending payment records found.
                                     </td>
                                 </tr>
                             ) : (
-                                filteredRows.map((row, index) => (
+                                paginatedRows.map((row, index) => (
                                     <tr key={`${row.category}-${row.id}-${index}`}>
-                                        <td>{index + 1}</td>
+                                        <td>{(currentPage - 1) * pageSize + index + 1}</td>
 
                                         <td>
                                             {row.date
@@ -331,8 +342,6 @@ const PendingPayments = () => {
                                         </td>
 
                                         <td>{row.type || '—'}</td>
-
-                                        <td>{row.reference || '—'}</td>
 
                                         <td>
                                             ₹{Number(row.total_amount || 0).toLocaleString('en-IN')}
@@ -360,6 +369,17 @@ const PendingPayments = () => {
                     </table>
                 </div>
 
+                <Pagination
+                    currentPage={currentPage}
+                    totalItems={filteredRows.length}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => {
+                        setPageSize(size);
+                        setPage(1);
+                    }}
+                    itemName="payment records"
+                />
             </div>
         </div>
     );

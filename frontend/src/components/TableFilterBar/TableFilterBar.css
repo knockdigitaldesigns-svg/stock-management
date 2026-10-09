@@ -27,6 +27,14 @@
   grid-column-start: 1;
 }
 
+.filter-date-range-group {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  align-items: end;
+}
+
 .filter-label {
   display: block;
   margin-bottom: 7px;
@@ -144,6 +152,11 @@
 @media (max-width: 480px) {
   .table-filter-grid,
   .table-filter-grid--5col {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-date-range-group {
+    grid-column: span 1;
     grid-template-columns: 1fr;
   }
 }
