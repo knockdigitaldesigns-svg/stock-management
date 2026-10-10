@@ -164,6 +164,7 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'dealer_sim_activation.view' => ['permission_name' => 'Dealer SIM Activation View', 'module' => 'dealer_sim_activation', 'action' => 'VIEW'],
         'dealer_sim_activation.edit' => ['permission_name' => 'Dealer SIM Activation Edit', 'module' => 'dealer_sim_activation', 'action' => 'EDIT'],
         'dealer_sim_activation.delete' => ['permission_name' => 'Dealer SIM Activation Delete', 'module' => 'dealer_sim_activation', 'action' => 'DELETE'],
+        'dealer_sim_activation.import' => ['permission_name' => 'Dealer SIM Activation Import', 'module' => 'dealer_sim_activation', 'action' => 'IMPORT'],
         'dealers.import' => ['permission_name' => 'Dealer Import', 'module' => 'dealers', 'action' => 'IMPORT'],
         'dealers.export' => ['permission_name' => 'Dealer Export', 'module' => 'dealers', 'action' => 'EXPORT'],
         'technicians.view' => ['permission_name' => 'Technician View', 'module' => 'technicians', 'action' => 'VIEW'],

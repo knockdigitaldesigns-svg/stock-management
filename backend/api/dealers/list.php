@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/renewal_history.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -23,6 +24,22 @@ $conn = $db->getConnection();
 if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
+
+try {
+    ensureRenewalHistoryPaymentActionType($conn);
+} catch (Throwable $error) {
+    sendResponse(false, 'Unable to prepare renewal payment totals: ' . $error->getMessage(), [], [], 500);
+}
+
+$dealerTotalAmountSql = '(COALESCE(allocation_summary.total_amount, 0) + COALESCE(renewal_summary.total_amount, 0))';
+$dealerAmountPaidSql = '(COALESCE(allocation_summary.amount_paid, 0) + COALESCE(renewal_summary.amount_paid, 0))';
+$dealerPendingAmountSql = '(COALESCE(allocation_summary.pending_amount, 0) + COALESCE(renewal_summary.pending_amount, 0))';
+$dealerPaymentStatusSql = "CASE
+    WHEN $dealerTotalAmountSql <= 0 THEN 'No Payment Required'
+    WHEN $dealerPendingAmountSql <= 0 THEN 'Paid'
+    WHEN $dealerAmountPaidSql > 0 THEN 'Partially Paid'
+    ELSE 'Not Paid'
+END";
 
 $whereConditions = [];
 $params = [];
@@ -109,7 +126,7 @@ if (($simValidity = trim((string)($_GET['sim_validity'] ?? ''))) !== '') {
 }
 
 if (($paymentStatus = trim((string)($_GET['payment_status'] ?? ''))) !== '') {
-    $whereConditions[] = "CASE WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) <= 0 THEN 'No Payment Required' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) THEN 'Paid' WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) > 0 THEN 'Partially Paid' ELSE 'Not Paid' END = ?";
+    $whereConditions[] = "$dealerPaymentStatusSql = ?";
     $params[] = $paymentStatus;
     $types .= 's';
 }
@@ -184,15 +201,10 @@ $sql = "
         COALESCE((SELECT COUNT(DISTINCT sa.sim_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1=sa.sim_id OR cvd.sim_id_2=sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id=sa.sim_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.sim_id=sa.sim_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0) as used_sim_count,
         GREATEST(0, COALESCE((SELECT COUNT(DISTINCT device_id) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND device_id IS NOT NULL), 0) - COALESCE((SELECT COUNT(DISTINCT sa.device_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.device_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id=sa.device_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id=sa.device_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.device_id=sa.device_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0)) as available_device_count,
         GREATEST(0, COALESCE((SELECT COUNT(DISTINCT sim_id) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND sim_id IS NOT NULL), 0) - COALESCE((SELECT COUNT(DISTINCT sa.sim_id) FROM stock_allocations sa WHERE sa.owner_type='dealer' AND sa.owner_id=d.id AND sa.sim_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1=sa.sim_id OR cvd.sim_id_2=sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id=sa.sim_id AND st.from_owner_type=sa.owner_type AND st.from_owner_id=sa.owner_id AND st.id=(SELECT MAX(x.id) FROM stock_transactions x WHERE x.sim_id=sa.sim_id AND x.from_owner_type=sa.owner_type AND x.from_owner_id=sa.owner_id) AND st.transaction_type='USE'))), 0)) as available_sim_count,
-        COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) as total_amount,
-        COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) as amount_paid,
-        GREATEST(0, COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) - COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0)) as pending_amount,
-        CASE
-            WHEN COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) <= 0 THEN 'No Payment Required'
-            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) >= COALESCE((SELECT SUM(total_amount) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) THEN 'Paid'
-            WHEN COALESCE((SELECT SUM(amount_paid) FROM stock_allocations WHERE owner_type='dealer' AND owner_id=d.id AND (device_id IS NOT NULL OR sim_id IS NOT NULL)), 0) > 0 THEN 'Partially Paid'
-            ELSE 'Not Paid'
-        END as payment_status,
+        $dealerTotalAmountSql as total_amount,
+        $dealerAmountPaidSql as amount_paid,
+        $dealerPendingAmountSql as pending_amount,
+        $dealerPaymentStatusSql as payment_status,
         COALESCE((SELECT sas.minimum_device_count FROM stock_alert_settings sas WHERE sas.owner_type='dealer' AND sas.owner_id=d.id LIMIT 1), 0) as minimum_device_count,
         COALESCE((SELECT sas.minimum_sim_count FROM stock_alert_settings sas WHERE sas.owner_type='dealer' AND sas.owner_id=d.id LIMIT 1), 0) as minimum_sim_count,
         (SELECT GROUP_CONCAT(DISTINCT dt.device_type SEPARATOR '||')
@@ -213,6 +225,38 @@ $sql = "
          FROM stock_allocations sa
          WHERE sa.owner_type = 'dealer' AND sa.owner_id = d.id AND sa.software IS NOT NULL AND sa.software != '') as allocated_platforms
     FROM dealers d
+    LEFT JOIN (
+        SELECT
+            owner_id,
+            SUM(total_amount) AS total_amount,
+            SUM(amount_paid) AS amount_paid,
+            SUM(GREATEST(0, total_amount - amount_paid)) AS pending_amount
+        FROM stock_allocations
+        WHERE owner_type = 'dealer'
+          AND (device_id IS NOT NULL OR sim_id IS NOT NULL)
+        GROUP BY owner_id
+    ) allocation_summary ON allocation_summary.owner_id = d.id
+    LEFT JOIN (
+        SELECT
+            sa.owner_id,
+            SUM(rh.payment_amount) AS total_amount,
+            SUM(rh.amount_paid + COALESCE(rp.amount_paid, 0)) AS amount_paid,
+            SUM(GREATEST(0, rh.amount_pending - COALESCE(rp.amount_paid, 0))) AS pending_amount
+        FROM stock_allocations sa
+        INNER JOIN renewal_history rh
+            ON rh.allocation_id = sa.id
+           AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
+        LEFT JOIN (
+            SELECT source_history_id, SUM(amount_paid) AS amount_paid
+            FROM renewal_history
+            WHERE action_type = 'Renewal Payment'
+              AND source_balance_updated = 0
+            GROUP BY source_history_id
+        ) rp ON rp.source_history_id = rh.id
+        WHERE sa.owner_type = 'dealer'
+          AND sa.sim_id IS NOT NULL
+        GROUP BY sa.owner_id
+    ) renewal_summary ON renewal_summary.owner_id = d.id
     $whereClause
     ORDER BY d.created_at DESC
 ";

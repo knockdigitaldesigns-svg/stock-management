@@ -12,13 +12,15 @@ import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
 import { useAuth } from '../../context/AuthContext';
 
-const PERMISSION_COLUMNS = ['view', 'add', 'edit', 'delete', 'export', 'update', 'approve'];
+const PERMISSION_COLUMNS = ['view', 'add', 'assign', 'edit', 'delete', 'import', 'export', 'update', 'approve'];
 
 const PERMISSION_COLUMN_LABELS = {
     view: 'View',
     add: 'Add',
+    assign: 'Assign',
     edit: 'Edit',
     delete: 'Delete',
+    import: 'Bulk Upload',
     export: 'Export',
     update: 'Update',
     approve: 'Approve'
@@ -61,6 +63,7 @@ const EXACT_MODULE_PERMISSIONS = [
         actions: {
             view: ['dealers.view'],
             add: ['dealers.add'],
+            import: ['dealers.import'],
             edit: ['dealers.edit'],
             delete: ['dealers.delete']
         }
@@ -70,6 +73,7 @@ const EXACT_MODULE_PERMISSIONS = [
         actions: {
             view: ['technicians.view'],
             add: ['technicians.add'],
+            import: ['technicians.import'],
             edit: ['technicians.edit'],
             delete: ['technicians.delete']
         }
@@ -78,6 +82,7 @@ const EXACT_MODULE_PERMISSIONS = [
         name: 'Dealer SIM Activation',
         actions: {
             view: ['dealer_sim_activation.view', 'dealers.view'],
+            import: ['dealer_sim_activation.import'],
             edit: ['dealer_sim_activation.edit', 'dealers.edit'],
             delete: ['dealer_sim_activation.delete', 'dealers.delete']
         }
@@ -162,6 +167,7 @@ const EXACT_MODULE_PERMISSIONS = [
         actions: {
             view: ['support.view'],
             add: ['support.add'],
+            assign: ['support.assign'],
             edit: ['support.edit'],
             delete: ['support.delete']
         }

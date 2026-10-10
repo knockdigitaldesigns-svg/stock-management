@@ -47,7 +47,7 @@ api.interceptors.response.use(
 
         if (isForbidden && !isAlreadyOnLoginPage) {
             const current = window.location.pathname;
-            if (!current.includes('/settings/') && !current.includes('/stock') && !current.includes('/outward') && !current.includes('/inward') && !current.includes('/dashboard')) {
+            if (!current.includes('/settings/') && !current.includes('/stock') && !current.includes('/outward') && !current.includes('/inward') && !current.includes('/dashboard') && !current.includes('/support')) {
                 window.location.href = '/dashboard';
             }
         }

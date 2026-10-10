@@ -1,4 +1,10 @@
 <?php
+
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+error_reporting(E_ALL);
+
+
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
@@ -135,47 +141,117 @@ if (!empty($_GET['changed_by'])) {
 
 $condition = $where ? ' WHERE ' . implode(' AND ', $where) : '';
 $from = ' FROM history h LEFT JOIN users u ON u.id = h.changed_by_user_id';
-$stmt = $conn->prepare('SELECT h.id, h.customer_id, h.module, h.action, h.field_changed, h.old_value, h.new_value, h.changed_by_user_id, h.changed_by_name, u.username AS changed_by_username, h.changed_at' . $from . $condition . ' ORDER BY h.changed_at DESC, h.id DESC');
-if ($types !== '') $stmt->bind_param($types, ...$params);
-$stmt->execute();
-$result = $stmt->get_result();
-$groups = [];
-while ($row = $result->fetch_assoc()) {
-    $key = implode('|', [
-        $row['changed_at'],
-        $row['module'],
-        $row['action'],
-        $row['customer_id'] ?? '',
-        $row['changed_by_user_id'] ?? ''
-    ]);
-    if (!isset($groups[$key])) {
-        $groups[$key] = [
-            'id' => $row['id'],
-            'customer_id' => $row['customer_id'],
-            'module' => $row['module'],
-            'action' => $row['action'],
-            'changed_by_user_id' => $row['changed_by_user_id'],
-            'changed_by_name' => $row['changed_by_name'],
-            'changed_by_username' => $row['changed_by_username'],
-            'changed_at' => $row['changed_at'],
-            'records' => []
-        ];
-    }
-    $ownerType = null;
-    if ($row['field_changed'] === 'owner_id' || $row['field_changed'] === 'installation_person_id') {
-        $ownerType = $row['field_changed'] === 'owner_id' ? null : 'dealer';
-    }
-    $row['old_display_value'] = historyDisplayValue($row['old_value'], $row['field_changed'], $lookups, $ownerType);
-    $row['new_display_value'] = historyDisplayValue($row['new_value'], $row['field_changed'], $lookups, $ownerType);
-    if ($row['field_changed'] === 'record_snapshot') {
-        $oldSnapshot = json_decode((string) $row['old_value'], true);
-        $newSnapshot = json_decode((string) $row['new_value'], true);
-        $row['old_display_snapshot'] = is_array($oldSnapshot) ? historyDisplaySnapshot($oldSnapshot, $lookups) : null;
-        $row['new_display_snapshot'] = is_array($newSnapshot) ? historyDisplaySnapshot($newSnapshot, $lookups) : null;
-    }
-    $groups[$key]['records'][] = $row;
+
+/*
+ * Paginate history GROUPS in SQL instead of loading all 70k+ history rows
+ * into PHP memory. A group is identified using the same fields as the UI:
+ * changed_at, module, action, customer_id, and changed_by_user_id.
+ */
+$groupBaseSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id'
+    . $from . $condition
+    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id';
+
+$countSql = 'SELECT COUNT(*) AS total FROM (' . $groupBaseSql . ') AS history_groups';
+$countStmt = $conn->prepare($countSql);
+if (!$countStmt) {
+    error_log('History API count query prepare failed: ' . $conn->error);
+    sendResponse(false, 'Unable to load history.', [], [], 500);
 }
-$stmt->close();
+if ($types !== '') $countStmt->bind_param($types, ...$params);
+$countStmt->execute();
+$countResult = $countStmt->get_result();
+$total = (int) (($countResult->fetch_assoc()['total'] ?? 0));
+$countStmt->close();
+
+$offset = ($page - 1) * $pageSize;
+$pageGroupsSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, MAX(h.id) AS latest_id'
+    . $from . $condition
+    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id'
+    . ' ORDER BY h.changed_at DESC, latest_id DESC LIMIT ? OFFSET ?';
+$pageGroupsStmt = $conn->prepare($pageGroupsSql);
+if (!$pageGroupsStmt) {
+    error_log('History API page query prepare failed: ' . $conn->error);
+    sendResponse(false, 'Unable to load history.', [], [], 500);
+}
+$pageParams = $params;
+$pageParams[] = $pageSize;
+$pageParams[] = $offset;
+$pageTypes = $types . 'ii';
+$pageGroupsStmt->bind_param($pageTypes, ...$pageParams);
+$pageGroupsStmt->execute();
+$pageGroupsResult = $pageGroupsStmt->get_result();
+$selectedGroups = [];
+while ($groupRow = $pageGroupsResult->fetch_assoc()) {
+    $selectedGroups[] = $groupRow;
+}
+$pageGroupsStmt->close();
+
+$groups = [];
+if ($selectedGroups) {
+    // Fetch every field-change row belonging to only the selected page groups.
+    $groupConditions = [];
+    $groupParams = [];
+    $groupTypes = '';
+    foreach ($selectedGroups as $selectedGroup) {
+        $groupConditions[] = '(h.changed_at = ? AND h.module = ? AND h.action = ? AND h.customer_id <=> ? AND h.changed_by_user_id <=> ?)';
+        $groupParams[] = $selectedGroup['changed_at'];
+        $groupParams[] = $selectedGroup['module'];
+        $groupParams[] = $selectedGroup['action'];
+        $groupParams[] = $selectedGroup['customer_id'];
+        $groupParams[] = $selectedGroup['changed_by_user_id'];
+        $groupTypes .= 'sssss';
+    }
+
+    $recordsSql = 'SELECT h.id, h.customer_id, h.module, h.action, h.field_changed, h.old_value, h.new_value, h.changed_by_user_id, h.changed_by_name, u.username AS changed_by_username, h.changed_at'
+        . $from . ' WHERE (' . implode(' OR ', $groupConditions) . ')'
+        . ' ORDER BY h.changed_at DESC, h.id DESC';
+    $stmt = $conn->prepare($recordsSql);
+    if (!$stmt) {
+        error_log('History API records query prepare failed: ' . $conn->error);
+        sendResponse(false, 'Unable to load history.', [], [], 500);
+    }
+    $stmt->bind_param($groupTypes, ...$groupParams);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    while ($row = $result->fetch_assoc()) {
+        $key = implode('|', [
+            $row['changed_at'],
+            $row['module'],
+            $row['action'],
+            $row['customer_id'] ?? '',
+            $row['changed_by_user_id'] ?? ''
+        ]);
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'id' => $row['id'],
+                'customer_id' => $row['customer_id'],
+                'module' => $row['module'],
+                'action' => $row['action'],
+                'changed_by_user_id' => $row['changed_by_user_id'],
+                'changed_by_name' => $row['changed_by_name'],
+                'changed_by_username' => $row['changed_by_username'],
+                'changed_at' => $row['changed_at'],
+                'records' => []
+            ];
+        }
+        $ownerType = null;
+        if ($row['field_changed'] === 'owner_id' || $row['field_changed'] === 'installation_person_id') {
+            $ownerType = $row['field_changed'] === 'owner_id' ? null : 'dealer';
+        }
+        $row['old_display_value'] = historyDisplayValue($row['old_value'], $row['field_changed'], $lookups, $ownerType);
+        $row['new_display_value'] = historyDisplayValue($row['new_value'], $row['field_changed'], $lookups, $ownerType);
+        if ($row['field_changed'] === 'record_snapshot') {
+            $oldSnapshot = json_decode((string) $row['old_value'], true);
+            $newSnapshot = json_decode((string) $row['new_value'], true);
+            $row['old_display_snapshot'] = is_array($oldSnapshot) ? historyDisplaySnapshot($oldSnapshot, $lookups) : null;
+            $row['new_display_snapshot'] = is_array($newSnapshot) ? historyDisplaySnapshot($newSnapshot, $lookups) : null;
+        }
+        $groups[$key]['records'][] = $row;
+    }
+    $stmt->close();
+}
+
 $ownerTypeGroups = [];
 foreach ($groups as $groupKey => $group) {
     $ownerType = null;
@@ -199,10 +275,7 @@ foreach ($groups as $groupKey => $group) {
     unset($record);
     $groups[$groupKey] = $group;
 }
-$allGroups = array_values($groups);
-$total = count($allGroups);
-$offset = ($page - 1) * $pageSize;
-$history = array_slice($allGroups, $offset, $pageSize);
+$history = array_values($groups);
 
 $modules = [];
 $moduleResult = $conn->query('SELECT DISTINCT module FROM history ORDER BY module');

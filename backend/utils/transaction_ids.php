@@ -133,6 +133,30 @@ function backfillTransactionIdRegistry(mysqli $conn): void
         'customer_cash_collections',
         'customer_cash_settlements'
     ];
+    $bulkRequestHasTransactionId = transactionIdTableExists($conn, 'dealer_allocation_payment_requests')
+        && transactionIdColumnExists($conn, 'dealer_allocation_payment_requests');
+    $bulkLifecyclePaymentHasRequestKey = false;
+    if (transactionIdTableExists($conn, 'renewal_history')) {
+        $columnCheck = $conn->prepare(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = 'renewal_history'
+               AND column_name = ?
+             LIMIT 1"
+        );
+        if (!$columnCheck) {
+            throw new RuntimeException('Unable to inspect SIM payment transaction links: ' . $conn->error);
+        }
+        $bulkRequestColumn = 'bulk_payment_request_key';
+        $columnCheck->bind_param('s', $bulkRequestColumn);
+        if (!$columnCheck->execute()) {
+            $error = $columnCheck->error;
+            $columnCheck->close();
+            throw new RuntimeException('Unable to inspect SIM payment transaction links: ' . $error);
+        }
+        $bulkLifecyclePaymentHasRequestKey = $columnCheck->get_result()->num_rows > 0;
+        $columnCheck->close();
+    }
     $mirrorRows = [];
     if (transactionIdTableExists($conn, 'cash_collection_settlement_allocations')
         && transactionIdTableExists($conn, 'cash_collection_settlements')) {
@@ -158,15 +182,34 @@ function backfillTransactionIdRegistry(mysqli $conn): void
             continue;
         }
         if ($table === 'dealer_sim_allocation_payments') {
-            $rows = $conn->query("SELECT id, allocation_id, transaction_id, is_legacy_snapshot FROM dealer_sim_allocation_payments WHERE transaction_id IS NOT NULL AND transaction_id <> '' ORDER BY id");
+            $bulkRequestJoin = $bulkRequestHasTransactionId
+                ? " LEFT JOIN dealer_allocation_payment_requests r
+                    ON r.allocation_id = p.allocation_id
+                   AND r.request_key = p.idempotency_key
+                   AND r.transaction_id = p.transaction_id"
+                : '';
+            $bulkRequestField = $bulkRequestHasTransactionId ? 'r.request_key' : 'NULL';
+            $rows = $conn->query("SELECT p.id, p.allocation_id, p.transaction_id, p.is_legacy_snapshot,
+                    $bulkRequestField AS bulk_request_key
+                FROM dealer_sim_allocation_payments p
+                $bulkRequestJoin
+                WHERE p.transaction_id IS NOT NULL AND p.transaction_id <> '' ORDER BY p.id");
             if (!$rows) {
                 throw new RuntimeException('Unable to audit transaction IDs in dealer SIM payment history: ' . $conn->error);
             }
             while ($row = $rows->fetch_assoc()) {
                 $id = (string) $row['transaction_id'];
                 $recordId = (string) $row['id'];
-                $sourceType = (int) $row['is_legacy_snapshot'] === 1 ? 'stock_allocations' : 'dealer_sim_allocation_payments';
-                $sourceId = $sourceType === 'stock_allocations' ? (string) $row['allocation_id'] : $recordId;
+                if ((int) $row['is_legacy_snapshot'] === 1) {
+                    $sourceType = 'stock_allocations';
+                    $sourceId = (string) $row['allocation_id'];
+                } elseif (!empty($row['bulk_request_key'])) {
+                    $sourceType = 'dealer_allocation_payment_requests';
+                    $sourceId = (string) $row['bulk_request_key'];
+                } else {
+                    $sourceType = 'dealer_sim_allocation_payments';
+                    $sourceId = $recordId;
+                }
                 if (!preg_match('/^[0-9]{6}$/', $id)) {
                     throw new RuntimeException("Invalid existing transaction ID in dealer_sim_allocation_payments#$recordId; expected exactly six numeric digits. No values were changed.");
                 }
@@ -188,7 +231,25 @@ function backfillTransactionIdRegistry(mysqli $conn): void
             }
             continue;
         }
-        $rows = $conn->query("SELECT id, transaction_id FROM `$table` WHERE transaction_id IS NOT NULL AND transaction_id <> '' ORDER BY id");
+        if ($table === 'stock_allocations' && $bulkRequestHasTransactionId) {
+            $rows = $conn->query("SELECT sa.id, sa.transaction_id, r.request_key AS bulk_request_key
+                FROM stock_allocations sa
+                LEFT JOIN dealer_allocation_payment_requests r
+                  ON r.allocation_id = sa.id AND r.transaction_id = sa.transaction_id
+                WHERE sa.transaction_id IS NOT NULL AND sa.transaction_id <> ''
+                ORDER BY sa.id");
+        } elseif ($table === 'renewal_history' && $bulkRequestHasTransactionId && $bulkLifecyclePaymentHasRequestKey) {
+            $rows = $conn->query("SELECT rh.id, rh.transaction_id, r.request_key AS bulk_request_key
+                FROM renewal_history rh
+                LEFT JOIN dealer_allocation_payment_requests r
+                  ON r.allocation_id = rh.allocation_id
+                 AND r.request_key = rh.bulk_payment_request_key
+                 AND r.transaction_id = rh.transaction_id
+                WHERE rh.transaction_id IS NOT NULL AND rh.transaction_id <> ''
+                ORDER BY rh.id");
+        } else {
+            $rows = $conn->query("SELECT id, transaction_id, NULL AS bulk_request_key FROM `$table` WHERE transaction_id IS NOT NULL AND transaction_id <> '' ORDER BY id");
+        }
         if (!$rows) {
             throw new RuntimeException("Unable to audit transaction IDs in $table: " . $conn->error);
         }
@@ -220,9 +281,17 @@ function backfillTransactionIdRegistry(mysqli $conn): void
             }
             if (isset($entries[$id])) {
                 $previous = $entries[$id];
+                $source = !empty($row['bulk_request_key'])
+                    ? ['source_type' => 'dealer_allocation_payment_requests', 'source_id' => (string) $row['bulk_request_key']]
+                    : ['source_type' => $table, 'source_id' => $recordId];
+                if ($previous['source_type'] === $source['source_type'] && $previous['source_id'] === $source['source_id']) {
+                    continue;
+                }
                 throw new RuntimeException("Duplicate existing transaction ID {$id} in {$previous['source_type']}#{$previous['source_id']} and {$table}#{$recordId}. No values were changed.");
             }
-            $entries[$id] = ['source_type' => $table, 'source_id' => $recordId];
+            $entries[$id] = !empty($row['bulk_request_key'])
+                ? ['source_type' => 'dealer_allocation_payment_requests', 'source_id' => (string) $row['bulk_request_key']]
+                : ['source_type' => $table, 'source_id' => $recordId];
         }
         $rows->free();
     }

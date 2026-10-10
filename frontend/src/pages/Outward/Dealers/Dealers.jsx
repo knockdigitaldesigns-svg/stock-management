@@ -14,9 +14,10 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../com
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 import { useAuth } from '../../../context/AuthContext';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const Dealers = () => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, refreshPermissions } = useAuth();
     const canManagePayments = hasPermission('dealers.edit') || hasPermission('stock.update');
     const [dealers, setDealers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -134,6 +135,12 @@ const Dealers = () => {
     }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.dealer_id, filters.year, filters.month]);
 
     useEffect(() => {
+        refreshPermissions().catch((error) => {
+            showGlobalError(error.response?.data?.message || error.message || 'Unable to refresh permissions.');
+        });
+    }, [refreshPermissions]);
+
+    useEffect(() => {
         fetchFilterMasters();
     }, []);
 
@@ -163,9 +170,9 @@ const Dealers = () => {
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
                     </button>
-                        <button className="btn btn-outline" onClick={() => setIsDealerUploadModalOpen(true)}>
+                        {hasPermission('dealers.import') && <button className="btn btn-outline" onClick={() => setIsDealerUploadModalOpen(true)}>
                             <Upload size={16} /> Upload Excel
-                        </button>
+                        </button>}
                     <button className="btn btn-primary" onClick={() => setIsAddDealerModalOpen(true)}>
                         <Plus size={16} /> Add Dealer
                     </button>

@@ -22,6 +22,7 @@ $dealerId = (int)($payload['dealer_id'] ?? 0);
 $requestKey = trim((string)($payload['request_key'] ?? ''));
 $paymentMode = trim((string)($payload['payment_mode'] ?? ''));
 $paymentDate = trim((string)($payload['payment_date'] ?? ''));
+$transactionId = trim((string)($payload['transaction_id'] ?? ''));
 $remarks = trim((string)($payload['remarks'] ?? ''));
 $items = $payload['allocations'] ?? null;
 
@@ -34,6 +35,15 @@ if (!is_array($items) || count($items) < 1) {
 if (!in_array($paymentMode, getPaymentModes(), true)) {
     sendResponse(false, 'Select a valid Payment Mode.', [], [], 400);
 }
+if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) {
+    sendResponse(false, 'Transaction ID must contain exactly 6 digits.', [], [], 400);
+}
+if ($paymentMode !== 'Cash' && $transactionId === '') {
+    sendResponse(false, 'A 6-digit Transaction ID is required for the selected Payment Mode.', [], [], 400);
+}
+if ($paymentMode === 'Cash') {
+    $transactionId = '';
+}
 if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $paymentDate, $dateParts)
     || !checkdate((int)$dateParts[2], (int)$dateParts[3], (int)$dateParts[1])) {
     sendResponse(false, 'Please select a valid Payment Date.', [], [], 400);
@@ -44,14 +54,12 @@ if (strlen($remarks) > 4000) {
 
 $normalizedItems = [];
 $allocationIds = [];
-$transactionIds = [];
 foreach ($items as $item) {
     if (!is_array($item)) {
         sendResponse(false, 'Invalid allocation payment details.', [], [], 400);
     }
     $allocationId = (int)($item['allocation_id'] ?? 0);
     $amountRaw = $item['amount_to_pay'] ?? null;
-    $transactionId = normalizeTransactionId($item['transaction_id'] ?? '');
     if ($allocationId <= 0 || !is_numeric($amountRaw)) {
         sendResponse(false, 'Each selected allocation requires a valid payment amount.', [], [], 400);
     }
@@ -62,20 +70,10 @@ foreach ($items as $item) {
     if (isset($allocationIds[$allocationId])) {
         sendResponse(false, 'An allocation was selected more than once.', [], [], 400);
     }
-    if ($paymentMode !== 'Cash' && $transactionId === '') {
-        sendResponse(false, 'A 6-digit Transaction ID is required for each allocation when the Payment Mode is not Cash.', [], [], 400);
-    }
-    if ($transactionId !== '' && isset($transactionIds[$transactionId])) {
-        sendResponse(false, 'Transaction IDs must be unique for each selected allocation.', [], [], 400);
-    }
     $allocationIds[$allocationId] = true;
-    if ($transactionId !== '') {
-        $transactionIds[$transactionId] = true;
-    }
     $normalizedItems[$allocationId] = [
         'allocation_id' => $allocationId,
-        'amount_to_pay' => $amount,
-        'transaction_id' => $paymentMode === 'Cash' ? '' : $transactionId
+        'amount_to_pay' => $amount
     ];
 }
 
@@ -91,6 +89,7 @@ $tableSql = "CREATE TABLE IF NOT EXISTS dealer_allocation_payment_requests (
     allocation_id INT NOT NULL,
     request_key VARCHAR(64) NOT NULL,
     payload_hash CHAR(64) NOT NULL DEFAULT '',
+    transaction_id CHAR(6) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
     INDEX idx_dealer_allocation_payment_request_key (request_key),
@@ -101,6 +100,19 @@ if (!$conn->query($tableSql)) {
     $error = $conn->error;
     $conn->close();
     sendResponse(false, 'Unable to prepare bulk payment duplicate protection: ' . $error, [], [], 500);
+}
+$transactionColumn = $conn->query("SHOW COLUMNS FROM dealer_allocation_payment_requests LIKE 'transaction_id'");
+if (!$transactionColumn) {
+    $error = $conn->error;
+    $conn->close();
+    sendResponse(false, 'Unable to inspect bulk payment transaction tracking: ' . $error, [], [], 500);
+}
+if ($transactionColumn->num_rows === 0 && !$conn->query(
+    "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payload_hash"
+)) {
+    $error = $conn->error;
+    $conn->close();
+    sendResponse(false, 'Unable to prepare bulk payment transaction tracking: ' . $error, [], [], 500);
 }
 
 $conn->begin_transaction();
@@ -165,6 +177,7 @@ try {
                 'dealer_id' => $dealerId,
                 'payment_mode' => $paymentMode,
                 'payment_date' => $paymentDate,
+                'transaction_id' => $transactionId,
                 'remarks' => $remarks,
                 'allocation' => $normalizedItems[$allocationId]
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -177,14 +190,12 @@ try {
         sendResponse(true, 'Bulk payment was already recorded.', ['idempotent_replay' => true]);
     }
 
-    $userId = (int)($currentUser['user_id'] ?? 0);
     foreach ($ids as $allocationId) {
         $allocation = $allocations[$allocationId];
         $totalAmount = round((float)$allocation['total_amount'], 2);
         $previouslyPaid = round((float)$allocation['amount_paid'], 2);
         $outstanding = max(0, round($totalAmount - $previouslyPaid, 2));
         $amountToPay = $normalizedItems[$allocationId]['amount_to_pay'];
-        $transactionId = $normalizedItems[$allocationId]['transaction_id'];
         if ($outstanding <= 0) {
             throw new InvalidArgumentException("Allocation #$allocationId has no outstanding balance.");
         }
@@ -193,7 +204,18 @@ try {
                 'Payment for allocation #' . $allocationId . ' cannot exceed its current outstanding balance of ₹' . number_format($outstanding, 2) . '.'
             );
         }
+    }
+    if ($transactionId !== '') {
+        reserveTransactionId($conn, $transactionId, 'dealer_allocation_payment_requests', $requestKey);
+    }
 
+    $userId = (int)($currentUser['user_id'] ?? 0);
+    foreach ($ids as $allocationId) {
+        $allocation = $allocations[$allocationId];
+        $totalAmount = round((float)$allocation['total_amount'], 2);
+        $previouslyPaid = round((float)$allocation['amount_paid'], 2);
+        $outstanding = max(0, round($totalAmount - $previouslyPaid, 2));
+        $amountToPay = $normalizedItems[$allocationId]['amount_to_pay'];
         $newAmountPaid = round($previouslyPaid + $amountToPay, 2);
         $newPending = max(0, round($totalAmount - $newAmountPaid, 2));
         $newStatus = $newPending <= 0 ? 'Paid' : ($newAmountPaid > 0 ? 'Partially Paid' : 'Not Paid');
@@ -227,11 +249,7 @@ try {
                 $paymentInsert->close();
                 throw new RuntimeException('Unable to record SIM payment for allocation #' . $allocationId . ': ' . $error);
             }
-            $paymentId = (string)$paymentInsert->insert_id;
             $paymentInsert->close();
-            if ($transactionId !== '') {
-                reserveTransactionId($conn, $transactionId, 'dealer_sim_allocation_payments', $paymentId);
-            }
         }
 
         $newValues = [
@@ -271,22 +289,19 @@ try {
         }
         $update->close();
 
-        if (empty($allocation['sim_id']) && $transactionId !== '') {
-            reserveTransactionId($conn, $transactionId, 'stock_allocations', (string)$allocationId);
-        }
-
         $payloadHash = hash('sha256', json_encode([
             'dealer_id' => $dealerId,
             'payment_mode' => $paymentMode,
             'payment_date' => $paymentDate,
+            'transaction_id' => $transactionId,
             'remarks' => $remarks,
             'allocation' => $normalizedItems[$allocationId]
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        $marker = $conn->prepare('INSERT INTO dealer_allocation_payment_requests (allocation_id, request_key, payload_hash) VALUES (?, ?, ?)');
+        $marker = $conn->prepare('INSERT INTO dealer_allocation_payment_requests (allocation_id, request_key, payload_hash, transaction_id) VALUES (?, ?, ?, NULLIF(?, \'\'))');
         if (!$marker) {
             throw new RuntimeException('Unable to prepare bulk payment duplicate marker: ' . $conn->error);
         }
-        $marker->bind_param('iss', $allocationId, $requestKey, $payloadHash);
+        $marker->bind_param('isss', $allocationId, $requestKey, $payloadHash, $transactionId);
         if (!$marker->execute()) {
             $error = $marker->error;
             $marker->close();

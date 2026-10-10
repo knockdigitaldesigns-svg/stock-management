@@ -198,5 +198,8 @@ if ($result) {
 $stmt->close();
 $conn->close();
 
-sendResponse(true, "Courier requests fetched successfully", ["requests" => $requests]);
+sendResponse(true, "Courier requests fetched successfully", [
+    "requests" => $requests,
+    "can_approve" => $canApprove
+]);
 ?>

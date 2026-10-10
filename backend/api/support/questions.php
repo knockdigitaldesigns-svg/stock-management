@@ -10,7 +10,7 @@ $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
 
 if ($method === 'GET') {
-    requirePermission('support.qa.view');
+    requirePermission('support.view');
     $result = $conn->query('SELECT id, question, answer, is_active, display_order, created_at, updated_at FROM support_questions WHERE is_active = 1 ORDER BY display_order ASC, id ASC');
     $questions = [];
     while ($result && ($row = $result->fetch_assoc())) $questions[] = $row;
@@ -19,8 +19,11 @@ if ($method === 'GET') {
 }
 
 if ($method !== 'POST' && $method !== 'PUT' && $method !== 'DELETE') sendResponse(false, 'Method not allowed', [], [], 405);
-requirePermission('support.qa.manage');
 $currentUser = authenticate();
+$userId = (int) ($currentUser['user_id'] ?? 0);
+if (!isSuperAdminUser($userId)) {
+    sendResponse(false, 'Only Super Admin can manage Support Questions & Answers.', [], [], 403);
+}
 $data = json_decode(file_get_contents('php://input'));
 $id = (int) ($data->id ?? $_GET['id'] ?? 0);
 if ($method === 'DELETE') {
@@ -41,7 +44,6 @@ $order = (int) ($data->display_order ?? 0);
 $active = !empty($data->is_active) ? 1 : 0;
 if ($question === '' || $answer === '') sendResponse(false, 'Question and answer are required.', [], [], 400);
 if ($method === 'POST') {
-    $userId = (int) ($currentUser['user_id'] ?? 0);
     $stmt = $conn->prepare('INSERT INTO support_questions (question, answer, is_active, display_order, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?)');
     $stmt->bind_param('ssiiii', $question, $answer, $active, $order, $userId, $userId);
     if (!$stmt->execute()) sendResponse(false, 'Failed to create support question.', [], [], 400);
@@ -49,7 +51,6 @@ if ($method === 'POST') {
     $stmt->close(); $conn->close(); sendResponse(true, 'Question created successfully.', ['id' => $id]);
 }
 $stmt = $conn->prepare('UPDATE support_questions SET question = ?, answer = ?, is_active = ?, display_order = ?, updated_by = ? WHERE id = ?');
-$userId = (int) ($currentUser['user_id'] ?? 0);
 $stmt->bind_param('ssiiii', $question, $answer, $active, $order, $userId, $id);
 if (!$stmt->execute() || $stmt->affected_rows === 0) sendResponse(false, 'Question not found.', [], [], 404);
 writeChangedFields($conn, $id, 'Support Question', [], ['question' => $question, 'answer' => $answer, 'is_active' => $active, 'display_order' => $order], $currentUser);

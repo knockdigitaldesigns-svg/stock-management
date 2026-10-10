@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, RotateCcw, Calendar, WalletCards } from 'lucide-react';
+import { Search, RotateCcw, Download } from 'lucide-react';
 import api from '../../services/api';
 import { formatDate } from '../../utils/date';
+import { exportToExcel, exportToPDF } from '../../utils/export';
 import Pagination from '../../components/Pagination/Pagination';
 
 const PendingPayments = () => {
     const [rows, setRows] = useState([]);
+    const [allocationRows, setAllocationRows] = useState([]);
+    const [customerRows, setCustomerRows] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const [search, setSearch] = useState('');
@@ -24,12 +27,18 @@ const PendingPayments = () => {
 
             if (response.data.success) {
                 setRows(response.data.data?.rows || []);
+                setAllocationRows(response.data.data?.allocation_rows || []);
+                setCustomerRows(response.data.data?.customer_rows || []);
             } else {
                 setRows([]);
+                setAllocationRows([]);
+                setCustomerRows([]);
             }
         } catch (error) {
             console.error('Failed to fetch pending payments:', error);
             setRows([]);
+            setAllocationRows([]);
+            setCustomerRows([]);
         } finally {
             setLoading(false);
         }
@@ -76,21 +85,31 @@ const PendingPayments = () => {
     const currentPage = Math.min(page, pageCount);
     const paginatedRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-    const totals = useMemo(() => {
-        return filteredRows.reduce(
+    const summaryTotals = useMemo(() => {
+        const text = search.trim().toLowerCase();
+        const matchingRows = [...customerRows, ...allocationRows].filter((row) => {
+            const matchesSearch =
+                !text ||
+                String(row.name || '').toLowerCase().includes(text) ||
+                String(row.type || '').toLowerCase().includes(text);
+            const matchesCategory = category === 'All' || row.category === category;
+            const rowDate = row.date || '';
+            const matchesFrom = !dateFrom || rowDate >= dateFrom;
+            const matchesTo = !dateTo || rowDate <= dateTo;
+
+            return matchesSearch && matchesCategory && matchesFrom && matchesTo;
+        });
+
+        return matchingRows.reduce(
             (acc, row) => {
-                acc.pending += Number(row.pending_amount || 0);
                 acc.total += Number(row.total_amount || 0);
                 acc.paid += Number(row.amount_paid || 0);
+                acc.pending += Number(row.pending_amount || 0);
                 return acc;
             },
-            {
-                total: 0,
-                paid: 0,
-                pending: 0
-            }
+            { total: 0, paid: 0, pending: 0 }
         );
-    }, [filteredRows]);
+    }, [customerRows, allocationRows, search, category, dateFrom, dateTo]);
 
     const resetFilters = () => {
         setPage(1);
@@ -104,6 +123,72 @@ const PendingPayments = () => {
     const updateFilter = (setter, value) => {
         setPage(1);
         setter(value);
+    };
+
+    const getExportRows = () => filteredRows.map((row) => ({
+            Date: row.date || '',
+            Category: row.category || '—',
+            Name: row.name || '—',
+            Type: row.type || '—',
+            'Total Amount (₹)': Number(row.total_amount || 0),
+            'Amount Paid (₹)': Number(row.amount_paid || 0),
+            'Pending Amount (₹)': Number(row.pending_amount || 0),
+            'Payment Status': row.display_status || 'Pending'
+        }));
+
+    const getExportSummary = () => [
+            { label: 'Total Amount', value: `INR ${summaryTotals.total.toLocaleString('en-IN')}` },
+            { label: 'Amount Paid', value: `INR ${summaryTotals.paid.toLocaleString('en-IN')}` },
+            { label: 'Pending Amount', value: `INR ${summaryTotals.pending.toLocaleString('en-IN')}` }
+        ];
+
+    const handleExportExcel = () => {
+        const exportRows = getExportRows();
+        const summary = getExportSummary();
+
+        exportToExcel(exportRows, 'Pending_Payments', 'Payment Records', {
+            summaryTitle: 'Payment Summary',
+            summary,
+            tableTitle: 'Pending Payment Records',
+            combinedSheet: { title: 'PENDING PAYMENTS' }
+        });
+    };
+
+    const handleExportPDF = () => {
+        const exportRows = getExportRows();
+        const summary = getExportSummary();
+        exportToPDF(
+            exportRows,
+            'Pending_Payments',
+            'PENDING PAYMENTS',
+            [
+                { header: 'Date', key: 'Date' },
+                { header: 'Category', key: 'Category' },
+                { header: 'Name', key: 'Name' },
+                { header: 'Type', key: 'Type' },
+                { header: 'Total Amount', key: 'Total Amount (₹)' },
+                { header: 'Amount Paid', key: 'Amount Paid (₹)' },
+                { header: 'Pending Amount', key: 'Pending Amount (₹)' },
+                { header: 'Payment Status', key: 'Payment Status' }
+            ],
+            {
+                orientation: 'landscape',
+                summaryTitle: 'Payment Summary',
+                summary,
+                tableTitle: 'Pending Payment Records',
+                styles: { cellPadding: 2, overflow: 'linebreak' },
+                columnStyles: {
+                    0: { cellWidth: 22 },
+                    1: { cellWidth: 22 },
+                    2: { cellWidth: 35 },
+                    3: { cellWidth: 24 },
+                    4: { cellWidth: 28 },
+                    5: { cellWidth: 28 },
+                    6: { cellWidth: 28 },
+                    7: { cellWidth: 32 }
+                }
+            }
+        );
     };
 
     const getStatusClass = (statusValue) => {
@@ -136,8 +221,26 @@ const PendingPayments = () => {
                 <div>
                     <h2>Pending Payments</h2>
                     <p className="page-subtitle" style={{ marginTop: '5px' }}>
-                        Track pending payments for customers, dealers and technicians.
+                        Track customer, dealer and technician payments, including linked SIM renewals.
                     </p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={handleExportExcel}
+                        disabled={loading || filteredRows.length === 0}
+                    >
+                        <Download size={16} /> Export Excel
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={handleExportPDF}
+                        disabled={loading || filteredRows.length === 0}
+                    >
+                        <Download size={16} /> Export PDF
+                    </button>
                 </div>
             </div>
 
@@ -156,7 +259,10 @@ const PendingPayments = () => {
                     </div>
 
                     <div style={{ fontSize: '25px', fontWeight: 700 }}>
-                        ₹{totals.total.toLocaleString('en-IN')}
+                        ₹{summaryTotals.total.toLocaleString('en-IN')}
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '6px' }}>
+                        Includes completed payments and SIM renewals
                     </div>
                 </div>
 
@@ -166,7 +272,7 @@ const PendingPayments = () => {
                     </div>
 
                     <div style={{ fontSize: '25px', fontWeight: 700 }}>
-                        ₹{totals.paid.toLocaleString('en-IN')}
+                        ₹{summaryTotals.paid.toLocaleString('en-IN')}
                     </div>
                 </div>
 
@@ -176,7 +282,7 @@ const PendingPayments = () => {
                     </div>
 
                     <div style={{ fontSize: '25px', fontWeight: 700 }}>
-                        ₹{totals.pending.toLocaleString('en-IN')}
+                        ₹{summaryTotals.pending.toLocaleString('en-IN')}
                     </div>
                 </div>
             </div>

@@ -12,8 +12,11 @@ import usePagination from '../../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
+import { useAuth } from '../../../context/AuthContext';
+import { showGlobalError } from '../../../context/ErrorContext';
 
 const Technicians = () => {
+    const { hasPermission, refreshPermissions } = useAuth();
     const [technicians, setTechnicians] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState(emptyTableFilters);
@@ -103,6 +106,12 @@ const Technicians = () => {
         fetchFilterMasters();
     }, []);
 
+    useEffect(() => {
+        refreshPermissions().catch((error) => {
+            showGlobalError(error.response?.data?.message || error.message || 'Unable to refresh permissions.');
+        });
+    }, [refreshPermissions]);
+
     const filteredTechnicians = filterTableRows(technicians, filters, {
         dateKeys: ['enrolled_date'],
         searchKeys: ['technician_name', 'mobile_no', 'location', 'notes']
@@ -130,9 +139,9 @@ const Technicians = () => {
                     <button className="btn btn-outline" onClick={() => setIsAddStockModalOpen(true)}>
                         <PackagePlus size={16} /> Add Device / SIM
                     </button>
-                        <button className="btn btn-outline" onClick={() => setIsTechnicianUploadModalOpen(true)}>
+                        {hasPermission('technicians.import') && <button className="btn btn-outline" onClick={() => setIsTechnicianUploadModalOpen(true)}>
                             <Upload size={16} /> Upload Excel
-                        </button>
+                        </button>}
                     <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)}>
                         <Plus size={16} /> Add Technician
                     </button>

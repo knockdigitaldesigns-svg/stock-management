@@ -22,6 +22,8 @@ const DealerSimActivationEditModal = ({
     mode = 'edit',
     lifecycleAction = '',
     canEditDetails = false,
+    canActivateAvailable = false,
+    canRecordPayment = false,
     onClose,
     onSuccess,
     onPaymentSuccess
@@ -43,6 +45,7 @@ const DealerSimActivationEditModal = ({
     const [paymentDate, setPaymentDate] = useState(localToday);
     const [paymentRemarks, setPaymentRemarks] = useState('');
     const [paymentRequestKey, setPaymentRequestKey] = useState(newPaymentRequestKey);
+    const [lifecyclePaymentRequestKey, setLifecyclePaymentRequestKey] = useState(newPaymentRequestKey);
     const [closeLifecyclePayment, setCloseLifecyclePayment] = useState(false);
     const [lifecyclePayment, setLifecyclePayment] = useState({
         totalAmount: '',
@@ -123,6 +126,10 @@ const DealerSimActivationEditModal = ({
     const isView = mode === 'view';
     const isAdminEdit = canEditDetails && !isView && !isLifecycle;
     const isAvailable = String(allocation?.sim_status || '').toLowerCase() === 'available';
+    const isActivationOnlyEdit = canActivateAvailable && isAvailable && !isView && !isLifecycle && !isAdminEdit;
+    const canEditActivationDetails = isAdminEdit || isActivationOnlyEdit;
+    const hasDeactivationDate = Boolean(allocation?.deactivation_date);
+    const hasReactivationDate = Boolean(allocation?.reactivation_date);
     const showLifecyclePayment = isLifecycle && ['renew', 'reactivate'].includes(lifecycleAction);
     const totalAmount = Number(isAdminEdit ? paymentDetails?.total_amount : allocation?.total_amount || 0);
     const amountPaid = Number(isAdminEdit ? paymentDetails?.amount_paid : allocation?.amount_paid || 0);
@@ -247,13 +254,17 @@ const DealerSimActivationEditModal = ({
                     return;
                 }
             }
-        } else if (isAdminEdit) {
+        } else if (canEditActivationDetails) {
             if ((form.activation_date && !form.sim_validity_id)
                 || (!form.activation_date && form.sim_validity_id)) {
                 setError('Activation Date and Validity must both be provided.');
                 return;
             }
-            if (allocation.sim_status !== 'Available' && (!form.activation_date || !form.sim_validity_id)) {
+            if (isActivationOnlyEdit && (!form.activation_date || !form.sim_validity_id)) {
+                setError('Enter an Activation Date and select a Validity to activate this SIM.');
+                return;
+            }
+            if (!isAvailable && (!form.activation_date || !form.sim_validity_id)) {
                 setError('Activation Date and Validity cannot be cleared after the SIM has been activated.');
                 return;
             }
@@ -261,39 +272,41 @@ const DealerSimActivationEditModal = ({
                 setError('Please enter a valid Activation Date.');
                 return;
             }
-            for (const [fieldLabel, value] of [
-                ['Given Date', adminSimDetails?.given_date],
-                ['Deactivation Date', adminSimDetails?.deactivation_date],
-                ['Reactivation Date', adminSimDetails?.reactivation_date]
-            ]) {
-                if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-                    setError(`Please enter a valid ${fieldLabel}.`);
+            if (isAdminEdit) {
+                for (const [fieldLabel, value] of [
+                    ['Given Date', adminSimDetails?.given_date],
+                    ['Deactivation Date', adminSimDetails?.deactivation_date],
+                    ['Reactivation Date', adminSimDetails?.reactivation_date]
+                ]) {
+                    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                        setError(`Please enter a valid ${fieldLabel}.`);
+                        return;
+                    }
+                }
+                const editedTotal = Number(paymentDetails?.total_amount);
+                const editedPaid = Number(paymentDetails?.amount_paid);
+                if (!Number.isFinite(editedTotal) || editedTotal < 0
+                    || !Number.isFinite(editedPaid) || editedPaid < 0) {
+                    setError('Payment amounts must be valid non-negative numbers.');
                     return;
                 }
-            }
-            const editedTotal = Number(paymentDetails?.total_amount);
-            const editedPaid = Number(paymentDetails?.amount_paid);
-            if (!Number.isFinite(editedTotal) || editedTotal < 0
-                || !Number.isFinite(editedPaid) || editedPaid < 0) {
-                setError('Payment amounts must be valid non-negative numbers.');
-                return;
-            }
-            if (editedPaid > editedTotal) {
-                setError('Amount Paid cannot exceed Total Amount.');
-                return;
-            }
-            if (editedPaid > 0 && !paymentDetails.payment_mode) {
-                setError('Please select the Payment Mode.');
-                return;
-            }
-            if (editedPaid > 0 && !paymentDetails.payment_date) {
-                setError('Please select the Payment Date.');
-                return;
-            }
-            if (editedPaid > 0 && paymentDetails.payment_mode !== 'Cash'
-                && !/^\d{6}$/.test(paymentDetails.transaction_id)) {
-                setError('Transaction ID must contain exactly 6 digits.');
-                return;
+                if (editedPaid > editedTotal) {
+                    setError('Amount Paid cannot exceed Total Amount.');
+                    return;
+                }
+                if (editedPaid > 0 && !paymentDetails.payment_mode) {
+                    setError('Please select the Payment Mode.');
+                    return;
+                }
+                if (editedPaid > 0 && !paymentDetails.payment_date) {
+                    setError('Please select the Payment Date.');
+                    return;
+                }
+                if (editedPaid > 0 && paymentDetails.payment_mode !== 'Cash'
+                    && !/^\d{6}$/.test(paymentDetails.transaction_id)) {
+                    setError('Transaction ID must contain exactly 6 digits.');
+                    return;
+                }
             }
         }
 
@@ -310,23 +323,32 @@ const DealerSimActivationEditModal = ({
                     amount_paid: lifecycleAmountPaid,
                     payment_mode: lifecyclePayment.paymentMode,
                     payment_date: lifecyclePayment.paymentDate,
-                    transaction_id: lifecyclePayment.transactionId
+                    transaction_id: lifecyclePayment.transactionId,
+                    request_key: lifecyclePaymentRequestKey
                 } : undefined,
                 previous_pending_payment: ['renew', 'reactivate'].includes(lifecycleAction) && closeLifecyclePayment ? {
                     amount_paid: previousPendingPaid,
                     payment_mode: previousPendingPayment.paymentMode,
                     payment_date: previousPendingPayment.paymentDate,
-                    transaction_id: previousPendingPayment.transactionId
+                    transaction_id: previousPendingPayment.transactionId,
+                    request_key: lifecyclePaymentRequestKey
                 } : undefined
             }
-            : {
+            : isActivationOnlyEdit
+                ? {
+                    allocation_id: allocation.allocation_id,
+                    action: 'update',
+                    activation_date: form.activation_date,
+                    sim_validity_id: form.sim_validity_id
+                }
+                : {
                 allocation_id: allocation.allocation_id,
                 action: 'update',
                 activation_date: form.activation_date,
                 sim_validity_id: form.sim_validity_id,
                 ...(adminSimDetails.given_date !== (allocation.given_date || '') ? { given_date: adminSimDetails.given_date } : {}),
-                deactivation_date: adminSimDetails.deactivation_date,
-                reactivation_date: adminSimDetails.reactivation_date,
+                ...(hasDeactivationDate ? { deactivation_date: adminSimDetails.deactivation_date } : {}),
+                ...(hasReactivationDate ? { reactivation_date: adminSimDetails.reactivation_date } : {}),
                 payment_details: {
                     total_amount: Number(paymentDetails.total_amount),
                     amount_paid: Number(paymentDetails.amount_paid),
@@ -441,7 +463,8 @@ const DealerSimActivationEditModal = ({
                     amount_paid: previousPendingPaid,
                     payment_mode: previousPendingPayment.paymentMode,
                     payment_date: previousPendingPayment.paymentDate,
-                    transaction_id: previousPendingPayment.transactionId
+                    transaction_id: previousPendingPayment.transactionId,
+                    request_key: lifecyclePaymentRequestKey
                 }
             });
             if (!response.data.success) {
@@ -455,6 +478,7 @@ const DealerSimActivationEditModal = ({
                 paymentDate: '',
                 transactionId: ''
             });
+            setLifecyclePaymentRequestKey(newPaymentRequestKey());
             await onPaymentSuccess?.();
         } catch (paymentError) {
             setError(paymentError.response?.data?.message || paymentError.message || 'Unable to record previous renewal payment.');
@@ -465,53 +489,38 @@ const DealerSimActivationEditModal = ({
 
     const actionTitle = actionLabels[lifecycleAction] || 'Lifecycle Action';
     const title = isView ? 'View Dealer SIM Activation' : isLifecycle ? actionTitle : 'Edit Dealer SIM Activation';
+    const lifecyclePaymentEntries = lifecyclePayments.filter((payment) => payment.display_type === 'payment');
     const renderLifecyclePaymentHistory = () => (
         <>
             <h4 className="sim-activation-modal-section-title sim-activation-modal-full-width">RENEWAL PAYMENT HISTORY</h4>
-            {lifecyclePayments.length === 0 ? (
+            {lifecyclePaymentEntries.length === 0 ? (
                 <p className="sim-activation-payment-empty">No renewal or lifecycle payment history is available for this SIM.</p>
             ) : (
                 <div className="sim-activation-payment-history">
                     <table>
                         <thead>
                             <tr>
-                                <th>Action</th>
-                                <th>Action Date</th>
-                                <th>Total Amount</th>
+                                <th>Date</th>
                                 <th>Amount Paid</th>
                                 <th>Amount Pending</th>
                                 <th>Payment Mode</th>
-                                <th>Payment Date</th>
                                 <th>Transaction ID</th>
                                 <th>Status</th>
+                                <th>Remarks</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {lifecyclePayments.map((payment) => {
-                                const amount = Number(payment.payment_amount || 0);
-                                const paid = Number(payment.amount_paid || 0);
-                                const pending = Number(payment.amount_pending || 0);
-                                const status = payment.action_type === 'Renewal Payment'
-                                    ? 'Payment Recorded'
-                                    : amount <= 0 || paid <= 0
-                                        ? 'Not Paid'
-                                        : pending <= 0
-                                            ? 'Paid'
-                                            : 'Partially Paid';
-                                return (
-                                    <tr key={payment.id}>
-                                        <td>{payment.action_type}</td>
-                                        <td>{formatDate(payment.action_date)}</td>
-                                        <td>{payment.action_type === 'Renewal Payment' ? '-' : currency(amount)}</td>
-                                        <td>{currency(paid)}</td>
-                                        <td>{currency(pending)}</td>
-                                        <td>{payment.payment_mode || '-'}</td>
-                                        <td>{formatDate(payment.payment_date)}</td>
-                                        <td>{payment.transaction_id || '-'}</td>
-                                        <td>{status}</td>
-                                    </tr>
-                                );
-                            })}
+                            {lifecyclePaymentEntries.map((payment) => (
+                                <tr key={payment.id}>
+                                    <td>{formatDate(payment.payment_date || payment.action_date)}</td>
+                                    <td>{currency(payment.amount_paid)}</td>
+                                    <td>{currency(payment.amount_pending)}</td>
+                                    <td>{payment.payment_mode || '-'}</td>
+                                    <td>{payment.transaction_id || '-'}</td>
+                                    <td>{payment.payment_status || (Number(payment.amount_pending) <= 0 ? 'Paid' : 'Partially Paid')}</td>
+                                    <td>{payment.notes || '-'}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
@@ -679,6 +688,7 @@ const DealerSimActivationEditModal = ({
                         disabled={lifecycleOutstandingPending <= 0}
                         onChange={(event) => {
                             setCloseLifecyclePayment(event.target.checked);
+                            setLifecyclePaymentRequestKey(newPaymentRequestKey());
                             setPreviousPendingPayment({
                                 amountPaid: '',
                                 paymentMode: '',
@@ -773,10 +783,12 @@ const DealerSimActivationEditModal = ({
                     <button type="button" className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
                     {!isView && !loading && allocation && form && (
                         <>
-                            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                                {saving ? 'Saving...' : isLifecycle ? 'Save Action' : 'Save Changes'}
-                            </button>
-                            {!isLifecycle && closePayment && (
+                            {(isLifecycle || isAdminEdit || isActivationOnlyEdit) && (
+                                <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                                    {saving ? 'Saving...' : isLifecycle ? 'Save Action' : isActivationOnlyEdit ? 'Activate SIM' : 'Save Changes'}
+                                </button>
+                            )}
+                            {!isLifecycle && canRecordPayment && closePayment && (
                                 <button type="button" className="btn btn-primary" onClick={handleRecordPayment} disabled={saving}>
                                     {saving ? 'Recording...' : 'Record Payment'}
                                 </button>
@@ -848,36 +860,40 @@ const DealerSimActivationEditModal = ({
                         <div className="form-group"><label className="form-label">SIM Type</label><input className="form-control" value={allocation.sim_type || '-'} readOnly /></div>
                         <div className="form-group">
                             <label className="form-label">Activation Date</label>
-                            {isAdminEdit
+                            {canEditActivationDetails
                                 ? <input type="date" className="form-control" value={form.activation_date} onChange={(event) => update('activation_date', event.target.value)} />
                                 : <input className="form-control" value={formatDate(allocation.activation_date)} readOnly />}
                         </div>
                         <div className="form-group">
                             <label className="form-label">Validity</label>
-                            {isAdminEdit ? (
+                            {canEditActivationDetails ? (
                                 <select className="form-control" value={form.sim_validity_id} onChange={(event) => update('sim_validity_id', event.target.value)}>
                                     <option value="">Select Validity</option>
                                     {simValidities.map((validity) => <option key={validity.id} value={validity.id}>{validity.months} Months</option>)}
                                 </select>
                             ) : <input className="form-control" value={allocation.validity_months ? `${allocation.validity_months} Months` : '-'} readOnly />}
                         </div>
-                        <div className="form-group"><label className="form-label">Next Renewal Date</label><input className="form-control" value={isAdminEdit || isAvailable ? calculateExpiry(form.activation_date, form.sim_validity_id) : formatDate(allocation.expiry_date)} readOnly /></div>
-                        <div className="form-group"><label className="form-label">Expiry Date</label><input className="form-control" value={formatDate(allocation.expiry_date)} readOnly /></div>
-                        <div className="form-group">
-                            <label className="form-label">Deactivation Date</label>
-                            {isAdminEdit
-                                ? <input type="date" className="form-control" value={adminSimDetails?.deactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, deactivation_date: event.target.value })} />
-                                : <input className="form-control" value={formatDate(allocation.deactivation_date)} readOnly />}
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Reactivation Date</label>
-                            {isAdminEdit
-                                ? <input type="date" className="form-control" value={adminSimDetails?.reactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, reactivation_date: event.target.value })} />
-                                : <input className="form-control" value={formatDate(allocation.reactivation_date)} readOnly />}
-                        </div>
+                        <div className="form-group"><label className="form-label">Next Renewal Date</label><input className="form-control" value={canEditActivationDetails || isAvailable ? calculateExpiry(form.activation_date, form.sim_validity_id) : formatDate(allocation.expiry_date)} readOnly /></div>
+                        <div className="form-group"><label className="form-label">Expiry Date</label><input className="form-control" value={canEditActivationDetails ? calculateExpiry(form.activation_date, form.sim_validity_id) : formatDate(allocation.expiry_date)} readOnly /></div>
+                        {hasDeactivationDate && (
+                            <div className="form-group">
+                                <label className="form-label">Deactivation Date</label>
+                                {isAdminEdit
+                                    ? <input type="date" className="form-control" value={adminSimDetails?.deactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, deactivation_date: event.target.value })} />
+                                    : <input className="form-control" value={formatDate(allocation.deactivation_date)} readOnly />}
+                            </div>
+                        )}
+                        {hasReactivationDate && (
+                            <div className="form-group">
+                                <label className="form-label">Reactivation Date</label>
+                                {isAdminEdit
+                                    ? <input type="date" className="form-control" value={adminSimDetails?.reactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, reactivation_date: event.target.value })} />
+                                    : <input className="form-control" value={formatDate(allocation.reactivation_date)} readOnly />}
+                            </div>
+                        )}
                         <div className="form-group"><label className="form-label">SIM Status</label><input className="form-control" value={allocation.sim_status || '-'} readOnly /></div>
                     </div>
-                    {renderPaymentDetails(!isView)}
+                    {renderPaymentDetails(canRecordPayment && !isView)}
                 </>
             ))}
         </Modal>

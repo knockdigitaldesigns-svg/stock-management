@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/utils/transaction_ids.php';
+require_once __DIR__ . '/utils/renewal_history.php';
 
 $host = "localhost";
 $username = "root";
@@ -208,6 +209,7 @@ $tables = [
         allocation_id INT NOT NULL,
         request_key VARCHAR(64) NOT NULL,
         payload_hash CHAR(64) NOT NULL DEFAULT '',
+        transaction_id CHAR(6) DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
         INDEX idx_dealer_allocation_payment_request_key (request_key),
@@ -415,6 +417,9 @@ $tables = [
         payment_date DATE DEFAULT NULL,
         transaction_id CHAR(6) DEFAULT NULL,
         changed_by INT DEFAULT NULL,
+        bulk_payment_request_key VARCHAR(64) DEFAULT NULL,
+        source_history_id INT DEFAULT NULL,
+        source_balance_updated TINYINT(1) NOT NULL DEFAULT 1,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )"
@@ -474,6 +479,10 @@ $columnChecks = [
     ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
     ['dealer_allocation_payment_requests', 'payload_hash', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN payload_hash CHAR(64) NOT NULL DEFAULT '' AFTER request_key"],
+    ['dealer_allocation_payment_requests', 'transaction_id', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payload_hash"],
+    ['renewal_history', 'bulk_payment_request_key', "ALTER TABLE renewal_history ADD COLUMN bulk_payment_request_key VARCHAR(64) DEFAULT NULL AFTER changed_by"],
+    ['renewal_history', 'source_history_id', "ALTER TABLE renewal_history ADD COLUMN source_history_id INT DEFAULT NULL AFTER bulk_payment_request_key"],
+    ['renewal_history', 'source_balance_updated', "ALTER TABLE renewal_history ADD COLUMN source_balance_updated TINYINT(1) NOT NULL DEFAULT 1 AFTER source_history_id"],
 ];
 
 foreach ($columnChecks as [$table, $column, $alterSql]) {
@@ -485,6 +494,13 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
             echo "Error adding column: " . $conn->error . "\n";
         }
     }
+}
+
+try {
+    ensureRenewalHistoryPaymentActionType($conn);
+} catch (Throwable $error) {
+    $conn->close();
+    die("Renewal payment history migration failed: " . $error->getMessage() . "\n");
 }
 
 $installationPersonIdColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'installation_person_id'");
@@ -724,6 +740,7 @@ $permissionDefinitions = [
     ['dealer_sim_activation.view', 'Dealer SIM Activation View', 'dealer_sim_activation', 'VIEW'],
     ['dealer_sim_activation.edit', 'Dealer SIM Activation Edit', 'dealer_sim_activation', 'EDIT'],
     ['dealer_sim_activation.delete', 'Dealer SIM Activation Delete', 'dealer_sim_activation', 'DELETE'],
+    ['dealer_sim_activation.import', 'Dealer SIM Activation Import', 'dealer_sim_activation', 'IMPORT'],
     ['dealers.import', 'Dealer Import', 'dealers', 'IMPORT'],
     ['dealers.export', 'Dealer Export', 'dealers', 'EXPORT'],
     ['technicians.view', 'Technician View', 'technicians', 'VIEW'],

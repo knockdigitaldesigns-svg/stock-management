@@ -38,6 +38,16 @@ export const AuthProvider = ({ children }) => {
         setPermissions(Array.isArray(permissionList) ? permissionList : []);
     }, []);
 
+    const refreshPermissions = useCallback(async () => {
+        const response = await api.get('/auth/permissions.php');
+        const permissionList = response.data?.data?.permissions;
+        if (!Array.isArray(permissionList)) {
+            throw new Error('Unable to refresh user permissions.');
+        }
+        setPermissions(permissionList);
+        return permissionList;
+    }, []);
+
     const logout = async () => {
         const token = localStorage.getItem('token');
         try {
@@ -88,10 +98,11 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         updatePermissions,
+        refreshPermissions,
         hasPermission,
         role: user?.role ?? null,
         currentUser: user
-    }), [user, permissions, isAuthenticated, updatePermissions, hasPermission]);
+    }), [user, permissions, isAuthenticated, updatePermissions, refreshPermissions, hasPermission]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
