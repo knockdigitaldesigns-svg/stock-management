@@ -7,63 +7,107 @@ require_once '../../middleware/auth.php';
 handlePreflight();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    sendResponse(false, "Method not allowed", [], [], 405);
+    sendResponse(false, 'Method not allowed', [], [], 405);
 }
 
 $currentUser = authenticate();
 requirePermission('devices.delete');
+$isSuperAdmin = isSuperAdminUser((int) ($currentUser['user_id'] ?? 0));
 
-$data = json_decode(file_get_contents("php://input"));
-
-if (!isset($data->id)) {
-    sendResponse(false, "Device ID is required", [], [], 400);
+$data = json_decode(file_get_contents('php://input'));
+$id = (int) ($data->id ?? 0);
+if ($id <= 0) {
+    sendResponse(false, 'Device ID is required', [], [], 400);
 }
 
-$id = $data->id;
-
-$db = new Database();
-$conn = $db->getConnection();
-
+$conn = (new Database())->getConnection();
 if (!$conn) {
-    sendResponse(false, "Database connection failed", [], [], 500);
+    sendResponse(false, 'Database connection failed', [], [], 500);
 }
-
-// Check status first
-$checkStmt = $conn->prepare("SELECT * FROM devices WHERE id = ?");
-$checkStmt->bind_param("i", $id);
-$checkStmt->execute();
-$result = $checkStmt->get_result();
-
-if ($result->num_rows === 0) {
-    sendResponse(false, "Device not found", [], [], 404);
-}
-
-$device = $result->fetch_assoc();
-
-if ($device['status'] === 'allocated' || $device['status'] === 'used') {
-    sendResponse(false, "This device is currently " . $device['status'] . " and cannot be deleted.", [], [], 400);
-}
-
-$checkStmt->close();
 
 $conn->begin_transaction();
-try {
-writeDeleteSnapshot($conn, (int) $id, 'Device', $device, $currentUser);
-$stmt = $conn->prepare("DELETE FROM devices WHERE id = ?");
-$stmt->bind_param("i", $id);
+$stmt = null;
 
-if ($stmt->execute()) {
+try {
+    $checkStmt = $conn->prepare('SELECT * FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE');
+    if (!$checkStmt) {
+        throw new RuntimeException('Unable to prepare device lookup.');
+    }
+    $checkStmt->bind_param('i', $id);
+    if (!$checkStmt->execute()) {
+        throw new RuntimeException('Unable to load device.');
+    }
+    $device = $checkStmt->get_result()->fetch_assoc();
+    $checkStmt->close();
+
+    if (!$device) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Device not found', [], [], 404);
+    }
+
+    if (!$isSuperAdmin && in_array(strtolower((string) $device['status']), ['allocated', 'used'], true)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'This device is currently ' . $device['status'] . ' and cannot be deleted.', [], [], 400);
+    }
+
+    $dependencyStmt = $conn->prepare("
+        SELECT EXISTS (
+            SELECT 1 FROM stock_allocations WHERE device_id = ?
+            UNION ALL SELECT 1 FROM stock_transactions WHERE device_id = ?
+            UNION ALL SELECT 1 FROM stock_transfers WHERE device_id = ?
+            UNION ALL SELECT 1 FROM customer_vehicle_details WHERE device_id = ?
+            UNION ALL SELECT 1 FROM courier_requests WHERE device_id = ?
+        ) AS has_dependencies
+    ");
+    if (!$dependencyStmt) {
+        throw new RuntimeException('Unable to check device history dependencies.');
+    }
+    $dependencyStmt->bind_param('iiiii', $id, $id, $id, $id, $id);
+    if (!$dependencyStmt->execute()) {
+        throw new RuntimeException('Unable to check device history dependencies.');
+    }
+    $hasDependencies = (bool) ($dependencyStmt->get_result()->fetch_assoc()['has_dependencies'] ?? false);
+    $dependencyStmt->close();
+
+    writeDeleteSnapshot($conn, $id, 'Device', $device, $currentUser);
+
+    if ($hasDependencies) {
+        $stmt = $conn->prepare('UPDATE devices SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL');
+        if (!$stmt) {
+            throw new RuntimeException('Unable to prepare device archive.');
+        }
+        $stmt->bind_param('i', $id);
+        if (!$stmt->execute() || $stmt->affected_rows !== 1) {
+            throw new RuntimeException('Failed to archive device.');
+        }
+        $stmt->close();
+        $stmt = null;
+        $conn->commit();
+        $conn->close();
+        sendResponse(true, 'Device archived to preserve its history.', ['archived' => true]);
+    }
+
+    $stmt = $conn->prepare('DELETE FROM devices WHERE id = ? AND deleted_at IS NULL');
+    if (!$stmt) {
+        throw new RuntimeException('Unable to prepare device deletion.');
+    }
+    $stmt->bind_param('i', $id);
+    if (!$stmt->execute() || $stmt->affected_rows !== 1) {
+        throw new RuntimeException('Failed to delete device.');
+    }
     $stmt->close();
+    $stmt = null;
     $conn->commit();
     $conn->close();
-    sendResponse(true, "Device deleted successfully");
-} else {
-    throw new RuntimeException("Failed to delete device");
-}
-} catch (Throwable $e) {
+    sendResponse(true, 'Device deleted successfully', ['archived' => false]);
+} catch (Throwable $error) {
     $conn->rollback();
-    $stmt->close();
+    if ($stmt instanceof mysqli_stmt) {
+        $stmt->close();
+    }
     $conn->close();
-    sendResponse(false, $e->getMessage(), [], [], 500);
+    sendResponse(false, $error->getMessage(), [], [], 500);
 }
 ?>

@@ -284,6 +284,7 @@ try {
                 LIMIT 1
             )
          WHERE d.imei_no = ?
+           AND d.deleted_at IS NULL
          LIMIT 1
          FOR UPDATE"
     );
@@ -401,6 +402,7 @@ try {
                 LIMIT 1
             )
          WHERE s.sim_no = ?
+           AND s.deleted_at IS NULL
          LIMIT 1
          FOR UPDATE'
     );
@@ -498,6 +500,7 @@ try {
                     LIMIT 1
                 )
              WHERE s.sim_no = ?
+               AND s.deleted_at IS NULL
              LIMIT 1
              FOR UPDATE'
         );

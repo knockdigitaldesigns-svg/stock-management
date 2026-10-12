@@ -127,7 +127,7 @@ try {
         $allocationId = 0;
         $oldAllocation = null;
         if ($simNo !== '') {
-            $simStmt = $conn->prepare('SELECT id, status FROM sims WHERE sim_no = ? LIMIT 1 FOR UPDATE');
+            $simStmt = $conn->prepare('SELECT id, status FROM sims WHERE sim_no = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE');
             if (!$simStmt) {
                 throw new RuntimeException('Unable to prepare SIM lookup.');
             }

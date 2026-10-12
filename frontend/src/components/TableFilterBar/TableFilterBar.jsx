@@ -261,6 +261,7 @@ const TableFilterBar = ({
     showDealer = false,
     gridCols = 4,
     statusPlaceholder = 'All Status',
+    statusLabel = 'Status',
     className = '',
     technicianOptions,
     showTechnician = false,
@@ -492,7 +493,7 @@ const TableFilterBar = ({
                 {/* 10. Status (Available / Allocated / Used) */}
                 {(showStatus || statusOptions) && (
                     <div className="filter-group">
-                        <label className="filter-label">Status</label>
+                        <label className="filter-label">{statusLabel}</label>
                         <FilterSelect value={filters.status || ''} onChange={set('status')}>
                             <option value="">{statusPlaceholder}</option>
                             {resolvedStatuses.map((status) => (

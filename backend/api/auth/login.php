@@ -55,25 +55,27 @@ $roleName = $user['role_name'] ?? $user['role'] ?? 'No Role';
 $permissions = getUserPermissions((int)$user['id']);
 $secret = 'your_super_secret_key_12345';
 $sessionId = bin2hex(random_bytes(32));
-$expiresAt = time() + (86400 * 30);
+$expiresAt = time() + SESSION_INACTIVITY_TIMEOUT_SECONDS;
+$tokenExpiresAt = time() + (86400 * 30);
 $payload = [
     'user_id' => (int) $user['id'],
     'username' => $user['username'],
     'role' => $roleName,
     'role_id' => (int)($user['role_id'] ?? 0),
     'sid' => $sessionId,
-    'exp' => $expiresAt
+    'exp' => $tokenExpiresAt
 ];
 $token = generateJWT($payload, $secret);
 
 $userId = (int) $user['id'];
 $currentTime = time();
-$updateSession = $conn->prepare('UPDATE users SET active_session_id = ?, active_session_created_at = CURRENT_TIMESTAMP, active_session_expires_at = ? WHERE id = ? AND (active_session_id IS NULL OR active_session_expires_at IS NULL OR active_session_expires_at <= ?)');
+$lastActivityCutoff = $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
+$updateSession = $conn->prepare('UPDATE users SET active_session_id = ?, active_session_created_at = CURRENT_TIMESTAMP, active_session_expires_at = ? WHERE id = ? AND (active_session_id IS NULL OR active_session_created_at IS NULL OR active_session_expires_at IS NULL OR active_session_expires_at <= ? OR UNIX_TIMESTAMP(active_session_created_at) <= ?)');
 if (!$updateSession) {
     $conn->close();
     sendResponse(false, 'Unable to create login session.', [], [], 500);
 }
-$updateSession->bind_param('siii', $sessionId, $expiresAt, $userId, $currentTime);
+$updateSession->bind_param('siiii', $sessionId, $expiresAt, $userId, $currentTime, $lastActivityCutoff);
 if (!$updateSession->execute()) {
     $updateSession->close();
     $conn->close();

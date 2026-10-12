@@ -73,7 +73,7 @@ try {
 
     // 2. Verify asset status is 'allocated'
     if ($assetType === 'device') {
-        $assetCheck = $conn->prepare("SELECT id, status FROM devices WHERE id = ? FOR UPDATE");
+        $assetCheck = $conn->prepare("SELECT id, status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $assetCheck->bind_param('i', $deviceId);
         $assetCheck->execute();
         $assetRow = $assetCheck->get_result()->fetch_assoc();
@@ -82,7 +82,7 @@ try {
         if (strtolower($assetRow['status']) !== 'allocated') throw new Exception('This device is not currently allocated and cannot be transferred.');
         if ((int)$allocRow['device_id'] !== $deviceId) throw new Exception('Device does not match the allocation record.');
     } else {
-        $assetCheck = $conn->prepare("SELECT id, status FROM sims WHERE id = ? FOR UPDATE");
+        $assetCheck = $conn->prepare("SELECT id, status FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $assetCheck->bind_param('i', $simId);
         $assetCheck->execute();
         $assetRow = $assetCheck->get_result()->fetch_assoc();

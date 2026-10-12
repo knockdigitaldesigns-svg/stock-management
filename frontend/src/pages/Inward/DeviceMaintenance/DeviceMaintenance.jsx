@@ -15,9 +15,15 @@ import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal
 import { useAuth } from '../../../context/AuthContext';
 
 const DeviceMaintenance = () => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, user } = useAuth();
+    const isSuperAdmin = ['super admin', 'super_admin'].includes(
+        String(user?.role?.name ?? user?.role ?? '').trim().toLowerCase()
+    );
+    const canEditDevices = isSuperAdmin || hasPermission('devices.edit');
+    const canDeleteDevices = isSuperAdmin || hasPermission('devices.delete');
     const [devices, setDevices] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
@@ -29,12 +35,16 @@ const DeviceMaintenance = () => {
     const fetchDevices = async () => {
         setLoading(true);
         try {
-            const response = await api.get('/devices/list.php').catch(() => ({ data: { success: true, data: { devices: [] } } }));
+            const response = await api.get('/devices/list.php');
             if (response.data.success) {
                 setDevices(response.data.data.devices || []);
+                setLoadError('');
+            } else {
+                setLoadError(response.data.message || 'Failed to fetch devices.');
             }
         } catch (error) {
             console.error('Failed to fetch devices', error);
+            setLoadError(error.response?.data?.message || 'Failed to fetch devices.');
         } finally {
             setLoading(false);
         }
@@ -132,6 +142,10 @@ const DeviceMaintenance = () => {
                                 <tr>
                                     <td colSpan="5" className="text-center">Loading devices...</td>
                                 </tr>
+                            ) : loadError ? (
+                                <tr>
+                                    <td colSpan="5" className="text-center">{loadError}</td>
+                                </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="text-center empty-state">
@@ -148,8 +162,8 @@ const DeviceMaintenance = () => {
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View device" title="View" onClick={() => setViewingDevice(device)}><Eye size={16} /></button>
-                                                {hasPermission('devices.edit') && <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>}
-                                                {hasPermission('devices.delete') && <button className="icon-btn delete" type="button" aria-label="Delete device" onClick={() => setDeleteTarget(device)}><Trash2 size={16} /></button>}
+                                                {canEditDevices && <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>}
+                                                {canDeleteDevices && <button className="icon-btn delete" type="button" aria-label="Delete device" onClick={() => setDeleteTarget(device)}><Trash2 size={16} /></button>}
                                             </div>
                                         </td>
                                     </tr>
@@ -189,7 +203,7 @@ const DeviceMaintenance = () => {
                 />
             )}
 
-            {editingDevice && hasPermission('devices.edit') && (
+            {editingDevice && canEditDevices && (
                 <EditDeviceModal
                     device={editingDevice}
                     onClose={() => setEditingDevice(null)}
@@ -202,7 +216,7 @@ const DeviceMaintenance = () => {
 
             {viewingDevice && <RecordViewModal isOpen onClose={() => setViewingDevice(null)} title="Device Details" record={viewingDevice} fetchRecord={async (row) => (await api.get('/devices/list.php')).data.data.devices.find((device) => String(device.id) === String(row.id)) || row} fields={[{ label: 'Device Model', key: 'model_name' }, { label: 'IMEI No', key: 'imei_no' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
 
-            {deleteTarget && hasPermission('devices.delete') && (
+            {deleteTarget && canDeleteDevices && (
                 <Modal
                     isOpen={Boolean(deleteTarget)}
                     onClose={() => setDeleteTarget(null)}
@@ -215,7 +229,12 @@ const DeviceMaintenance = () => {
                         </>
                     }
                 >
-                    <p>Are you sure you want to delete this device?</p>
+                    <p>Are you sure you want to delete device <strong>{deleteTarget.imei_no}</strong>?</p>
+                    {Number(deleteTarget.has_history_dependencies) === 1 && (
+                        <p className="text-warning">
+                            This device is referenced by allocations, transactions, transfers, courier requests, or customer vehicles. It will be archived so history is preserved and it cannot be allocated again.
+                        </p>
+                    )}
                 </Modal>
             )}
         </div>

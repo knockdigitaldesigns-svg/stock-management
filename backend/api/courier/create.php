@@ -228,7 +228,8 @@ foreach ($deviceItems as $idx => $dItem) {
         SELECT d.id, d.status, d.device_model_id, dt.device_type AS model_name, d.imei_no 
         FROM devices d 
         JOIN device_types dt ON dt.id = d.device_model_id 
-        WHERE d.id = ? 
+        WHERE d.id = ?
+          AND d.deleted_at IS NULL
         FOR UPDATE
     ");
     $devCheck->bind_param("i", $dId);
@@ -279,7 +280,8 @@ foreach ($simItems as $idx => $sItem) {
     $simCheck = $conn->prepare("
         SELECT id, status, sim_no, sim_type 
         FROM sims 
-        WHERE id = ? 
+        WHERE id = ?
+          AND deleted_at IS NULL
         FOR UPDATE
     ");
     $simCheck->bind_param("i", $sId);

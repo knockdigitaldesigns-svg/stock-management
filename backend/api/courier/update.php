@@ -211,7 +211,7 @@ try {
 
     // 3. Verify and Reserve new Device if changed or resubmitting
     if ($newDeviceId && ((int)$existing['device_id'] !== $newDeviceId || $currentApprovalStatus === 'Rejected')) {
-        $devCheck = $conn->prepare("SELECT status FROM devices WHERE id = ? FOR UPDATE");
+        $devCheck = $conn->prepare("SELECT status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $devCheck->bind_param("i", $newDeviceId);
         $devCheck->execute();
         $devRes = $devCheck->get_result()->fetch_assoc();
@@ -248,7 +248,7 @@ try {
 
     // 4. Verify and Reserve new SIM if changed or resubmitting
     if ($newSimId && ((int)$existing['sim_id'] !== $newSimId || $currentApprovalStatus === 'Rejected')) {
-        $simCheck = $conn->prepare("SELECT status FROM sims WHERE id = ? FOR UPDATE");
+        $simCheck = $conn->prepare("SELECT status FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $simCheck->bind_param("i", $newSimId);
         $simCheck->execute();
         $simRes = $simCheck->get_result()->fetch_assoc();

@@ -66,6 +66,7 @@ if (preg_match($devicePattern, $searchValue)) {
         LEFT JOIN customer_vehicle_details cvd ON cvd.device_id = d.id
         LEFT JOIN customers c ON c.id = cvd.customer_id
         WHERE d.imei_no = ?
+          AND d.deleted_at IS NULL
         ORDER BY sa.created_at DESC, d.id DESC
         LIMIT 1
     ");
@@ -131,6 +132,7 @@ if (preg_match($simPattern, $searchValue)) {
         LEFT JOIN customer_vehicle_details cvd ON cvd.sim_id_1 = s.id OR cvd.sim_id_2 = s.id
         LEFT JOIN customers c ON c.id = cvd.customer_id
         WHERE s.sim_no = ?
+          AND s.deleted_at IS NULL
         ORDER BY sa.created_at DESC, s.id DESC
         LIMIT 1
     ");

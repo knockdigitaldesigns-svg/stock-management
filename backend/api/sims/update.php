@@ -140,6 +140,7 @@ $oldStmt = $conn->prepare(
         notes
      FROM sims
      WHERE id = ?
+       AND deleted_at IS NULL
      LIMIT 1'
 );
 

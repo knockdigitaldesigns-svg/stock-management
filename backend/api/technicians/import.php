@@ -68,7 +68,7 @@ foreach ($rows as $index => $row) {
         if ($imei === '') $rowErrors[] = "Row {$rowNumber}: IMEI No is required.";
         elseif (!preg_match('/^[0-9]{15}$/', $imei)) $rowErrors[] = "Row {$rowNumber}: IMEI No must contain exactly 15 digits.";
         else {
-            $stmt = $conn->prepare("SELECT id, status FROM devices WHERE imei_no = ? LIMIT 1");
+            $stmt = $conn->prepare("SELECT id, status FROM devices WHERE imei_no = ? AND deleted_at IS NULL LIMIT 1");
             $stmt->bind_param('s', $imei);
             $stmt->execute();
             $device = $stmt->get_result()->fetch_assoc();
@@ -86,7 +86,7 @@ foreach ($rows as $index => $row) {
         elseif ($simDate === false || isFutureDate($simDate)) $rowErrors[] = "Row {$rowNumber}: Invalid or future SIM Date.";
         if ($simNumber === '') $rowErrors[] = "Row {$rowNumber}: SIM Number is required.";
         else {
-            $stmt = $conn->prepare("SELECT id, status, sim_validity_id FROM sims WHERE sim_no = ? LIMIT 1");
+            $stmt = $conn->prepare("SELECT id, status, sim_validity_id FROM sims WHERE sim_no = ? AND deleted_at IS NULL LIMIT 1");
             $stmt->bind_param('s', $simNumber);
             $stmt->execute();
             $sim = $stmt->get_result()->fetch_assoc();

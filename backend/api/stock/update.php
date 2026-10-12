@@ -186,7 +186,7 @@ try {
         }
         $seenDeviceIds[$deviceId] = true;
 
-        $deviceStmt = $conn->prepare("SELECT id, imei_no, status FROM devices WHERE id = ? FOR UPDATE");
+        $deviceStmt = $conn->prepare("SELECT id, imei_no, status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $deviceStmt->bind_param("i", $deviceId);
         $deviceStmt->execute();
         $deviceRow = $deviceStmt->get_result()->fetch_assoc();
@@ -279,7 +279,7 @@ try {
         }
         $seenSimIds[$simId] = true;
 
-        $simStmt = $conn->prepare("SELECT id, sim_no, status FROM sims WHERE id = ? FOR UPDATE");
+        $simStmt = $conn->prepare("SELECT id, sim_no, status FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $simStmt->bind_param("i", $simId);
         $simStmt->execute();
         $simRow = $simStmt->get_result()->fetch_assoc();

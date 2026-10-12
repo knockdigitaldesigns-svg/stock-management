@@ -146,8 +146,8 @@ const Dealers = () => {
 
     const filteredDealers = filterTableRows(dealers, filters, {
         dateKeys: ['enrolled_date'],
-        searchKeys: ['dealer_name', 'mobile_no', 'location', 'software', 'notes'],
-        searchNestedKeys: [{ key: 'sims', fields: ['sim_no'] }]
+        searchKeys: [],
+        searchNestedKeys: []
     });
 
     const {
@@ -190,7 +190,7 @@ const Dealers = () => {
                     onSearch={fetchDealers}
                     items={dealers}
                     dateKeys={['enrolled_date']}
-                    searchPlaceholder="Search by name, mobile, location, or notes..."
+                    searchPlaceholder="Search dealer name, mobile, location, SIM number or IMEI number..."
                     platformOptions={masterData.platforms}
                     deviceModelOptions={masterData.deviceModels}
                     simTypeOptions={masterData.simTypes}

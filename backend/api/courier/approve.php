@@ -86,7 +86,7 @@ $notes = $request['notes'] ?? '';
 try {
     // 2. Verify selected Device is available or reserved by this request.
     if ($device_id) {
-        $devStmt = $conn->prepare("SELECT id, status FROM devices WHERE id = ? FOR UPDATE");
+        $devStmt = $conn->prepare("SELECT id, status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $devStmt->bind_param("i", $device_id);
         $devStmt->execute();
         $devRow = $devStmt->get_result()->fetch_assoc();
@@ -121,7 +121,7 @@ try {
 
     // 3. Verify selected SIM is available or reserved by this request.
     if ($sim_id) {
-        $simStmt = $conn->prepare("SELECT id, status, sim_validity_id FROM sims WHERE id = ? FOR UPDATE");
+        $simStmt = $conn->prepare("SELECT id, status, sim_validity_id FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $simStmt->bind_param("i", $sim_id);
         $simStmt->execute();
         $simRow = $simStmt->get_result()->fetch_assoc();

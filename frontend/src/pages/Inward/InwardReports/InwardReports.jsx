@@ -20,9 +20,40 @@ const InwardReports = () => {
     
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        setFilters(emptyTableFilters());
-    }, [activeTab]);
+    const filterReportRows = (items, rowFilters, options) => {
+        const rows = filterTableRows(items, { ...rowFilters, status: '' }, options);
+        if (!rowFilters.status) return rows;
+        const selectedStatus = rowFilters.status.trim().toLowerCase();
+        return rows.filter((row) => (
+            [row.status, row.lifecycle_status]
+                .filter(Boolean)
+                .some((status) => String(status).trim().toLowerCase() === selectedStatus)
+        ));
+    };
+
+    const formatReportStatus = (row) => {
+        const inventoryStatus = String(row.status || 'available');
+        const lifecycleStatus = String(row.lifecycle_status || '');
+        const inventoryLabel = inventoryStatus.charAt(0).toUpperCase() + inventoryStatus.slice(1).toLowerCase();
+        if (lifecycleStatus && lifecycleStatus.toLowerCase() !== 'available') {
+            const lifecycleLabel = lifecycleStatus.charAt(0).toUpperCase() + lifecycleStatus.slice(1).toLowerCase();
+            return `${inventoryLabel} (${lifecycleLabel})`;
+        }
+        return inventoryLabel;
+    };
+
+    const getStatusCounts = (rows) => rows.reduce((counts, row) => {
+        const status = String(row.status || 'available').toLowerCase();
+        counts.total += 1;
+        if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+        return counts;
+    }, { total: 0, available: 0, allocated: 0, used: 0, reserved: 0 });
+
+    const getFilteredModelCounts = () => filteredDevices.reduce((counts, device) => {
+        const model = device.model_name || 'Unknown';
+        counts[model] = (counts[model] || 0) + 1;
+        return counts;
+    }, {});
 
     useEffect(() => {
         api.get('/device_types/list.php')
@@ -41,12 +72,12 @@ const InwardReports = () => {
             try {
                 if (activeTab === 'sim') {
                     const sumRes = await api.get('/reports/sim_summary.php').catch(()=>null);
-                    const listRes = await api.get('/reports/sim_available.php').catch(()=>null);
+                    const listRes = await api.get('/reports/sim_available.php', filters.status ? { params: { status: filters.status } } : undefined).catch(()=>null);
                     if (sumRes?.data?.success) setSimSummary(sumRes.data.data.summary);
                     if (listRes?.data?.success) setSimList(listRes.data.data.sims || []);
                 } else {
                     const sumRes = await api.get('/reports/device_summary.php').catch(()=>null);
-                    const listRes = await api.get('/reports/device_available.php').catch(()=>null);
+                    const listRes = await api.get('/reports/device_available.php', filters.status ? { params: { status: filters.status } } : undefined).catch(()=>null);
                     if (sumRes?.data?.success) setDeviceSummary(sumRes.data.data);
                     if (listRes?.data?.success) setDeviceList(listRes.data.data.devices || []);
                 }
@@ -57,21 +88,23 @@ const InwardReports = () => {
             }
         };
         fetchReports();
-    }, [activeTab]);
+    }, [activeTab, filters.status]);
 
-    const filteredSims = filterTableRows(simList, filters, { dateKeys: ['purchase_date'], simKey: 'sim_type', searchKeys: ['sim_no', 'sim_type', 'notes'] });
-    const filteredDevices = filterTableRows(deviceList, filters, { dateKeys: ['purchase_date'], deviceKey: 'model_name', searchKeys: ['imei_no', 'model_name', 'notes'] });
+    const filteredSims = filterReportRows(simList, filters, { dateKeys: ['purchase_date'], simKey: 'sim_type', searchKeys: ['sim_no', 'sim_type', 'notes'] });
+    const filteredDevices = filterReportRows(deviceList, filters, { dateKeys: ['purchase_date'], deviceKey: 'model_name', searchKeys: ['imei_no', 'model_name', 'notes'] });
 
     const simPagination = usePagination(filteredSims, 10, [filters, activeTab]);
     const devicePagination = usePagination(filteredDevices, 10, [filters, activeTab]);
 
     const handleExportExcel = () => {
         if (activeTab === 'sim') {
+            const summary = getStatusCounts(filteredSims);
             const summaryData = [
-                { label: 'Total SIMs', value: simSummary?.total ?? 0 },
-                { label: 'Available', value: simSummary?.available ?? 0 },
-                { label: 'Allocated', value: simSummary?.allocated ?? 0 },
-                { label: 'Used', value: simSummary?.used ?? 0 }
+                { label: 'Total SIMs', value: summary.total },
+                { label: 'Available', value: summary.available },
+                { label: 'Allocated', value: summary.allocated },
+                { label: 'Used', value: summary.used },
+                { label: 'Reserved', value: summary.reserved }
             ];
 
             const simData = filteredSims.map(s => ({
@@ -79,7 +112,7 @@ const InwardReports = () => {
                 "SIM No": s.sim_no,
                 "SIM Type": s.sim_type || '-',
                 "Notes": s.notes || '-',
-                "Status": "Available"
+                "Status": formatReportStatus(s)
             }));
 
             const columns = [
@@ -90,7 +123,7 @@ const InwardReports = () => {
                 { header: "Status", key: "Status" }
             ];
 
-            exportToExcel(simData, 'Available_SIM_Report', 'Available SIMs', {
+            exportToExcel(simData, 'SIM_Report', 'SIMs', {
                 summary: summaryData,
                 summaryTitle: 'SIM Report Summary',
                 tableTitle: 'Current SIM Report',
@@ -98,15 +131,16 @@ const InwardReports = () => {
                 combinedSheet: { title: 'SIM REPORT' }
             });
         } else {
-            const summary = deviceSummary?.summary || {};
+            const summary = getStatusCounts(filteredDevices);
             const deviceSummaryData = [
-                { label: 'Total Devices', value: summary.total ?? 0 },
-                { label: 'Available', value: summary.available ?? 0 },
-                { label: 'Allocated', value: summary.allocated ?? 0 },
-                { label: 'Used', value: summary.used ?? 0 }
+                { label: 'Total Devices', value: summary.total },
+                { label: 'Available', value: summary.available },
+                { label: 'Allocated', value: summary.allocated },
+                { label: 'Used', value: summary.used },
+                { label: 'Reserved', value: summary.reserved }
             ];
 
-            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model, count]) => ({
+            const modelBreakdown = Object.entries(getFilteredModelCounts()).map(([model, count]) => ({
                 "Model": model,
                 "Count": count
             }));
@@ -116,7 +150,7 @@ const InwardReports = () => {
                 "Model": d.model_name,
                 "IMEI No": d.imei_no,
                 "Notes": d.notes || '-',
-                "Status": "Available"
+                "Status": formatReportStatus(d)
             }));
 
             const columns = [
@@ -127,7 +161,7 @@ const InwardReports = () => {
                 { header: "Status", key: "Status" }
             ];
 
-            exportToExcel(deviceData, 'Available_Device_Report', 'Available Devices', {
+            exportToExcel(deviceData, 'Device_Report', 'Devices', {
                 summary: deviceSummaryData,
                 summaryTitle: 'Device Report Summary',
                 sections: [{
@@ -158,17 +192,19 @@ const InwardReports = () => {
                 sim_no: s.sim_no,
                 sim_type: s.sim_type || '-',
                 notes: s.notes || '-',
-                status: 'Available'
+                status: formatReportStatus(s)
             }));
 
+            const summary = getStatusCounts(filteredSims);
             const summaryData = [
-                { label: 'Total SIMs', value: simSummary?.total ?? 0 },
-                { label: 'Available', value: simSummary?.available ?? 0 },
-                { label: 'Allocated', value: simSummary?.allocated ?? 0 },
-                { label: 'Used', value: simSummary?.used ?? 0 }
+                { label: 'Total SIMs', value: summary.total },
+                { label: 'Available', value: summary.available },
+                { label: 'Allocated', value: summary.allocated },
+                { label: 'Used', value: summary.used },
+                { label: 'Reserved', value: summary.reserved }
             ];
 
-            exportToPDF(simData, 'Available_SIM_Report', 'SIM REPORT', cols, {
+            exportToPDF(simData, 'SIM_Report', 'SIM REPORT', cols, {
                 summary: summaryData,
                 summaryTitle: 'SIM Report Summary'
             });
@@ -186,23 +222,24 @@ const InwardReports = () => {
                 model_name: d.model_name,
                 imei_no: d.imei_no,
                 notes: d.notes || '-',
-                status: 'Available'
+                status: formatReportStatus(d)
             }));
 
-            const summary = deviceSummary?.summary || {};
+            const summary = getStatusCounts(filteredDevices);
             const deviceSummaryData = [
-                { label: 'Total Devices', value: summary.total ?? 0 },
-                { label: 'Available', value: summary.available ?? 0 },
-                { label: 'Allocated', value: summary.allocated ?? 0 },
-                { label: 'Used', value: summary.used ?? 0 }
+                { label: 'Total Devices', value: summary.total },
+                { label: 'Available', value: summary.available },
+                { label: 'Allocated', value: summary.allocated },
+                { label: 'Used', value: summary.used },
+                { label: 'Reserved', value: summary.reserved }
             ];
 
-            const modelBreakdown = Object.entries(deviceSummary?.model_counts || {}).map(([model_name, count]) => ({
+            const modelBreakdown = Object.entries(getFilteredModelCounts()).map(([model_name, count]) => ({
                 model_name,
                 count
             }));
 
-            exportToPDF(deviceData, 'Available_Device_Report', 'DEVICE REPORT', cols, {
+            exportToPDF(deviceData, 'Device_Report', 'DEVICE REPORT', cols, {
                 summary: deviceSummaryData,
                 summaryTitle: 'Device Report Summary',
                 sections: [{
@@ -222,10 +259,10 @@ const InwardReports = () => {
                     <p className="page-subtitle">Review incoming device and SIM stock with exportable reports.</p>
                 </div>
                 <div className="header-actions">
-                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? simList.length === 0 : deviceList.length === 0)} onClick={handleExportExcel}>
+                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? filteredSims.length === 0 : filteredDevices.length === 0)} onClick={handleExportExcel}>
                         <Download size={16} /> Export Excel
                     </button>
-                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? simList.length === 0 : deviceList.length === 0)} onClick={handleExportPDF}>
+                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? filteredSims.length === 0 : filteredDevices.length === 0)} onClick={handleExportPDF}>
                         <Download size={16} /> Export PDF
                     </button>
                 </div>
@@ -234,13 +271,19 @@ const InwardReports = () => {
             <div className="tabs-container">
                 <button 
                     className={`tab-btn ${activeTab === 'sim' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('sim')}
+                    onClick={() => {
+                        setFilters(emptyTableFilters());
+                        setActiveTab('sim');
+                    }}
                 >
                     SIM Report
                 </button>
                 <button 
                     className={`tab-btn ${activeTab === 'device' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('device')}
+                    onClick={() => {
+                        setFilters(emptyTableFilters());
+                        setActiveTab('device');
+                    }}
                 >
                     Device Report
                 </button>
@@ -309,7 +352,7 @@ const InwardReports = () => {
 
                     <div className="card">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
-                            <h3 style={{ margin: 0 }}>Available {activeTab === 'sim' ? 'SIMs' : 'Devices'}</h3>
+                            <h3 style={{ margin: 0 }}>{activeTab === 'sim' ? 'SIM Report' : 'Device Report'}</h3>
                         </div>
                         <TableFilterBar
                             filters={filters}
@@ -320,6 +363,12 @@ const InwardReports = () => {
                             deviceModelOptions={activeTab === 'device' ? deviceModels : undefined}
                             showSimType={activeTab === 'sim'}
                             showDeviceModel={activeTab === 'device'}
+                            showStatus
+                            statusLabel={activeTab === 'sim' ? 'SIM Status' : 'Device Status'}
+                            statusPlaceholder="All Statuses"
+                            statusOptions={activeTab === 'sim'
+                                ? ['Available', 'Allocated', 'Used', 'Reserved', 'Active', 'Deactive', 'Expired', 'Safe Custody']
+                                : ['Available', 'Allocated', 'Used', 'Reserved']}
                             searchPlaceholder={activeTab === 'sim' ? 'Search SIM number, type, or notes...' : 'Search IMEI, model, or notes...'}
                         />
                         <div className="table-container">
@@ -352,12 +401,12 @@ const InwardReports = () => {
                                             <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
                                             <td>{sim.sim_type || '-'}</td>
                                             <td className="truncate-cell" title={sim.notes}>{sim.notes || '-'}</td>
-                                            <td><span className="badge badge-success">Available</span></td>
+                                            <td><span className={`badge ${String(sim.status).toLowerCase() === 'available' ? 'badge-success' : String(sim.status).toLowerCase() === 'allocated' ? 'badge-warning' : 'badge-info'}`}>{formatReportStatus(sim)}</span></td>
                                         </tr>
                                     ))}
 
                                     {activeTab === 'device' && devicePagination.paginatedItems.length === 0 && (
-                                        <tr><td colSpan="5" className="text-center empty-state">No available Devices found</td></tr>
+                                        <tr><td colSpan="5" className="text-center empty-state">No records found for the selected filters.</td></tr>
                                     )}
                                     {activeTab === 'device' && devicePagination.paginatedItems.map(dev => (
                                         <tr key={dev.id}>
@@ -365,7 +414,7 @@ const InwardReports = () => {
                                             <td className="truncate-cell" title={dev.model_name}>{dev.model_name}</td>
                                             <td className="truncate-cell" title={dev.imei_no}>{dev.imei_no}</td>
                                             <td className="truncate-cell" title={dev.notes}>{dev.notes || '-'}</td>
-                                            <td><span className="badge badge-success">Available</span></td>
+                                            <td><span className={`badge ${String(dev.status).toLowerCase() === 'available' ? 'badge-success' : String(dev.status).toLowerCase() === 'allocated' ? 'badge-warning' : 'badge-info'}`}>{formatReportStatus(dev)}</span></td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -379,7 +428,7 @@ const InwardReports = () => {
                                 pageSize={simPagination.pageSize}
                                 onPageChange={simPagination.setPage}
                                 onPageSizeChange={simPagination.setPageSize}
-                                itemName="available SIMs"
+                                itemName="SIMs"
                             />
                         ) : (
                             <Pagination
@@ -388,7 +437,7 @@ const InwardReports = () => {
                                 pageSize={devicePagination.pageSize}
                                 onPageChange={devicePagination.setPage}
                                 onPageSizeChange={devicePagination.setPageSize}
-                                itemName="available devices"
+                                itemName="devices"
                             />
                         )}
                     </div>

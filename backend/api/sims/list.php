@@ -25,7 +25,7 @@ if (!$conn) {
 |--------------------------------------------------------------------------
 */
 
-$where = [];
+$where = ['s.deleted_at IS NULL'];
 $customerId = max(0, (int) ($_GET['customer_id'] ?? 0));
 $vehicleId = max(0, (int) ($_GET['vehicle_id'] ?? 0));
 $params = [$customerId, $customerId, $customerId, $vehicleId, $vehicleId];
@@ -120,6 +120,17 @@ $sql = '
         s.sim_no,
         s.sim_type,
         s.notes,
+        EXISTS (
+            SELECT 1 FROM stock_allocations dep WHERE dep.sim_id = s.id
+            UNION ALL
+            SELECT 1 FROM stock_transactions dep WHERE dep.sim_id = s.id
+            UNION ALL
+            SELECT 1 FROM stock_transfers dep WHERE dep.sim_id = s.id
+            UNION ALL
+            SELECT 1 FROM customer_vehicle_details dep WHERE dep.sim_id_1 = s.id OR dep.sim_id_2 = s.id
+            UNION ALL
+            SELECT 1 FROM courier_requests dep WHERE dep.sim_id = s.id
+        ) AS has_history_dependencies,
 
         CASE
             WHEN EXISTS (

@@ -71,14 +71,66 @@ if (isset($_GET['for_alert']) && $_GET['for_alert'] === '1') {
 }
 
 if (($search = trim((string)($_GET['search'] ?? ''))) !== '') {
-    $whereConditions[] = '(LOWER(TRIM(d.dealer_name)) LIKE ? OR LOWER(TRIM(d.mobile_no)) LIKE ? OR LOWER(TRIM(d.location)) LIKE ? OR LOWER(TRIM(d.notes)) LIKE ? OR EXISTS (SELECT 1 FROM stock_allocations sa_search JOIN sims s_search ON s_search.id = sa_search.sim_id WHERE sa_search.owner_type = \'dealer\' AND sa_search.owner_id = d.id AND LOWER(TRIM(s_search.sim_no)) LIKE ?))';
-    $like = "%$search%";
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-    $params[] = $like;
-    $types .= 'sssss';
+    $whereConditions[] = "(
+        LOWER(TRIM(d.dealer_name)) LIKE ?
+        OR LOWER(TRIM(d.mobile_no)) LIKE ?
+        OR LOWER(TRIM(d.location)) LIKE ?
+        OR LOWER(TRIM(d.notes)) LIKE ?
+        OR EXISTS (
+            SELECT 1
+            FROM stock_allocations sa_search
+            JOIN sims s_search ON s_search.id = sa_search.sim_id
+            WHERE sa_search.owner_type = 'dealer'
+              AND sa_search.owner_id = d.id
+              AND LOWER(TRIM(s_search.sim_no)) LIKE ?
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM stock_allocations sa_search_device
+            JOIN devices d_search_device ON d_search_device.id = sa_search_device.device_id
+            WHERE sa_search_device.owner_type = 'dealer'
+              AND sa_search_device.owner_id = d.id
+              AND d_search_device.status = 'allocated'
+              AND LOWER(TRIM(d_search_device.imei_no)) LIKE ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM customer_vehicle_details cvd_search
+                  WHERE cvd_search.device_id = sa_search_device.device_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM stock_transactions st_search
+                  WHERE st_search.device_id = sa_search_device.device_id
+                    AND st_search.from_owner_type = sa_search_device.owner_type
+                    AND st_search.from_owner_id = sa_search_device.owner_id
+                    AND st_search.id = (
+                        SELECT MAX(x_search.id)
+                        FROM stock_transactions x_search
+                        WHERE x_search.device_id = sa_search_device.device_id
+                          AND x_search.from_owner_type = sa_search_device.owner_type
+                          AND x_search.from_owner_id = sa_search_device.owner_id
+                    )
+                    AND st_search.transaction_type = 'USE'
+              )
+        )
+        OR LOWER(TRIM(COALESCE(d.software, ''))) LIKE ?
+        OR EXISTS (
+            SELECT 1
+            FROM dealer_software ds_search
+            WHERE ds_search.dealer_id = d.id
+              AND LOWER(TRIM(ds_search.software)) LIKE ?
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM stock_allocations sa_search_software
+            WHERE sa_search_software.owner_type = 'dealer'
+              AND sa_search_software.owner_id = d.id
+              AND LOWER(TRIM(COALESCE(sa_search_software.software, ''))) LIKE ?
+        )
+    )";
+    $like = '%' . strtolower($search) . '%';
+    $params = array_merge($params, array_fill(0, 9, $like));
+    $types .= str_repeat('s', 9);
 }
 
 if (($platform = trim((string)($_GET['platform'] ?? ''))) !== '') {
