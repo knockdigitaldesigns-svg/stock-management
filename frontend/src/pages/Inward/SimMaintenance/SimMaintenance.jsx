@@ -14,9 +14,15 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../com
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 
 const SimMaintenance = () => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, user } = useAuth();
+    const isSuperAdmin = ['super admin', 'super_admin'].includes(
+        String(user?.role?.name ?? user?.role ?? '').trim().toLowerCase()
+    );
+    const canEditSims = isSuperAdmin || hasPermission('sims.edit');
+    const canDeleteSims = isSuperAdmin || hasPermission('sims.delete');
     const [sims, setSims] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
@@ -28,12 +34,16 @@ const SimMaintenance = () => {
     const fetchSims = async () => {
         setLoading(true);
         try {
-            const response = await api.get('/sims/list.php').catch(() => ({ data: { success: true, data: { sims: [] } } }));
+            const response = await api.get('/sims/list.php');
             if (response.data.success) {
                 setSims(response.data.data.sims || []);
+                setLoadError('');
+            } else {
+                setLoadError(response.data.message || 'Failed to fetch SIMs.');
             }
         } catch (error) {
             console.error('Failed to fetch sims', error);
+            setLoadError(error.response?.data?.message || 'Failed to fetch SIMs.');
         } finally {
             setLoading(false);
         }
@@ -145,6 +155,10 @@ const SimMaintenance = () => {
                                 <tr>
                                     <td colSpan="5" className="text-center">Loading SIMs...</td>
                                 </tr>
+                            ) : loadError ? (
+                                <tr>
+                                    <td colSpan="5" className="text-center">{loadError}</td>
+                                </tr>
                             ) : paginatedItems.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="text-center empty-state">
@@ -161,8 +175,8 @@ const SimMaintenance = () => {
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View SIM" title="View" onClick={() => setViewingSim(sim)}><Eye size={16} /></button>
-                                                {hasPermission('sims.edit') && <button className="icon-btn edit" type="button" aria-label="Edit SIM" onClick={() => setEditingSim(sim)}><Edit size={16} /></button>}
-                                                {hasPermission('sims.delete') && <button className="icon-btn delete" type="button" aria-label="Delete SIM" onClick={() => setDeleteTarget(sim)}><Trash2 size={16} /></button>}
+                                                {canEditSims && <button className="icon-btn edit" type="button" aria-label="Edit SIM" onClick={() => setEditingSim(sim)}><Edit size={16} /></button>}
+                                                {canDeleteSims && <button className="icon-btn delete" type="button" aria-label="Delete SIM" onClick={() => setDeleteTarget(sim)}><Trash2 size={16} /></button>}
                                             </div>
                                         </td>
                                     </tr>
@@ -202,7 +216,7 @@ const SimMaintenance = () => {
                 />
             )}
 
-            {editingSim && hasPermission('sims.edit') && (
+            {editingSim && canEditSims && (
                 <EditSimModal
                     sim={editingSim}
                     onClose={() => setEditingSim(null)}
@@ -215,7 +229,7 @@ const SimMaintenance = () => {
 
             {viewingSim && <RecordViewModal isOpen onClose={() => setViewingSim(null)} title="SIM Details" record={viewingSim} fetchRecord={async (row) => (await api.get('/sims/list.php')).data.data.sims.find((sim) => String(sim.id) === String(row.id)) || row} fields={[{ label: 'SIM No', key: 'sim_no' }, { label: 'SIM Type', key: 'sim_type' }, { label: 'Purchase Date', key: 'purchase_date' }, { label: 'Status', key: 'status' }, { label: 'Owner', key: 'owner_name' }, { label: 'Allocation Date', key: 'allocation_date' }, { label: 'Software', key: 'software' }, { label: 'Payment Status', key: 'payment_status' }, { label: 'Notes', key: 'notes' }]} />}
 
-            {deleteTarget && hasPermission('sims.delete') && (
+            {deleteTarget && canDeleteSims && (
                 <Modal
                     isOpen={Boolean(deleteTarget)}
                     onClose={() => setDeleteTarget(null)}
@@ -228,7 +242,12 @@ const SimMaintenance = () => {
                         </>
                     }
                 >
-                    <p>Are you sure you want to delete this SIM?</p>
+                    <p>Are you sure you want to delete SIM <strong>{deleteTarget.sim_no}</strong>?</p>
+                    {Number(deleteTarget.has_history_dependencies) === 1 && (
+                        <p className="text-warning">
+                            This SIM is referenced by allocations, activations, payment or renewal history, transfers, courier requests, or customer vehicles. It will be archived so history is preserved and it cannot be allocated again.
+                        </p>
+                    )}
                 </Modal>
             )}
         </div>

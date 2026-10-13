@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../../../services/api';
 import { formatDate } from '../../../utils/date';
 import { exportToExcel, exportToPDF } from '../../../utils/export';
@@ -11,6 +11,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { Ban, Download, Edit2, Eye, Play, RotateCw, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import DealerSimActivationEditModal from './DealerSimActivationEditModal';
 import DealerSimActivationBulkUploadModal from './DealerSimActivationBulkUploadModal';
+import DealerSimActivationBulkPaymentModal from './DealerSimActivationBulkPaymentModal';
 import './DealerSimActivation.css';
 
 const simStatusBadgeClass = (status) => ({
@@ -27,12 +28,18 @@ const paymentStatusBadgeClass = (status) => ({
     'not paid': 'badge-danger'
 }[String(status || '').trim().toLowerCase()] || 'badge-info');
 
+const getPaymentOutstanding = (sim) => {
+    const outstanding = Number(sim.total_pending_amount ?? sim.pending_amount ?? sim.allocation_pending_amount ?? 0);
+    return Number.isFinite(outstanding) ? Math.max(0, outstanding) : 0;
+};
+
 const DealerSimActivation = () => {
-    const { currentUser, hasPermission } = useAuth();
+    const { currentUser, hasPermission, refreshPermissions } = useAuth();
     const roleName = typeof currentUser?.role === 'string'
         ? currentUser.role
         : currentUser?.role?.name || currentUser?.role_name || '';
     const isSuperAdmin = String(roleName).trim().toLowerCase().replace(/[\s_-]/g, '') === 'superadmin';
+    const canBulkUpload = isSuperAdmin || hasPermission('dealer_sim_activation.import');
     const canViewActivation = hasPermission('dealer_sim_activation.view') || hasPermission('dealers.view');
     const canEditActivation = hasPermission('dealer_sim_activation.edit') || hasPermission('dealers.edit');
     const canDeleteActivation = hasPermission('dealer_sim_activation.delete') || hasPermission('dealers.delete');
@@ -42,11 +49,11 @@ const DealerSimActivation = () => {
         simType: '',
         status: '',
         paymentStatus: '',
-        given_date: '',
-        given_date_operator: 'exact',
+        expiry_date: '',
+        expiry_date_operator: 'exact',
         simValidity: '',
-        activation_date_from: '',
-        activation_date_to: ''
+        expiry_date_from: '',
+        expiry_date_to: ''
     };
 
     const [sims, setSims] = useState([]);
@@ -54,7 +61,7 @@ const DealerSimActivation = () => {
     const [error, setError] = useState(null);
 
     const [masters, setMasters] = useState({ dealers: [], simTypes: [], simValidities: [] });
-    const [dateYears, setDateYears] = useState({ given_date: [], activation_date: [] });
+    const [dateYears, setDateYears] = useState({ expiry_date: [] });
     const [filters, setFilters] = useState(initialFilters);
     const [appliedFilters, setAppliedFilters] = useState(initialFilters);
     const [dealerDropdownResetKey, setDealerDropdownResetKey] = useState(0);
@@ -64,11 +71,31 @@ const DealerSimActivation = () => {
     const [deleting, setDeleting] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
     const [uploadSuccess, setUploadSuccess] = useState('');
+    const [selectedSims, setSelectedSims] = useState({});
+    const [allFilteredSimsSelected, setAllFilteredSimsSelected] = useState(false);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const [revalidatingSelection, setRevalidatingSelection] = useState(false);
+    const [isBulkPaymentOpen, setIsBulkPaymentOpen] = useState(false);
 
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [totalRecords, setTotalRecords] = useState(0);
     const latestFetchId = useRef(0);
+    const selectionRequestId = useRef(0);
+    const selectAllRef = useRef(null);
+    const eligiblePageSims = sims.filter((sim) => getPaymentOutstanding(sim) > 0);
+    const selectedSimIds = useMemo(
+        () => Object.entries(selectedSims)
+            .filter(([, sim]) => getPaymentOutstanding(sim) > 0)
+            .map(([id]) => id),
+        [selectedSims]
+    );
+    const pageSelectionCount = eligiblePageSims.filter((sim) => selectedSims[String(sim.allocation_id)]).length;
+    useEffect(() => {
+        if (selectAllRef.current) {
+            selectAllRef.current.indeterminate = pageSelectionCount > 0 && !allFilteredSimsSelected;
+        }
+    }, [pageSelectionCount, allFilteredSimsSelected]);
 
     const buildFilterParams = (selectedFilters, exportAll = false) => {
         let validity_id = '';
@@ -87,10 +114,10 @@ const DealerSimActivation = () => {
             sim_type: selectedFilters.simType || '',
             status: selectedFilters.status || '',
             payment_status: selectedFilters.paymentStatus || '',
-            given_date: selectedFilters.given_date || '',
-            given_date_operator: selectedFilters.given_date_operator || 'exact',
-            activation_date_from: selectedFilters.activation_date_from || '',
-            activation_date_to: selectedFilters.activation_date_to || '',
+            expiry_date: selectedFilters.expiry_date || '',
+            expiry_date_operator: selectedFilters.expiry_date_operator || 'exact',
+            expiry_date_from: selectedFilters.expiry_date_from || '',
+            expiry_date_to: selectedFilters.expiry_date_to || '',
             validity_id
         });
     };
@@ -122,7 +149,7 @@ const DealerSimActivation = () => {
             if (fetchId !== latestFetchId.current) return;
             if (response.data.success) {
                 setSims(response.data.data?.sims || []);
-                setDateYears(response.data.data?.date_years || { given_date: [], activation_date: [] });
+                setDateYears(response.data.data?.date_years || { expiry_date: [] });
                 setTotalRecords(response.data.data?.pagination?.total_records || 0);
             } else {
                 setError(response.data.message || 'Failed to load SIMs');
@@ -140,6 +167,12 @@ const DealerSimActivation = () => {
     }, []);
 
     useEffect(() => {
+        refreshPermissions().catch((permissionError) => {
+            showGlobalError(permissionError.response?.data?.message || permissionError.message || 'Unable to refresh permissions.');
+        });
+    }, [refreshPermissions]);
+
+    useEffect(() => {
         fetchSims();
     }, [page, pageSize, appliedFilters, masters.simValidities]);
 
@@ -148,8 +181,82 @@ const DealerSimActivation = () => {
     };
 
     const handleSearch = () => {
+        selectionRequestId.current += 1;
+        setSelectedSims({});
+        setAllFilteredSimsSelected(false);
+        setSelectingAll(false);
         setAppliedFilters({ ...filters });
         setPage(1);
+    };
+
+    const toggleSimSelection = (sim) => {
+        const id = String(sim.allocation_id);
+        selectionRequestId.current += 1;
+        setSelectingAll(false);
+        setAllFilteredSimsSelected(false);
+        setSelectedSims((current) => {
+            if (current[id]) {
+                const next = { ...current };
+                delete next[id];
+                return next;
+            }
+            return { ...current, [id]: sim };
+        });
+    };
+
+    const toggleSelectAllSims = async () => {
+        if (allFilteredSimsSelected) {
+            selectionRequestId.current += 1;
+            setSelectedSims({});
+            setAllFilteredSimsSelected(false);
+            return;
+        }
+        const requestId = ++selectionRequestId.current;
+        setSelectingAll(true);
+        setError(null);
+        try {
+            const records = await getExportRows();
+            if (requestId !== selectionRequestId.current) return;
+            const eligibleRecords = records.filter((sim) => getPaymentOutstanding(sim) > 0);
+            setSelectedSims(Object.fromEntries(
+                eligibleRecords.map((sim) => [String(sim.allocation_id), sim])
+            ));
+            setAllFilteredSimsSelected(eligibleRecords.length > 0);
+        } catch (selectionError) {
+            if (requestId === selectionRequestId.current) {
+                setError(selectionError.response?.data?.message || selectionError.message || 'Unable to select matching SIMs.');
+            }
+        } finally {
+            if (requestId === selectionRequestId.current) setSelectingAll(false);
+        }
+    };
+
+    const openBulkPayment = async () => {
+        const selected = Object.values(selectedSims).filter((sim) => getPaymentOutstanding(sim) > 0);
+        if (!selected.length || revalidatingSelection) return;
+
+        setRevalidatingSelection(true);
+        setError(null);
+        try {
+            const latestRecords = await Promise.all(selected.map(async (sim) => {
+                const response = await api.get(`/dealers/sim_activation_get.php?allocation_id=${encodeURIComponent(sim.allocation_id)}`);
+                if (!response.data.success || !response.data.data?.allocation) {
+                    throw new Error(response.data.message || `Unable to revalidate SIM ${sim.sim_no}.`);
+                }
+                return response.data.data.allocation;
+            }));
+            const eligibleRecords = latestRecords.filter((sim) => getPaymentOutstanding(sim) > 0);
+            setSelectedSims(Object.fromEntries(eligibleRecords.map((sim) => [String(sim.allocation_id), sim])));
+            if (eligibleRecords.length !== selected.length) {
+                setAllFilteredSimsSelected(false);
+                setError('Some selected SIMs no longer have an outstanding balance and were removed from the selection.');
+            }
+            if (eligibleRecords.length > 0) setIsBulkPaymentOpen(true);
+        } catch (selectionError) {
+            setError(selectionError.response?.data?.message || selectionError.message || 'Unable to revalidate selected SIMs.');
+        } finally {
+            setRevalidatingSelection(false);
+        }
     };
 
     const getExportRows = async () => {
@@ -278,7 +385,7 @@ const DealerSimActivation = () => {
                     <h1>Dealer SIM Activation</h1>
                     <p className="page-subtitle">Review and manage SIM activation records for dealers.</p>
                 </div>
-                {isSuperAdmin && (
+                {canBulkUpload && (
                     <button type="button" className="btn btn-primary" onClick={() => setIsBulkUploadOpen(true)}>
                         <Upload size={16} /> Upload Excel
                     </button>
@@ -288,7 +395,15 @@ const DealerSimActivation = () => {
             {uploadSuccess && <div className="alert alert-success">{uploadSuccess}</div>}
 
             <div className="card">
-                <div className="header-actions" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>
+                <div className="header-actions dealer-sim-bulk-actions" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>
+                    {canEditActivation && (
+                        <>
+                            <span className="dealer-sim-selected-count" role="status">Selected SIMs: {selectedSimIds.length}</span>
+                            <button type="button" className="btn btn-primary" onClick={openBulkPayment} disabled={!selectedSimIds.length || selectingAll || revalidatingSelection}>
+                                Close Payment
+                            </button>
+                        </>
+                    )}
                     <button type="button" className="btn btn-outline" onClick={handleExportExcel} disabled={loading || totalRecords === 0}>
                         <Download size={16} /> Export Excel
                     </button>
@@ -302,6 +417,10 @@ const DealerSimActivation = () => {
                     onSearch={handleSearch}
                     dealerDropdownResetKey={dealerDropdownResetKey}
                     onReset={() => {
+                        selectionRequestId.current += 1;
+                        setSelectedSims({});
+                        setAllFilteredSimsSelected(false);
+                        setSelectingAll(false);
                         setFilters({ ...initialFilters });
                         setAppliedFilters({ ...initialFilters });
                         setDealerDropdownResetKey((key) => key + 1);
@@ -315,9 +434,9 @@ const DealerSimActivation = () => {
                     showPaymentStatus
                     paymentStatusOptions={['Paid', 'Partially Paid', 'Not Paid']}
                     simValidityOptions={masters.simValidities.map(v => `${v.months} Months`)}
-                    dateRangeFilters={[{ key: 'activation_date', label: 'Activation Date' }]}
+                    dateRangeFilters={[{ key: 'expiry_date', label: 'Expiry Date' }]}
                     customDateFilters={[
-                        { key: 'given_date', label: 'Given Date', years: dateYears.given_date }
+                        { key: 'expiry_date', label: 'Expiry Date', years: dateYears.expiry_date }
                     ]}
                 />
 
@@ -327,6 +446,21 @@ const DealerSimActivation = () => {
                     <table className="dealer-sim-activation-table">
                         <thead>
                             <tr>
+                                {canEditActivation && (
+                                    <th>
+                                        <label className="dealer-sim-select-all">
+                                            <input
+                                                ref={selectAllRef}
+                                                type="checkbox"
+                                                checked={allFilteredSimsSelected}
+                                                disabled={selectingAll || totalRecords === 0}
+                                                onChange={toggleSelectAllSims}
+                                                aria-label="Select All SIMs matching current filters"
+                                            />
+                                            <span>Select All SIMs</span>
+                                        </label>
+                                    </th>
+                                )}
                                 <th>S.No</th>
                                 <th>Dealer Name</th>
                                 <th>SIM Number</th>
@@ -347,15 +481,26 @@ const DealerSimActivation = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="15" className="text-center">Loading SIMs...</td>
+                                    <td colSpan={canEditActivation ? 16 : 15} className="text-center">Loading SIMs...</td>
                                 </tr>
                             ) : sims.length === 0 ? (
                                 <tr>
-                                    <td colSpan="15" className="text-center empty-state">No SIMs found</td>
+                                    <td colSpan={canEditActivation ? 16 : 15} className="text-center empty-state">No SIMs found</td>
                                 </tr>
                             ) : (
                                 sims.map((sim, index) => (
                                     <tr key={sim.allocation_id}>
+                                        {canEditActivation && (
+                                            <td>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(selectedSims[String(sim.allocation_id)])}
+                                                    disabled={getPaymentOutstanding(sim) <= 0}
+                                                    onChange={() => toggleSimSelection(sim)}
+                                                    aria-label={`Select SIM ${sim.sim_no} for payment`}
+                                                />
+                                            </td>
+                                        )}
                                         <td>{(page - 1) * pageSize + index + 1}</td>
                                         <td className="truncate-cell" title={sim.dealer_name}>{sim.dealer_name}</td>
                                         <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
@@ -391,11 +536,14 @@ const DealerSimActivation = () => {
                                                         <Eye size={16} />
                                                     </button>
                                                 )}
-                                                {isSuperAdmin && (
+                                                {canViewActivation && (
                                                     <button
                                                         type="button"
                                                         className="icon-btn edit"
-                                                        onClick={() => setActiveSimModal({ allocationId: sim.allocation_id, mode: 'edit' })}
+                                                        onClick={() => setActiveSimModal({
+                                                            allocationId: sim.allocation_id,
+                                                            mode: 'edit'
+                                                        })}
                                                         title="Edit SIM and Payment Details"
                                                         aria-label={`Edit SIM and Payment Details for ${sim.sim_no}`}
                                                     >
@@ -458,6 +606,8 @@ const DealerSimActivation = () => {
                     mode={activeSimModal.mode}
                     lifecycleAction={activeSimModal.action}
                     canEditDetails={isSuperAdmin}
+                    canActivateAvailable={canEditActivation}
+                    canRecordPayment={canEditActivation}
                     onClose={() => setActiveSimModal(null)}
                     onSuccess={async () => {
                         setActiveSimModal(null);
@@ -497,6 +647,21 @@ const DealerSimActivation = () => {
                         setIsBulkUploadOpen(false);
                         setUploadSuccess(`${count} SIMs activated successfully.`);
                         fetchSims();
+                    }}
+                />
+            )}
+            {isBulkPaymentOpen && (
+                <DealerSimActivationBulkPaymentModal
+                    selectedIds={selectedSimIds}
+                    onClose={() => setIsBulkPaymentOpen(false)}
+                    onSuccess={async () => {
+                        setIsBulkPaymentOpen(false);
+                        selectionRequestId.current += 1;
+                        setSelectedSims({});
+                        setAllFilteredSimsSelected(false);
+                        setSelectingAll(false);
+                        setUploadSuccess('Bulk SIM payment recorded successfully.');
+                        await fetchSims();
                     }}
                 />
             )}

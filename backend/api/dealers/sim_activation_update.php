@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/date.php';
 require_once '../../utils/dealer_sim_activation.php';
+require_once '../../utils/renewal_history.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/transaction_ids.php';
 require_once '../../utils/stock_allocation_payment.php';
@@ -18,12 +19,14 @@ $currentUser = authenticate();
 $data = json_decode(file_get_contents('php://input'), true) ?: [];
 $id = (int) ($data['allocation_id'] ?? 0);
 $action = trim((string) ($data['action'] ?? 'update'));
+$isSuperAdmin = isSuperAdminUser((int)($currentUser['user_id'] ?? 0));
 
 if ($action === 'update') {
-    if (!isSuperAdminUser((int)($currentUser['user_id'] ?? 0))) {
-        sendResponse(false, 'Only Super Admin can edit Dealer SIM activation details.', [], [], 403);
+    if ($isSuperAdmin) {
+        requirePermission('dealer_sim_activation.edit');
+    } else {
+        requireAnyPermission(['dealer_sim_activation.edit', 'dealers.edit']);
     }
-    requirePermission('dealer_sim_activation.edit');
 } else {
     requireAnyPermission(['dealer_sim_activation.edit', 'dealers.edit']);
 }
@@ -32,12 +35,14 @@ if ($id <= 0) sendResponse(false, 'Valid allocation ID is required', [], [], 400
 
 $db = new Database();
 $conn = $db->getConnection();
-$conn->begin_transaction();
 
 try {
     foreach ([
         'allocation_id' => "ALTER TABLE renewal_history ADD COLUMN allocation_id INT DEFAULT NULL AFTER renewal_id",
-        'payment_date' => "ALTER TABLE renewal_history ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_mode"
+        'payment_date' => "ALTER TABLE renewal_history ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_mode",
+        'bulk_payment_request_key' => "ALTER TABLE renewal_history ADD COLUMN bulk_payment_request_key VARCHAR(64) DEFAULT NULL AFTER changed_by",
+        'source_history_id' => "ALTER TABLE renewal_history ADD COLUMN source_history_id INT DEFAULT NULL AFTER bulk_payment_request_key",
+        'source_balance_updated' => "ALTER TABLE renewal_history ADD COLUMN source_balance_updated TINYINT(1) NOT NULL DEFAULT 1 AFTER source_history_id"
     ] as $column => $alterSql) {
         $columnCheck = $conn->query("SHOW COLUMNS FROM renewal_history LIKE '$column'");
         if (!$columnCheck) {
@@ -51,6 +56,8 @@ try {
             }
         }
     }
+    ensureRenewalHistoryPaymentActionType($conn);
+    $conn->begin_transaction();
 
     $stmt = $conn->prepare("SELECT * FROM stock_allocations WHERE id = ? AND owner_type = 'dealer' AND sim_id IS NOT NULL FOR UPDATE");
     $stmt->bind_param('i', $id);
@@ -60,6 +67,62 @@ try {
 
     if (!$oldAllocation) {
         throw new Exception('Stock allocation not found or not a valid dealer SIM.');
+    }
+
+    $previousRequestData = is_array($data['previous_pending_payment'] ?? null)
+        ? $data['previous_pending_payment']
+        : [];
+    $lifecycleRequestData = is_array($data['lifecycle_payment'] ?? null)
+        ? $data['lifecycle_payment']
+        : [];
+    $paymentRequestKey = trim((string)(
+        $previousRequestData['request_key'] ?? $lifecycleRequestData['request_key'] ?? ''
+    ));
+    if ($action === 'renewal_payment' && !preg_match('/^[A-Za-z0-9-]{16,64}$/', $paymentRequestKey)) {
+        throw new InvalidArgumentException('A valid renewal payment request key is required.');
+    }
+    if ($paymentRequestKey !== '' && !preg_match('/^[A-Za-z0-9-]{16,64}$/', $paymentRequestKey)) {
+        throw new InvalidArgumentException('Invalid renewal payment request key.');
+    }
+    if (($action === 'renew' || $action === 'reactivate') && (float)($lifecycleRequestData['amount_paid'] ?? 0) > 0
+        && $paymentRequestKey === '') {
+        throw new InvalidArgumentException('A valid lifecycle payment request key is required.');
+    }
+    if ($paymentRequestKey !== '') {
+        $replayCheck = $conn->prepare(
+            "SELECT id FROM renewal_history
+             WHERE allocation_id = ? AND action_type = 'Renewal Payment'
+               AND bulk_payment_request_key = ?
+             LIMIT 1 FOR UPDATE"
+        );
+        if (!$replayCheck) {
+            throw new RuntimeException('Unable to prepare renewal payment duplicate check: ' . $conn->error);
+        }
+        $replayCheck->bind_param('is', $id, $paymentRequestKey);
+        if (!$replayCheck->execute()) {
+            $error = $replayCheck->error;
+            $replayCheck->close();
+            throw new RuntimeException('Unable to check for a repeated renewal payment: ' . $error);
+        }
+        $alreadyRecorded = $replayCheck->get_result()->num_rows > 0;
+        $replayCheck->close();
+        if ($alreadyRecorded) {
+            $conn->commit();
+            $conn->close();
+            sendResponse(true, 'Renewal payment was already recorded.', ['idempotent_replay' => true]);
+        }
+    }
+    if ($action === 'update' && !$isSuperAdmin) {
+        if (strtolower(trim((string)($oldAllocation['sim_status'] ?? ''))) !== 'available') {
+            throw new InvalidArgumentException('Only Super Admin can edit an already activated SIM.');
+        }
+        $allowedActivationFields = ['allocation_id', 'action', 'activation_date', 'sim_validity_id'];
+        if (array_diff(array_keys($data), $allowedActivationFields)) {
+            throw new InvalidArgumentException('You can only activate an Available SIM by setting its Activation Date and Validity.');
+        }
+        if (trim((string)($data['activation_date'] ?? '')) === '' || (int)($data['sim_validity_id'] ?? 0) <= 0) {
+            throw new InvalidArgumentException('Enter an Activation Date and select a Validity to activate this SIM.');
+        }
     }
 
     $lifecyclePayment = $data['lifecycle_payment'] ?? [];
@@ -352,12 +415,26 @@ try {
 
     if (in_array($action, ['renew', 'reactivate', 'renewal_payment'], true) && $previousPendingPaid > 0) {
         $pendingStmt = $conn->prepare(
-            "SELECT id, amount_paid, amount_pending
-             FROM renewal_history
-             WHERE allocation_id = ?
-               AND action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
-               AND amount_pending > 0
-             ORDER BY id ASC
+            "SELECT rh.id, rh.amount_pending, rh.old_status, rh.new_status,
+                    rh.old_renewal_date, rh.new_renewal_date,
+                    GREATEST(0, rh.amount_pending - COALESCE((
+                        SELECT SUM(payment.amount_paid)
+                        FROM renewal_history payment
+                        WHERE payment.source_history_id = rh.id
+                          AND payment.action_type = 'Renewal Payment'
+                          AND payment.source_balance_updated = 0
+                    ), 0)) AS current_pending
+             FROM renewal_history rh
+             WHERE rh.allocation_id = ?
+               AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
+               AND GREATEST(0, rh.amount_pending - COALESCE((
+                   SELECT SUM(payment.amount_paid)
+                   FROM renewal_history payment
+                   WHERE payment.source_history_id = rh.id
+                     AND payment.action_type = 'Renewal Payment'
+                     AND payment.source_balance_updated = 0
+               ), 0)) > 0
+             ORDER BY rh.id ASC
              FOR UPDATE"
         );
         if (!$pendingStmt) {
@@ -372,7 +449,7 @@ try {
         $pendingRows = $pendingStmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $pendingStmt->close();
         $availablePending = array_sum(array_map(
-            static fn($row) => (float) $row['amount_pending'],
+            static fn($row) => (float) $row['current_pending'],
             $pendingRows
         ));
         if ($previousPendingPaid > $availablePending) {
@@ -382,67 +459,61 @@ try {
         }
 
         $remainingPayment = $previousPendingPaid;
-        $totalPendingAfterPayment = $availablePending;
+        $reservedPaymentId = null;
         foreach ($pendingRows as $pendingRow) {
             if ($remainingPayment <= 0) break;
-            $rowPending = round((float) $pendingRow['amount_pending'], 2);
+            $rowPending = round((float) $pendingRow['current_pending'], 2);
             $appliedPayment = min($rowPending, $remainingPayment);
-            $newRowPaid = round((float) $pendingRow['amount_paid'] + $appliedPayment, 2);
             $newRowPending = round($rowPending - $appliedPayment, 2);
-            $pendingUpdate = $conn->prepare(
-                'UPDATE renewal_history SET amount_paid = ?, amount_pending = ? WHERE id = ?'
-            );
-            if (!$pendingUpdate) {
-                throw new RuntimeException('Unable to prepare previous renewal balance update: ' . $conn->error);
-            }
-            $pendingHistoryId = (int) $pendingRow['id'];
-            $pendingUpdate->bind_param('ddi', $newRowPaid, $newRowPending, $pendingHistoryId);
-            if (!$pendingUpdate->execute()) {
-                $error = $pendingUpdate->error;
-                $pendingUpdate->close();
-                throw new RuntimeException('Unable to update previous renewal balance: ' . $error);
-            }
-            $pendingUpdate->close();
             $remainingPayment = round($remainingPayment - $appliedPayment, 2);
-            $totalPendingAfterPayment = round($totalPendingAfterPayment - $appliedPayment, 2);
-        }
 
-        $paymentLog = $conn->prepare(
-            "INSERT INTO renewal_history
-                (renewal_id, allocation_id, customer_id, action_type, action_date, old_status, new_status,
-                 old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending,
-                 payment_mode, payment_date, transaction_id, changed_by)
-             VALUES (0, ?, 0, 'Renewal Payment', ?, ?, ?, ?, ?, 0, ?, ?, NULLIF(?, ''),
-                     NULLIF(?, ''), NULLIF(?, ''), ?)"
-        );
-        if (!$paymentLog) {
-            throw new RuntimeException('Unable to prepare previous renewal payment history: ' . $conn->error);
-        }
-        $paymentUserId = $currentUser['id'] ?? null;
-        $paymentLog->bind_param(
-            'isssssddsssi',
-            $id,
-            $previousPendingDate,
-            $oldStatus,
-            $oldStatus,
-            $oldExpiry,
-            $oldExpiry,
-            $previousPendingPaid,
-            $totalPendingAfterPayment,
-            $previousPendingMode,
-            $previousPendingDate,
-            $previousPendingTransactionId,
-            $paymentUserId
-        );
-        if (!$paymentLog->execute()) {
-            $error = $paymentLog->error;
+            $sourceHistoryId = (int)$pendingRow['id'];
+
+            $paymentLog = $conn->prepare(
+                "INSERT INTO renewal_history
+                    (renewal_id, allocation_id, customer_id, action_type, action_date, old_status, new_status,
+                     old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending,
+                     payment_mode, payment_date, transaction_id, changed_by, bulk_payment_request_key,
+                     source_history_id, source_balance_updated)
+                 VALUES (0, ?, 0, 'Renewal Payment', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULLIF(?, ''),
+                         ?, ?, ?, 0)"
+            );
+            if (!$paymentLog) {
+                throw new RuntimeException('Unable to prepare previous renewal payment history: ' . $conn->error);
+            }
+            $paymentUserId = (int)($currentUser['id'] ?? 0);
+            $paymentLog->bind_param(
+                'isssssddsssisi',
+                $id,
+                $previousPendingDate,
+                $pendingRow['old_status'],
+                $pendingRow['new_status'],
+                $pendingRow['old_renewal_date'],
+                $pendingRow['new_renewal_date'],
+                $appliedPayment,
+                $newRowPending,
+                $previousPendingMode,
+                $previousPendingDate,
+                $previousPendingTransactionId,
+                $paymentUserId,
+                $paymentRequestKey,
+                $sourceHistoryId
+            );
+            if (!$paymentLog->execute()) {
+                $error = $paymentLog->error;
+                $paymentLog->close();
+                throw new RuntimeException('Unable to save previous renewal payment history: ' . $error);
+            }
+            if ($reservedPaymentId === null) {
+                $reservedPaymentId = (string)$paymentLog->insert_id;
+            }
             $paymentLog->close();
-            throw new RuntimeException('Unable to save previous renewal payment history: ' . $error);
         }
-        $paymentHistoryId = (string) $paymentLog->insert_id;
-        $paymentLog->close();
-        if ($previousPendingTransactionId !== '') {
-            reserveTransactionId($conn, $previousPendingTransactionId, 'renewal_history', $paymentHistoryId);
+        if ($remainingPayment > 0) {
+            throw new RuntimeException('Unable to allocate the full renewal payment to the current outstanding balances.');
+        }
+        if ($previousPendingTransactionId !== '' && $reservedPaymentId !== null) {
+            reserveTransactionId($conn, $previousPendingTransactionId, 'renewal_history', $reservedPaymentId);
         }
     }
 
@@ -494,7 +565,9 @@ try {
         }
         
         $histSql = "INSERT INTO renewal_history
-                    (renewal_id, allocation_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by)
+                    (renewal_id, allocation_id, customer_id, action_type, action_date, old_status, new_status,
+                     old_validity_months, new_validity_months, old_renewal_date, new_renewal_date,
+                     payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by)
                     VALUES (0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)";
         $histStmt = $conn->prepare($histSql);
         $userId = $currentUser['id'] ?? null;
@@ -517,10 +590,52 @@ try {
             $userId
         );
         if (!$histStmt->execute()) throw new Exception('Failed to write SIM lifecycle history: ' . $histStmt->error);
-        $historyId = (string) $histStmt->insert_id;
+        $historyId = (int)$histStmt->insert_id;
         $histStmt->close();
-        if ($transactionId !== '') {
-            reserveTransactionId($conn, $transactionId, 'renewal_history', $historyId);
+
+        if ($paymentPaid > 0 && in_array($actionTypeLog, ['Renew SIM', 'Reactivate SIM'], true)) {
+            $paymentLog = $conn->prepare(
+                "INSERT INTO renewal_history
+                    (renewal_id, allocation_id, customer_id, action_type, action_date,
+                     old_status, new_status, old_renewal_date, new_renewal_date,
+                     payment_amount, amount_paid, amount_pending, payment_mode, payment_date,
+                     transaction_id, changed_by, bulk_payment_request_key, source_history_id,
+                     source_balance_updated)
+                 VALUES (0, ?, 0, 'Renewal Payment', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?,
+                         NULLIF(?, ''), ?, ?, ?, 1)"
+            );
+            if (!$paymentLog) {
+                throw new RuntimeException('Unable to prepare initial renewal payment history: ' . $conn->error);
+            }
+            $paymentHistoryDate = $paymentDate;
+            $paymentUserId = (int)($currentUser['id'] ?? 0);
+            $paymentLog->bind_param(
+                'isssssddsssisi',
+                $id,
+                $paymentHistoryDate,
+                $oldStatus,
+                $newStatus,
+                $oldExpiry,
+                $logNewRenewalDate,
+                $paymentPaid,
+                $paymentPending,
+                $paymentMode,
+                $paymentHistoryDate,
+                $transactionId,
+                $paymentUserId,
+                $paymentRequestKey,
+                $historyId
+            );
+            if (!$paymentLog->execute()) {
+                $error = $paymentLog->error;
+                $paymentLog->close();
+                throw new RuntimeException('Unable to save initial renewal payment history: ' . $error);
+            }
+            $paymentHistoryId = (string)$paymentLog->insert_id;
+            $paymentLog->close();
+            if ($transactionId !== '') {
+                reserveTransactionId($conn, $transactionId, 'renewal_history', $paymentHistoryId);
+            }
         }
     }
     

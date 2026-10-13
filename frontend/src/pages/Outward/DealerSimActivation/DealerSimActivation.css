@@ -2,6 +2,71 @@
     min-width: 1450px;
 }
 
+.dealer-sim-bulk-actions {
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.dealer-sim-selected-count {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.dealer-sim-select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.dealer-sim-select-all input,
+.dealer-sim-activation-table td input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--brand-blue);
+}
+
+.dealer-sim-bulk-payment-modal {
+    width: min(95vw, 1100px);
+}
+
+.dealer-sim-bulk-payment-summary {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.dealer-sim-bulk-payment-table {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.dealer-sim-bulk-payment-table table {
+    min-width: 850px;
+}
+
+.dealer-sim-bulk-payment-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0 1rem;
+    margin-top: 1rem;
+}
+
+.dealer-sim-bulk-payment-remarks {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+    .dealer-sim-bulk-payment-modal {
+        width: min(96vw, 1100px);
+    }
+
+    .dealer-sim-bulk-payment-summary {
+        flex-direction: column;
+    }
+}
+
 .dealer-sim-activation-table th,
 .dealer-sim-activation-table td {
     padding: 0.55rem 0.65rem;

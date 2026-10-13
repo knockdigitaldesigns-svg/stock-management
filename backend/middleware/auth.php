@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../utils/response.php';
 
+define('SESSION_INACTIVITY_TIMEOUT_SECONDS', 1800);
+
 function generateJWT($payload, $secret) {
     $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
     $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
@@ -78,7 +80,7 @@ function authenticate() {
         sendResponse(false, 'Unable to validate user session.', [], [], 500);
     }
 
-    $stmt = $conn->prepare('SELECT active_session_id, active_session_expires_at FROM users WHERE id = ? LIMIT 1');
+    $stmt = $conn->prepare('SELECT active_session_id, UNIX_TIMESTAMP(active_session_created_at) AS active_session_last_activity_at, active_session_expires_at FROM users WHERE id = ? LIMIT 1');
     if (!$stmt) {
         $conn->close();
         sendResponse(false, 'Unable to validate user session.', [], [], 500);
@@ -89,19 +91,27 @@ function authenticate() {
     $stmt->close();
 
     $activeSessionId = (string) ($activeSession['active_session_id'] ?? '');
+    $lastActivityAt = (int) ($activeSession['active_session_last_activity_at'] ?? 0);
     $activeSessionExpiresAt = (int) ($activeSession['active_session_expires_at'] ?? 0);
     $sessionMatches = $activeSessionId !== '' && hash_equals($activeSessionId, $sessionId);
-    if (!$sessionMatches || $activeSessionExpiresAt <= time()) {
-        if ($sessionMatches && $activeSessionExpiresAt <= time()) {
-            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ?');
+    $currentTime = time();
+    $sessionExpired = $activeSessionExpiresAt <= $currentTime
+        || $lastActivityAt <= $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
+    if (!$sessionMatches || $sessionExpired) {
+        if ($sessionMatches && $sessionExpired) {
+            $lastActivityCutoff = $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
+            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ? AND (active_session_expires_at <= ? OR UNIX_TIMESTAMP(active_session_created_at) <= ?)');
             if ($clearSession) {
-                $clearSession->bind_param('is', $userId, $sessionId);
+                $clearSession->bind_param('isii', $userId, $sessionId, $currentTime, $lastActivityCutoff);
                 $clearSession->execute();
                 $clearSession->close();
             }
         }
         $conn->close();
-        sendResponse(false, 'Your session is no longer valid.', [], [], 401);
+        $message = $sessionMatches && $sessionExpired
+            ? 'Session expired due to inactivity.'
+            : 'Your session is no longer valid.';
+        sendResponse(false, $message, [], [], 401);
     }
 
     $conn->close();
@@ -164,6 +174,7 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'dealer_sim_activation.view' => ['permission_name' => 'Dealer SIM Activation View', 'module' => 'dealer_sim_activation', 'action' => 'VIEW'],
         'dealer_sim_activation.edit' => ['permission_name' => 'Dealer SIM Activation Edit', 'module' => 'dealer_sim_activation', 'action' => 'EDIT'],
         'dealer_sim_activation.delete' => ['permission_name' => 'Dealer SIM Activation Delete', 'module' => 'dealer_sim_activation', 'action' => 'DELETE'],
+        'dealer_sim_activation.import' => ['permission_name' => 'Dealer SIM Activation Import', 'module' => 'dealer_sim_activation', 'action' => 'IMPORT'],
         'dealers.import' => ['permission_name' => 'Dealer Import', 'module' => 'dealers', 'action' => 'IMPORT'],
         'dealers.export' => ['permission_name' => 'Dealer Export', 'module' => 'dealers', 'action' => 'EXPORT'],
         'technicians.view' => ['permission_name' => 'Technician View', 'module' => 'technicians', 'action' => 'VIEW'],

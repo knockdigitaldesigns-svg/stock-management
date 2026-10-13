@@ -84,6 +84,7 @@ $customerPendingResult = $conn->query("
         'Not Paid',
         'Partially Paid'
     )
+    AND COALESCE(total_amount, total_sale_amount, 0) > 0
 ");
 
 if ($customerPendingResult && $customerPendingResult->num_rows > 0) {
@@ -101,6 +102,7 @@ $allocationPendingResult = $conn->query("
     SELECT COUNT(*) AS count
     FROM stock_allocations
     WHERE payment_status <> 'Paid'
+      AND COALESCE(total_amount, 0) > 0
 ");
 
 if ($allocationPendingResult && $allocationPendingResult->num_rows > 0) {

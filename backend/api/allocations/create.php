@@ -184,7 +184,7 @@ try {
             $server_total_amount += $device_amount;
 
             // 1. Check exists & available (using FOR UPDATE to lock row)
-            $checkDev = $conn->prepare("SELECT status FROM devices WHERE id = ? FOR UPDATE");
+            $checkDev = $conn->prepare("SELECT status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
             $checkDev->bind_param("i", $device_id);
             $checkDev->execute();
             $devResult = $checkDev->get_result()->fetch_assoc();
@@ -229,7 +229,7 @@ try {
             $server_total_amount += $sim_amount;
 
             // 1. Check exists & available (using FOR UPDATE to lock row)
-            $checkSim = $conn->prepare("SELECT id, sim_validity_id, status FROM sims WHERE id = ? FOR UPDATE");
+            $checkSim = $conn->prepare("SELECT id, sim_validity_id, status FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
             $checkSim->bind_param("i", $sim_id);
             $checkSim->execute();
             $simResult = $checkSim->get_result()->fetch_assoc();

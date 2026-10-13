@@ -121,6 +121,7 @@ if (false && $includeAvailable) {
         FROM devices d
         JOIN device_types dm ON dm.id = d.device_model_id
         WHERE d.status = 'available'
+          AND d.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1
               FROM stock_allocations sa
@@ -224,6 +225,7 @@ if (false && $includeAvailable) {
         FROM sims s
         LEFT JOIN sim_validities v ON v.id = s.sim_validity_id
         WHERE s.status = 'available'
+          AND s.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1
               FROM stock_allocations sa

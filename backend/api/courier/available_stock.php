@@ -82,6 +82,7 @@ $imeiSql = "
     FROM devices d
     JOIN device_types dt ON dt.id = d.device_model_id
     WHERE d.status = 'available'
+      AND d.deleted_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM courier_requests cr 
           WHERE cr.device_id = d.id AND cr.approval_status = 'Pending Approval'
@@ -120,7 +121,7 @@ $simTypesRes = $conn->query("
     SELECT DISTINCT sim_type FROM (
         SELECT sim_type FROM sim_types WHERE sim_type IS NOT NULL AND sim_type != ''
         UNION
-        SELECT sim_type FROM sims WHERE sim_type IS NOT NULL AND sim_type != '' AND status = 'available'
+        SELECT sim_type FROM sims WHERE sim_type IS NOT NULL AND sim_type != '' AND status = 'available' AND deleted_at IS NULL
     ) AS combined_sim_types ORDER BY sim_type ASC
 ");
 $simTypes = [];
@@ -138,6 +139,7 @@ $simSql = "
     SELECT s.id, s.sim_no, s.sim_type
     FROM sims s
     WHERE s.status = 'available'
+      AND s.deleted_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM courier_requests cr 
           WHERE cr.sim_id = s.id AND cr.approval_status = 'Pending Approval'

@@ -218,21 +218,21 @@ try {
 
     $stmt->close();
 
-    $findAsset = static function ($conn, $table, $numberColumn, $number) {
+    $findAsset = static function ($conn, $table, $numberColumn, $number, $allowedArchivedId) {
         $allocationColumn = $numberColumn === 'imei_no' ? 'device_id' : 'sim_id';
         $statusExpression = $table === 'devices'
             ? "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.device_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END"
             : "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = a.id OR cvd.sim_id_2 = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.sim_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END";
-        $stmt = $conn->prepare("SELECT a.id, {$statusExpression} AS status, sa.owner_type, sa.owner_id, (SELECT installation_status FROM dealers WHERE id = sa.owner_id AND sa.owner_type = 'dealer' LIMIT 1) AS owner_installation_status FROM {$table} a LEFT JOIN stock_allocations sa ON sa.id = (SELECT latest_sa.id FROM stock_allocations latest_sa WHERE latest_sa.{$allocationColumn} = a.id ORDER BY latest_sa.created_at DESC, latest_sa.id DESC LIMIT 1) WHERE a.{$numberColumn} = ? LIMIT 1 FOR UPDATE");
-        $stmt->bind_param('s', $number);
+        $stmt = $conn->prepare("SELECT a.id, {$statusExpression} AS status, sa.owner_type, sa.owner_id, (SELECT installation_status FROM dealers WHERE id = sa.owner_id AND sa.owner_type = 'dealer' LIMIT 1) AS owner_installation_status FROM {$table} a LEFT JOIN stock_allocations sa ON sa.id = (SELECT latest_sa.id FROM stock_allocations latest_sa WHERE latest_sa.{$allocationColumn} = a.id ORDER BY latest_sa.created_at DESC, latest_sa.id DESC LIMIT 1) WHERE a.{$numberColumn} = ? AND (a.deleted_at IS NULL OR a.id = ?) LIMIT 1 FOR UPDATE");
+        $stmt->bind_param('si', $number, $allowedArchivedId);
         $stmt->execute();
         $asset = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         return $asset;
     };
-    $device = $findAsset($conn, 'devices', 'imei_no', $imeiNo);
-    $sim1 = $findAsset($conn, 'sims', 'sim_no', $simNo1);
-    $sim2 = $simNo2 === '' ? null : $findAsset($conn, 'sims', 'sim_no', $simNo2);
+    $device = $findAsset($conn, 'devices', 'imei_no', $imeiNo, (int) ($old['device_id'] ?? 0));
+    $sim1 = $findAsset($conn, 'sims', 'sim_no', $simNo1, (int) ($old['sim_id_1'] ?? 0));
+    $sim2 = $simNo2 === '' ? null : $findAsset($conn, 'sims', 'sim_no', $simNo2, (int) ($old['sim_id_2'] ?? 0));
     if (!$device || !$sim1 || ($simNo2 !== '' && !$sim2)) {
         throw new Exception('Selected device or SIM was not found.');
     }

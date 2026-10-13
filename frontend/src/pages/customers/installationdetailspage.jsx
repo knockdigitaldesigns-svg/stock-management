@@ -317,7 +317,7 @@ const InstallationDetailsPage = () => {
                     return;
                 }
 
-                const currentOwner = deviceOwner && simOwner ? deviceOwner : null;
+                const currentOwner = deviceOwner || simOwner;
                 const ownerType = currentOwner
                     ? currentOwner.type === 'technician'
                         ? 'Technician'
@@ -380,7 +380,7 @@ const InstallationDetailsPage = () => {
                 return;
             }
             setCurrentOwnerResolved(true);
-            const currentOwner = deviceOwner && simOwner ? deviceOwner : null;
+            const currentOwner = deviceOwner || simOwner;
             setSameAllocatedOwner(Boolean(currentOwner));
             setCurrentOwnerName(currentOwner?.name || '');
             const selectedOwnerType = currentOwner?.type || '';

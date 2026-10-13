@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
     mobile_no VARCHAR(20) DEFAULT NULL,
     username VARCHAR(50) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
+    credential_ciphertext TEXT DEFAULT NULL,
+    credential_nonce VARCHAR(24) DEFAULT NULL,
+    credential_tag VARCHAR(24) DEFAULT NULL,
     role VARCHAR(50) DEFAULT 'super_admin',
     role_id INT DEFAULT NULL,
     status ENUM('active','inactive') DEFAULT 'active',
@@ -23,7 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS active_session_id CHAR(64) DEFAULT NULL AFTER status,
     ADD COLUMN IF NOT EXISTS active_session_created_at DATETIME DEFAULT NULL AFTER active_session_id,
-    ADD COLUMN IF NOT EXISTS active_session_expires_at BIGINT UNSIGNED DEFAULT NULL AFTER active_session_created_at;
+    ADD COLUMN IF NOT EXISTS active_session_expires_at BIGINT UNSIGNED DEFAULT NULL AFTER active_session_created_at,
+    ADD COLUMN IF NOT EXISTS credential_ciphertext TEXT DEFAULT NULL AFTER password,
+    ADD COLUMN IF NOT EXISTS credential_nonce VARCHAR(24) DEFAULT NULL AFTER credential_ciphertext,
+    ADD COLUMN IF NOT EXISTS credential_tag VARCHAR(24) DEFAULT NULL AFTER credential_nonce;
 
 -- =====================================================
 -- RBAC TABLES
@@ -104,6 +110,7 @@ CREATE TABLE IF NOT EXISTS devices (
     imei_no VARCHAR(15) NOT NULL UNIQUE,
     notes TEXT NULL,
     status ENUM('available', 'allocated', 'used') DEFAULT 'available',
+    deleted_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (device_model_id) REFERENCES device_types(id) ON DELETE RESTRICT
@@ -117,6 +124,7 @@ CREATE TABLE IF NOT EXISTS sims (
     sim_validity_id INT DEFAULT NULL,
     notes TEXT NULL,
     status ENUM('available', 'allocated', 'used') DEFAULT 'available',
+    deleted_at DATETIME DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (sim_validity_id) REFERENCES sim_validities(id) ON DELETE RESTRICT
@@ -227,6 +235,7 @@ CREATE TABLE IF NOT EXISTS dealer_allocation_payment_requests (
     allocation_id INT NOT NULL,
     request_key VARCHAR(64) NOT NULL,
     payload_hash CHAR(64) NOT NULL DEFAULT '',
+    transaction_id CHAR(6) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
     INDEX idx_dealer_allocation_payment_request_key (request_key),
@@ -296,11 +305,17 @@ VALUES
     ('dealers.add', 'Dealer Add', 'dealers', 'ADD'),
     ('dealers.edit', 'Dealer Edit', 'dealers', 'EDIT'),
     ('dealers.delete', 'Dealer Delete', 'dealers', 'DELETE'),
+    ('dealers.import', 'Dealer Import', 'dealers', 'IMPORT'),
     ('dealers.export', 'Dealer Export', 'dealers', 'EXPORT'),
+    ('dealer_sim_activation.view', 'Dealer SIM Activation View', 'dealer_sim_activation', 'VIEW'),
+    ('dealer_sim_activation.edit', 'Dealer SIM Activation Edit', 'dealer_sim_activation', 'EDIT'),
+    ('dealer_sim_activation.delete', 'Dealer SIM Activation Delete', 'dealer_sim_activation', 'DELETE'),
+    ('dealer_sim_activation.import', 'Dealer SIM Activation Import', 'dealer_sim_activation', 'IMPORT'),
     ('technicians.view', 'Technician View', 'technicians', 'VIEW'),
     ('technicians.add', 'Technician Add', 'technicians', 'ADD'),
     ('technicians.edit', 'Technician Edit', 'technicians', 'EDIT'),
     ('technicians.delete', 'Technician Delete', 'technicians', 'DELETE'),
+    ('technicians.import', 'Technician Import', 'technicians', 'IMPORT'),
     ('technicians.export', 'Technician Export', 'technicians', 'EXPORT'),
     ('outward_reports.view', 'Outward Reports View', 'outward_reports', 'VIEW'),
     ('outward_reports.export', 'Outward Reports Export', 'outward_reports', 'EXPORT'),

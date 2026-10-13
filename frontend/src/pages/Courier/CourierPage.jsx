@@ -14,7 +14,8 @@ import './CourierPage.css';
 
 const CourierPage = () => {
     const { hasPermission } = useAuth();
-    const canApprove = hasPermission('courier.approve');
+    const [canApprove, setCanApprove] = useState(() => hasPermission('courier.approve'));
+    const [approvalPermissionResolved, setApprovalPermissionResolved] = useState(false);
     const canAdd = hasPermission('courier.add');
     const canEdit = hasPermission('courier.edit');
     const canDelete = hasPermission('courier.delete');
@@ -70,8 +71,14 @@ const CourierPage = () => {
             const res = await api.get(`/courier/list.php?${params.toString()}`, { skipGlobalError: true });
             if (res.data?.success) {
                 setRequests(res.data.data?.requests || []);
+                setCanApprove(Boolean(res.data.data?.can_approve));
+                setApprovalPermissionResolved(true);
             }
         } catch (err) {
+            if (err.response?.status === 403) {
+                setCanApprove(false);
+                setApprovalPermissionResolved(true);
+            }
             console.error('Failed to fetch courier requests', err);
             showGlobalError(err.response?.data?.message || 'Failed to fetch courier requests');
         } finally {
@@ -80,11 +87,11 @@ const CourierPage = () => {
     }, [search, courierToFilter, activeTab, approvalStatusFilter, courierStatusFilter, dateFrom, dateTo]);
 
     useEffect(() => {
-        if (!canApprove && activeTab === 'pending') {
+        if (approvalPermissionResolved && !canApprove && activeTab === 'pending') {
             setActiveTab('all');
             setApprovalStatusFilter('');
         }
-    }, [canApprove, activeTab]);
+    }, [canApprove, approvalPermissionResolved, activeTab]);
 
     useEffect(() => {
         fetchRequests();

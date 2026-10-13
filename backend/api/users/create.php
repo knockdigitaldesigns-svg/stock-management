@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/user_identity.php';
 require_once '../../utils/audit.php';
+require_once '../../utils/user_credential_crypto.php';
 
 handlePreflight();
 
@@ -22,7 +23,7 @@ if (!$data) {
 $employeeName = trim((string) ($data->employee_name ?? ''));
 $mobileNo = trim((string) ($data->mobile_no ?? ''));
 $roleId = isset($data->role_id) ? (int) $data->role_id : 0;
-$password = trim((string) ($data->password ?? ''));
+$password = (string) ($data->password ?? '');
 $status = isset($data->status) ? strtolower(trim((string) $data->status)) : 'active';
 
 if ($employeeName === '' || $mobileNo === '' || $password === '' || $roleId === 0) {
@@ -78,30 +79,68 @@ $role = $roleResult->fetch_assoc();
 $roleCheck->close();
 
 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+try {
+    getUserCredentialEncryptionKey();
+} catch (Throwable $error) {
+    sendResponse(false, 'User credential encryption is not configured on the server.', [], [], 500);
+}
 $conn->begin_transaction();
-$insert = $conn->prepare('INSERT INTO users (employee_name, mobile_no, username, password, role, role_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
-$insert->bind_param('sssssis', $employeeName, $mobileNo, $username, $hashedPassword, $role['role_name'], $roleId, $status);
-if (!$insert->execute()) {
-    if ($conn->errno === 1062 || $insert->errno === 1062) {
+try {
+    $insert = $conn->prepare('INSERT INTO users (employee_name, mobile_no, username, password, role, role_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    if (!$insert) {
+        throw new RuntimeException('Failed to prepare user creation.');
+    }
+    $insert->bind_param('sssssis', $employeeName, $mobileNo, $username, $hashedPassword, $role['role_name'], $roleId, $status);
+    if (!$insert->execute()) {
+        $duplicate = $conn->errno === 1062 || $insert->errno === 1062;
         $insert->close();
-        $conn->close();
-        sendResponse(false, 'Username already exists. Please use a different employee name.', [], [], 409);
+        if ($duplicate) {
+            throw new DomainException('Username already exists. Please use a different employee name.');
+        }
+        throw new RuntimeException('Failed to create user.');
     }
     $insert->close();
+    $userId = $conn->insert_id;
+    $credential = encryptUserCredential($password, $userId);
+    $credentialStmt = $conn->prepare('UPDATE users SET credential_ciphertext = ?, credential_nonce = ?, credential_tag = ? WHERE id = ?');
+    if (!$credentialStmt) {
+        throw new RuntimeException('Failed to prepare encrypted credential storage.');
+    }
+    $credentialStmt->bind_param('sssi', $credential['ciphertext'], $credential['nonce'], $credential['tag'], $userId);
+    if (!$credentialStmt->execute()) {
+        $credentialStmt->close();
+        throw new RuntimeException('Failed to store encrypted user credential.');
+    }
+    $credentialStmt->close();
+
+    writeCreatedFields($conn, $userId, 'User', [
+        'employee_name' => $employeeName,
+        'mobile_no' => $mobileNo,
+        'username' => $username,
+        'role_id' => $roleId,
+        'status' => $status
+    ], $currentUser);
+    $conn->commit();
+} catch (Throwable $error) {
+    $conn->rollback();
     $conn->close();
-    sendResponse(false, 'Failed to create user', [], [], 500);
+    $statusCode = $error instanceof DomainException ? 409 : 500;
+    if (!$error instanceof DomainException) {
+        error_log('User creation failed: ' . $error->getMessage());
+    }
+    $message = $error instanceof DomainException
+        ? $error->getMessage()
+        : 'Failed to create user and securely store its display credential.';
+    sendResponse(false, $message, [], [], $statusCode);
 }
-$insert->close();
-$userId = $conn->insert_id;
-writeCreatedFields($conn, $userId, 'User', [
+$conn->close();
+
+sendResponse(true, 'User created successfully', ['user' => [
     'employee_name' => $employeeName,
     'mobile_no' => $mobileNo,
     'username' => $username,
     'role_id' => $roleId,
+    'role' => $role['role_name'],
     'status' => $status
-], $currentUser);
-$conn->commit();
-$conn->close();
-
-sendResponse(true, 'User created successfully', ['user' => ['employee_name' => $employeeName, 'mobile_no' => $mobileNo, 'role_id' => $roleId, 'status' => $status]]);
+]]);
 ?>

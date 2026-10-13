@@ -66,7 +66,7 @@ if ($checkResult->num_rows > 0) {
 }
 $checkStmt->close();
 
-$oldStmt = $conn->prepare('SELECT purchase_date, device_model_id, imei_no, notes FROM devices WHERE id = ? LIMIT 1');
+$oldStmt = $conn->prepare('SELECT purchase_date, device_model_id, imei_no, notes FROM devices WHERE id = ? AND deleted_at IS NULL LIMIT 1');
 $oldStmt->bind_param('i', $id);
 $oldStmt->execute();
 $oldDevice = $oldStmt->get_result()->fetch_assoc();

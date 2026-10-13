@@ -38,16 +38,25 @@ api.interceptors.response.use(
         const isAlreadyOnLoginPage = window.location.pathname === '/login';
 
         if (isUnauthorized && !isLoginRequest && !isAlreadyOnLoginPage) {
+            const inactivityMessage = error.response?.data?.message?.toLowerCase().includes('inactivity')
+                ? 'You have been logged out due to 30 minutes of inactivity. Please log in again.'
+                : '';
+            sessionStorage.setItem('authLogoutMessage', inactivityMessage);
+            localStorage.setItem('authSessionEnded', JSON.stringify({
+                at: Date.now(),
+                message: inactivityMessage
+            }));
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             localStorage.removeItem('permissions');
+            localStorage.removeItem('authLastMeaningfulActivity');
             window.location.href = '/login';
             return Promise.reject(error);
         }
 
         if (isForbidden && !isAlreadyOnLoginPage) {
             const current = window.location.pathname;
-            if (!current.includes('/settings/') && !current.includes('/stock') && !current.includes('/outward') && !current.includes('/inward') && !current.includes('/dashboard')) {
+            if (!current.includes('/settings/') && !current.includes('/stock') && !current.includes('/outward') && !current.includes('/inward') && !current.includes('/dashboard') && !current.includes('/support')) {
                 window.location.href = '/dashboard';
             }
         }

@@ -393,7 +393,8 @@ $res = $conn->query(
      FROM devices d
      LEFT JOIN stock_allocations sa ON sa.id = (
          SELECT MAX(id) FROM stock_allocations WHERE device_id = d.id
-     )"
+     )
+     WHERE d.deleted_at IS NULL"
 );
 if ($res) {
     while ($r = $res->fetch_assoc()) {
@@ -415,7 +416,8 @@ $res = $conn->query(
      FROM sims s
      LEFT JOIN stock_allocations sa ON sa.id = (
          SELECT MAX(id) FROM stock_allocations WHERE sim_id = s.id
-     )"
+     )
+     WHERE s.deleted_at IS NULL"
 );
 if ($res) {
     while ($r = $res->fetch_assoc()) {

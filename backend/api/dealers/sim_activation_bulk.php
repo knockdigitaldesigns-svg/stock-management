@@ -12,9 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $currentUser = authenticate();
-if (!isSuperAdminUser((int)($currentUser['user_id'] ?? 0))) {
-    sendResponse(false, 'Only Super Admin can bulk activate Dealer SIMs.', [], [], 403);
-}
+requirePermission('dealer_sim_activation.import');
 
 $data = json_decode(file_get_contents('php://input'), true);
 $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
@@ -129,7 +127,7 @@ try {
         $allocationId = 0;
         $oldAllocation = null;
         if ($simNo !== '') {
-            $simStmt = $conn->prepare('SELECT id, status FROM sims WHERE sim_no = ? LIMIT 1 FOR UPDATE');
+            $simStmt = $conn->prepare('SELECT id, status FROM sims WHERE sim_no = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE');
             if (!$simStmt) {
                 throw new RuntimeException('Unable to prepare SIM lookup.');
             }

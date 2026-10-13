@@ -120,7 +120,7 @@ foreach ($rows as $index => $row) {
             }
             $seenImeis[$imeiNo] = true;
 
-            $devStmt = $conn->prepare("SELECT id, imei_no, status FROM devices WHERE imei_no = ? LIMIT 1");
+            $devStmt = $conn->prepare("SELECT id, imei_no, status FROM devices WHERE imei_no = ? AND deleted_at IS NULL LIMIT 1");
             $devStmt->bind_param('s', $imeiNo);
             $devStmt->execute();
             $deviceRow = $devStmt->get_result()->fetch_assoc();
@@ -166,7 +166,7 @@ foreach ($rows as $index => $row) {
             }
             $seenSimNos[$simNo] = true;
 
-            $simStmt = $conn->prepare("SELECT id, sim_no, sim_validity_id, status FROM sims WHERE sim_no = ? LIMIT 1");
+            $simStmt = $conn->prepare("SELECT id, sim_no, sim_validity_id, status FROM sims WHERE sim_no = ? AND deleted_at IS NULL LIMIT 1");
             $simStmt->bind_param('s', $simNo);
             $simStmt->execute();
             $simRow = $simStmt->get_result()->fetch_assoc();

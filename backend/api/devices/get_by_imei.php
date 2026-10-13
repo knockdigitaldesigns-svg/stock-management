@@ -64,6 +64,7 @@ $stmt = $conn->prepare(
      LEFT JOIN dealers dl ON dl.id = sa.owner_id AND sa.owner_type = 'dealer'
     LEFT JOIN technicians t ON t.id = sa.owner_id AND sa.owner_type = 'technician'
      WHERE d.imei_no = ?
+       AND d.deleted_at IS NULL
      LIMIT 1"
 );
 

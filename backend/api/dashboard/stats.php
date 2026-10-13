@@ -175,7 +175,7 @@ if ($techCount && $techCount->num_rows > 0) {
     $summary['total_technicians'] = (int) $techCount->fetch_assoc()['count'];
 }
 
-$pendingPaymentsWhere = "WHERE payment_status != 'Paid'";
+$pendingPaymentsWhere = "WHERE payment_status != 'Paid' AND COALESCE(total_amount, 0) > 0";
 if (!empty($reqStartDate) || !empty($reqEndDate)) {
     $pendingPaymentsWhere .= $isInvalidRange ? " AND 1=0" : " AND allocation_date BETWEEN '$effStartEsc' AND '$effEndEsc'";
 }

@@ -70,6 +70,11 @@ if ($installationLeadClosureColumn && ($column = $installationLeadClosureColumn-
 	$conn->query("ALTER TABLE customer_installations MODIFY COLUMN lead_closure_id INT UNSIGNED DEFAULT NULL");
 }
 $conn->query("ALTER TABLE customer_payments ADD COLUMN IF NOT EXISTS vehicle_id INT DEFAULT NULL AFTER customer_id");
+$conn->query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS deleted_at DATETIME DEFAULT NULL AFTER status");
+$conn->query("ALTER TABLE sims ADD COLUMN IF NOT EXISTS deleted_at DATETIME DEFAULT NULL AFTER status");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS credential_ciphertext TEXT DEFAULT NULL AFTER password");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS credential_nonce VARCHAR(24) DEFAULT NULL AFTER credential_ciphertext");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS credential_tag VARCHAR(24) DEFAULT NULL AFTER credential_nonce");
 $conn->query("ALTER TABLE customer_installations DROP INDEX IF EXISTS uq_customer_installation_customer");
 $conn->query("ALTER TABLE customer_payments DROP INDEX IF EXISTS uq_customer_payment_customer");
 $conn->query("ALTER TABLE customer_installations ADD UNIQUE KEY IF NOT EXISTS uq_customer_installation_vehicle (vehicle_id)");

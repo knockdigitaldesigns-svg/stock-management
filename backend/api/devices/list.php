@@ -18,7 +18,7 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
-$where = [];
+$where = ['d.deleted_at IS NULL'];
 $params = [];
 $types = '';
 if (($search = trim((string)($_GET['search'] ?? ''))) !== '') { $where[] = '(d.imei_no LIKE ? OR dm.device_type LIKE ? OR d.notes LIKE ?)'; $like = "%$search%"; array_push($params, $like, $like, $like); $types .= 'sss'; }
@@ -45,6 +45,17 @@ $sql = "
                                 ELSE d.status
                         END AS status,
                         dm.device_type AS model_name,
+                        EXISTS (
+                            SELECT 1 FROM stock_allocations dep WHERE dep.device_id = d.id
+                            UNION ALL
+                            SELECT 1 FROM stock_transactions dep WHERE dep.device_id = d.id
+                            UNION ALL
+                            SELECT 1 FROM stock_transfers dep WHERE dep.device_id = d.id
+                            UNION ALL
+                            SELECT 1 FROM customer_vehicle_details dep WHERE dep.device_id = d.id
+                            UNION ALL
+                            SELECT 1 FROM courier_requests dep WHERE dep.device_id = d.id
+                        ) AS has_history_dependencies,
             sa.allocation_date, sa.owner_type, sa.owner_id, sa.payment_status, sa.software,
             CASE WHEN sa.owner_type = 'dealer' THEN dl.dealer_name WHEN sa.owner_type = 'technician' THEN t.technician_name END AS owner_name
     FROM devices d

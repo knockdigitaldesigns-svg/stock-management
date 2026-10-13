@@ -22,7 +22,6 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
     const [allocations, setAllocations] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
     const [amounts, setAmounts] = useState({});
-    const [transactionIds, setTransactionIds] = useState({});
     const [bulkMode, setBulkMode] = useState(false);
     const [individual, setIndividual] = useState(null);
     const [totalPrice, setTotalPrice] = useState('0');
@@ -73,7 +72,10 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
         [allocations, selectedIds]
     );
     const selectedPending = selectedAllocations.reduce((sum, item) => sum + Math.max(0, Number(item.total_amount || 0) - Number(item.amount_paid || 0)), 0);
-    const selectedPaymentTotal = selectedAllocations.reduce((sum, item) => sum + Number(amounts[item.allocation_id] || 0), 0);
+    const selectedPaymentTotal = selectedAllocations.reduce((sum, item) => {
+        const amount = Number(amounts[item.allocation_id] || 0);
+        return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0);
     const allEligibleSelected = eligibleAllocations.length > 0 && eligibleAllocations.every((item) => selectedIds.includes(String(item.allocation_id)));
 
     useEffect(() => {
@@ -118,8 +120,8 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
         setRetryLocked(false);
         setPaymentMode('');
         setPaymentDate(localDateToday());
+        setTransactionId('');
         setRemarks('');
-        setTransactionIds({});
         setBulkMode(true);
         setError('');
     };
@@ -195,15 +197,14 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
         if (!selectedAllocations.length) return setError('Select at least one eligible allocation.');
         if (!paymentMode || !PAYMENT_MODES.includes(paymentMode)) return setError('Please select a valid Payment Mode.');
         if (!paymentDate) return setError('Please select a Payment Date.');
+        if (paymentMode !== 'Cash' && !/^[0-9]{6}$/.test(transactionId)) {
+            return setError('Enter a 6-digit Transaction ID.');
+        }
         for (const item of selectedAllocations) {
             const outstanding = Math.max(0, Number(item.total_amount || 0) - Number(item.amount_paid || 0));
             const amount = Number(amounts[item.allocation_id]);
             if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding) {
                 return setError(`${item.label}: payment must be greater than zero and cannot exceed its ${money(outstanding)} outstanding balance.`);
-            }
-            const id = transactionIds[item.allocation_id] || '';
-            if (paymentMode !== 'Cash' && !/^[0-9]{6}$/.test(id)) {
-                return setError(`${item.label}: enter a unique 6-digit Transaction ID.`);
             }
         }
         if (savingRef.current) return;
@@ -216,11 +217,11 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                 request_key: requestKeyRef.current,
                 payment_mode: paymentMode,
                 payment_date: paymentDate,
+                transaction_id: paymentMode === 'Cash' ? '' : transactionId,
                 remarks,
                 allocations: selectedAllocations.map((item) => ({
                     allocation_id: item.allocation_id,
-                    amount_to_pay: Number(amounts[item.allocation_id]),
-                    transaction_id: paymentMode === 'Cash' ? '' : (transactionIds[item.allocation_id] || '')
+                    amount_to_pay: Number(amounts[item.allocation_id])
                 }))
             });
             if (!response.data.success) {
@@ -282,7 +283,7 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                     <p>Total outstanding: <strong>{money(selectedPending)}</strong> · Payment to apply: <strong>{money(selectedPaymentTotal)}</strong></p>
                     <div className="table-container">
                         <table>
-                            <thead><tr><th>Allocation</th><th>Original Total</th><th>Previously Paid</th><th>Outstanding</th><th>Amount to Pay</th><th>Transaction ID</th></tr></thead>
+                            <thead><tr><th>Allocation</th><th>Original Total</th><th>Previously Paid</th><th>Outstanding</th><th>Amount to Pay</th></tr></thead>
                             <tbody>
                                 {selectedAllocations.map((item) => {
                                     const outstanding = Math.max(0, Number(item.total_amount || 0) - Number(item.amount_paid || 0));
@@ -293,7 +294,6 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                                             <td>{money(item.amount_paid)}</td>
                                             <td>{money(outstanding)}</td>
                                             <td><input className="form-control" type="number" min="0.01" max={outstanding} step="0.01" value={amounts[item.allocation_id] ?? ''} disabled={busy} onChange={(event) => setAmounts((current) => ({ ...current, [item.allocation_id]: event.target.value }))} aria-label={`Amount to pay for allocation ${item.allocation_id}`} /></td>
-                                            <td><input className="form-control" type="text" inputMode="numeric" maxLength={6} value={transactionIds[item.allocation_id] || ''} disabled={busy || paymentMode === 'Cash'} onChange={(event) => setTransactionIds((current) => ({ ...current, [item.allocation_id]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} placeholder={paymentMode === 'Cash' ? 'Not required' : '6 digits'} aria-label={`Transaction ID for allocation ${item.allocation_id}`} /></td>
                                         </tr>
                                     );
                                 })}
@@ -303,6 +303,7 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 16 }}>
                         <div className="form-group"><label className="form-label">Payment Mode *</label><select className="form-control" value={paymentMode} disabled={busy} onChange={(event) => setPaymentMode(event.target.value)}><option value="">Select payment mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></div>
                         <div className="form-group"><label className="form-label">Payment Date *</label><input className="form-control" type="date" value={paymentDate} disabled={busy} onChange={(event) => setPaymentDate(event.target.value)} /></div>
+                        <div className="form-group"><label className="form-label">Transaction ID{paymentMode && paymentMode !== 'Cash' ? ' *' : ''}</label><input className="form-control" type="text" inputMode="numeric" maxLength={6} value={transactionId} disabled={busy || paymentMode === 'Cash'} onChange={(event) => setTransactionId(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={paymentMode === 'Cash' ? 'Not required' : '6 digits'} /></div>
                         <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Remarks</label><textarea className="form-control" rows="2" value={remarks} disabled={busy} onChange={(event) => setRemarks(event.target.value)} /></div>
                     </div>
                     {retryLocked && <p role="status">The result is not confirmed. Retry this same payment without changing its details to avoid duplicate payment.</p>}

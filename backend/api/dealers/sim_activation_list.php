@@ -1,6 +1,7 @@
 <?php
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
+require_once '../../utils/renewal_history.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -20,6 +21,29 @@ if ($historyAllocationColumn->num_rows === 0 && !$conn->query("ALTER TABLE renew
     $error = $conn->error;
     $conn->close();
     sendResponse(false, 'Failed to prepare SIM lifecycle payment totals: ' . $error, [], [], 500);
+}
+foreach ([
+    'bulk_payment_request_key' => "ALTER TABLE renewal_history ADD COLUMN bulk_payment_request_key VARCHAR(64) DEFAULT NULL AFTER changed_by",
+    'source_history_id' => "ALTER TABLE renewal_history ADD COLUMN source_history_id INT DEFAULT NULL AFTER bulk_payment_request_key",
+    'source_balance_updated' => "ALTER TABLE renewal_history ADD COLUMN source_balance_updated TINYINT(1) NOT NULL DEFAULT 1 AFTER source_history_id"
+] as $column => $alterSql) {
+    $columnCheck = $conn->query("SHOW COLUMNS FROM renewal_history LIKE '$column'");
+    if (!$columnCheck) {
+        $error = $conn->error;
+        $conn->close();
+        sendResponse(false, 'Failed to check SIM lifecycle payment schema: ' . $error, [], [], 500);
+    }
+    if ($columnCheck->num_rows === 0 && !$conn->query($alterSql)) {
+        $error = $conn->error;
+        $conn->close();
+        sendResponse(false, 'Failed to prepare SIM lifecycle payment totals: ' . $conn->error, [], [], 500);
+    }
+}
+try {
+    ensureRenewalHistoryPaymentActionType($conn);
+} catch (Throwable $error) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare renewal payment history: ' . $error->getMessage(), [], [], 500);
 }
 
 $expireStmt = $conn->prepare(
@@ -49,10 +73,10 @@ $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $dealer_id = isset($_GET['dealer_id']) ? (int)$_GET['dealer_id'] : 0;
 $sim_type = isset($_GET['sim_type']) ? trim($_GET['sim_type']) : '';
 $status = isset($_GET['status']) ? trim($_GET['status']) : '';
-$given_date = isset($_GET['given_date']) ? trim($_GET['given_date']) : '';
-$given_date_operator = strtolower(trim((string) ($_GET['given_date_operator'] ?? 'exact')));
-$activation_date_from = isset($_GET['activation_date_from']) ? trim($_GET['activation_date_from']) : '';
-$activation_date_to = isset($_GET['activation_date_to']) ? trim($_GET['activation_date_to']) : '';
+$expiry_date = isset($_GET['expiry_date']) ? trim($_GET['expiry_date']) : '';
+$expiry_date_operator = strtolower(trim((string) ($_GET['expiry_date_operator'] ?? 'exact')));
+$expiry_date_from = isset($_GET['expiry_date_from']) ? trim($_GET['expiry_date_from']) : '';
+$expiry_date_to = isset($_GET['expiry_date_to']) ? trim($_GET['expiry_date_to']) : '';
 $validity_id = isset($_GET['validity_id']) ? (int)$_GET['validity_id'] : 0;
 $payment_status = trim((string)($_GET['payment_status'] ?? ''));
 $export_all = filter_var($_GET['export_all'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -60,14 +84,28 @@ $export_all = filter_var($_GET['export_all'] ?? false, FILTER_VALIDATE_BOOLEAN);
 $whereClauses = ["sa.owner_type = 'dealer'", "sa.sim_id IS NOT NULL"];
 $params = [];
 $types = '';
+$lifecyclePaymentPendingExpression = "GREATEST(0, rh.amount_pending - COALESCE((
+    SELECT SUM(rhp.amount_paid)
+    FROM renewal_history rhp
+    WHERE rhp.source_history_id = rh.id
+      AND rhp.action_type = 'Renewal Payment'
+      AND rhp.source_balance_updated = 0
+), 0))";
+$lifecyclePaymentPaidExpression = "rh.amount_paid + COALESCE((
+    SELECT SUM(rhp.amount_paid)
+    FROM renewal_history rhp
+    WHERE rhp.source_history_id = rh.id
+      AND rhp.action_type = 'Renewal Payment'
+      AND rhp.source_balance_updated = 0
+), 0)";
 $totalPaymentPendingExpression = "GREATEST(0, COALESCE(sa.total_amount, 0) - COALESCE(sa.amount_paid, 0)) + COALESCE((
-    SELECT SUM(rh.amount_pending)
+    SELECT SUM($lifecyclePaymentPendingExpression)
     FROM renewal_history rh
     WHERE rh.allocation_id = sa.id
       AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
 ), 0)";
 $totalPaymentPaidExpression = "COALESCE(sa.amount_paid, 0) + COALESCE((
-    SELECT SUM(rh.amount_paid)
+    SELECT SUM($lifecyclePaymentPaidExpression)
     FROM renewal_history rh
     WHERE rh.allocation_id = sa.id
       AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
@@ -87,7 +125,7 @@ $isValidDateFilter = static function ($value, $operator) {
 };
 
 foreach ([
-    ['value' => $given_date, 'operator' => $given_date_operator, 'label' => 'Given Date']
+    ['value' => $expiry_date, 'operator' => $expiry_date_operator, 'label' => 'Expiry Date']
 ] as $dateFilter) {
     if ($dateFilter['value'] !== '' && !$isValidDateFilter($dateFilter['value'], $dateFilter['operator'])) {
         $conn->close();
@@ -96,8 +134,8 @@ foreach ([
 }
 
 foreach ([
-    ['value' => $activation_date_from, 'label' => 'Activation Date From'],
-    ['value' => $activation_date_to, 'label' => 'Activation Date To']
+    ['value' => $expiry_date_from, 'label' => 'Expiry Date From'],
+    ['value' => $expiry_date_to, 'label' => 'Expiry Date To']
 ] as $dateFilter) {
     if ($dateFilter['value'] !== '' && !$isValidDateFilter($dateFilter['value'], 'exact')) {
         $conn->close();
@@ -105,7 +143,7 @@ foreach ([
     }
 }
 
-if ($activation_date_from !== '' && $activation_date_to !== '' && $activation_date_to < $activation_date_from) {
+if ($expiry_date_from !== '' && $expiry_date_to !== '' && $expiry_date_to < $expiry_date_from) {
     $conn->close();
     sendResponse(false, 'To Date must be on or after From Date.', [], [], 400);
 }
@@ -152,28 +190,27 @@ if ($payment_status !== '') {
     }
 }
 
-if ($given_date !== '') {
-    $givenDateColumn = "COALESCE(sa.sim_given_date, sa.allocation_date)";
-    if ($given_date_operator === 'year') {
-        $whereClauses[] = "YEAR($givenDateColumn) = ?";
-    } elseif ($given_date_operator === 'month') {
-        $whereClauses[] = "DATE_FORMAT($givenDateColumn, '%Y-%m') = ?";
+if ($expiry_date !== '') {
+    if ($expiry_date_operator === 'year') {
+        $whereClauses[] = "YEAR(sa.sim_expiry_date) = ?";
+    } elseif ($expiry_date_operator === 'month') {
+        $whereClauses[] = "DATE_FORMAT(sa.sim_expiry_date, '%Y-%m') = ?";
     } else {
-        $whereClauses[] = "DATE($givenDateColumn) = ?";
+        $whereClauses[] = "DATE(sa.sim_expiry_date) = ?";
     }
-    $params[] = $given_date;
+    $params[] = $expiry_date;
     $types .= 's';
 }
 
-if ($activation_date_from !== '') {
-    $whereClauses[] = "sa.sim_activation_date >= ?";
-    $params[] = $activation_date_from;
+if ($expiry_date_from !== '') {
+    $whereClauses[] = "sa.sim_expiry_date >= ?";
+    $params[] = $expiry_date_from;
     $types .= 's';
 }
 
-if ($activation_date_to !== '') {
-    $whereClauses[] = "sa.sim_activation_date < DATE_ADD(?, INTERVAL 1 DAY)";
-    $params[] = $activation_date_to;
+if ($expiry_date_to !== '') {
+    $whereClauses[] = "sa.sim_expiry_date < DATE_ADD(?, INTERVAL 1 DAY)";
+    $params[] = $expiry_date_to;
     $types .= 's';
 }
 
@@ -200,17 +237,13 @@ $countStmt->close();
 
 $totalPages = ceil($totalRecords / $limit);
 
-$dateYearsQuery = "SELECT 'given_date' AS date_key, YEAR(COALESCE(sim_given_date, allocation_date)) AS year
+$dateYearsQuery = "SELECT 'expiry_date' AS date_key, YEAR(sim_expiry_date) AS year
                    FROM stock_allocations
                    WHERE owner_type = 'dealer' AND sim_id IS NOT NULL
-                     AND COALESCE(sim_given_date, allocation_date) IS NOT NULL
-                   UNION
-                   SELECT 'activation_date' AS date_key, YEAR(sim_activation_date) AS year
-                   FROM stock_allocations
-                   WHERE owner_type = 'dealer' AND sim_id IS NOT NULL AND sim_activation_date IS NOT NULL
+                     AND sim_expiry_date IS NOT NULL
                    ORDER BY date_key, year DESC";
 $dateYearsResult = $conn->query($dateYearsQuery);
-$dateYears = ['given_date' => [], 'activation_date' => []];
+$dateYears = ['expiry_date' => []];
 if (!$dateYearsResult) {
     $error = $conn->error;
     $conn->close();
@@ -239,6 +272,7 @@ $query = "SELECT
             sa.sim_status,
             COALESCE(sa.sim_validity_id, s.sim_validity_id) as sim_validity_id,
             sa.sim_amount,
+            GREATEST(0, COALESCE(sa.total_amount, 0) - COALESCE(sa.amount_paid, 0)) AS allocation_pending_amount,
             COALESCE(sa.total_amount, 0) + COALESCE((
                 SELECT SUM(rh.payment_amount)
                 FROM renewal_history rh

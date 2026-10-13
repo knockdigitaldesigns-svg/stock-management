@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/utils/transaction_ids.php';
+require_once __DIR__ . '/utils/renewal_history.php';
 
 $host = "localhost";
 $username = "root";
@@ -41,6 +42,9 @@ $tables = [
         mobile_no VARCHAR(20) DEFAULT NULL,
         username VARCHAR(50) NOT NULL UNIQUE,
         password VARCHAR(255) NOT NULL,
+        credential_ciphertext TEXT DEFAULT NULL,
+        credential_nonce VARCHAR(24) DEFAULT NULL,
+        credential_tag VARCHAR(24) DEFAULT NULL,
         role VARCHAR(50) DEFAULT 'super_admin',
         role_id INT DEFAULT NULL,
         status ENUM('active','inactive') DEFAULT 'active',
@@ -117,6 +121,7 @@ $tables = [
         imei_no VARCHAR(15) NOT NULL UNIQUE,
         notes TEXT NULL,
         status ENUM('available', 'allocated', 'used', 'reserved') DEFAULT 'available',
+        deleted_at DATETIME DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (device_model_id) REFERENCES device_types(id) ON DELETE RESTRICT
@@ -129,6 +134,7 @@ $tables = [
         sim_validity_id INT DEFAULT NULL,
         notes TEXT NULL,
         status ENUM('available', 'allocated', 'used', 'reserved') DEFAULT 'available',
+        deleted_at DATETIME DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )",
@@ -208,6 +214,7 @@ $tables = [
         allocation_id INT NOT NULL,
         request_key VARCHAR(64) NOT NULL,
         payload_hash CHAR(64) NOT NULL DEFAULT '',
+        transaction_id CHAR(6) DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_dealer_allocation_payment_request (allocation_id, request_key),
         INDEX idx_dealer_allocation_payment_request_key (request_key),
@@ -415,6 +422,9 @@ $tables = [
         payment_date DATE DEFAULT NULL,
         transaction_id CHAR(6) DEFAULT NULL,
         changed_by INT DEFAULT NULL,
+        bulk_payment_request_key VARCHAR(64) DEFAULT NULL,
+        source_history_id INT DEFAULT NULL,
+        source_balance_updated TINYINT(1) NOT NULL DEFAULT 1,
         notes TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )"
@@ -436,6 +446,9 @@ $columnChecks = [
     ['users', 'role_id', "ALTER TABLE users ADD COLUMN role_id INT DEFAULT NULL AFTER role"],
     ['users', 'status', "ALTER TABLE users ADD COLUMN status ENUM('active','inactive') DEFAULT 'active' AFTER role_id"],
     ['users', 'updated_at', "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at"],
+    ['users', 'credential_ciphertext', "ALTER TABLE users ADD COLUMN credential_ciphertext TEXT DEFAULT NULL AFTER password"],
+    ['users', 'credential_nonce', "ALTER TABLE users ADD COLUMN credential_nonce VARCHAR(24) DEFAULT NULL AFTER credential_ciphertext"],
+    ['users', 'credential_tag', "ALTER TABLE users ADD COLUMN credential_tag VARCHAR(24) DEFAULT NULL AFTER credential_nonce"],
     ['stock_alert_settings', 'owner_type', "ALTER TABLE stock_alert_settings ADD COLUMN owner_type ENUM('dealer', 'technician') NOT NULL AFTER id"],
     ['stock_alert_settings', 'owner_id', "ALTER TABLE stock_alert_settings ADD COLUMN owner_id INT NOT NULL AFTER owner_type"],
     ['stock_alert_settings', 'asset_type', "ALTER TABLE stock_alert_settings ADD COLUMN asset_type ENUM('device', 'sim', 'both') NOT NULL DEFAULT 'device' AFTER owner_id"],
@@ -448,7 +461,9 @@ $columnChecks = [
     ['sims', 'sim_validity_id', "ALTER TABLE sims ADD COLUMN sim_validity_id INT DEFAULT NULL AFTER sim_type"],
     ['sim_validities', 'status', "ALTER TABLE sim_validities ADD COLUMN status ENUM('active', 'inactive') DEFAULT 'active' AFTER months"],
     ['devices', 'notes', "ALTER TABLE devices ADD COLUMN notes TEXT NULL AFTER imei_no"],
+    ['devices', 'deleted_at', "ALTER TABLE devices ADD COLUMN deleted_at DATETIME DEFAULT NULL AFTER status"],
     ['sims', 'notes', "ALTER TABLE sims ADD COLUMN notes TEXT NULL AFTER sim_validity_id"],
+    ['sims', 'deleted_at', "ALTER TABLE sims ADD COLUMN deleted_at DATETIME DEFAULT NULL AFTER status"],
     ['dealers', 'notes', "ALTER TABLE dealers ADD COLUMN notes TEXT NULL AFTER installation_status"],
     ['dealers', 'software', "ALTER TABLE dealers ADD COLUMN software VARCHAR(50) DEFAULT NULL AFTER installation_status"],
     ['dealers', 'alternate_mobile_no', "ALTER TABLE dealers ADD COLUMN alternate_mobile_no VARCHAR(10) DEFAULT NULL AFTER mobile_no"],
@@ -474,6 +489,10 @@ $columnChecks = [
     ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
     ['dealer_allocation_payment_requests', 'payload_hash', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN payload_hash CHAR(64) NOT NULL DEFAULT '' AFTER request_key"],
+    ['dealer_allocation_payment_requests', 'transaction_id', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payload_hash"],
+    ['renewal_history', 'bulk_payment_request_key', "ALTER TABLE renewal_history ADD COLUMN bulk_payment_request_key VARCHAR(64) DEFAULT NULL AFTER changed_by"],
+    ['renewal_history', 'source_history_id', "ALTER TABLE renewal_history ADD COLUMN source_history_id INT DEFAULT NULL AFTER bulk_payment_request_key"],
+    ['renewal_history', 'source_balance_updated', "ALTER TABLE renewal_history ADD COLUMN source_balance_updated TINYINT(1) NOT NULL DEFAULT 1 AFTER source_history_id"],
 ];
 
 foreach ($columnChecks as [$table, $column, $alterSql]) {
@@ -485,6 +504,13 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
             echo "Error adding column: " . $conn->error . "\n";
         }
     }
+}
+
+try {
+    ensureRenewalHistoryPaymentActionType($conn);
+} catch (Throwable $error) {
+    $conn->close();
+    die("Renewal payment history migration failed: " . $error->getMessage() . "\n");
 }
 
 $installationPersonIdColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'installation_person_id'");
@@ -724,6 +750,7 @@ $permissionDefinitions = [
     ['dealer_sim_activation.view', 'Dealer SIM Activation View', 'dealer_sim_activation', 'VIEW'],
     ['dealer_sim_activation.edit', 'Dealer SIM Activation Edit', 'dealer_sim_activation', 'EDIT'],
     ['dealer_sim_activation.delete', 'Dealer SIM Activation Delete', 'dealer_sim_activation', 'DELETE'],
+    ['dealer_sim_activation.import', 'Dealer SIM Activation Import', 'dealer_sim_activation', 'IMPORT'],
     ['dealers.import', 'Dealer Import', 'dealers', 'IMPORT'],
     ['dealers.export', 'Dealer Export', 'dealers', 'EXPORT'],
     ['technicians.view', 'Technician View', 'technicians', 'VIEW'],

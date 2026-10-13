@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../utils/response.php';
 require_once __DIR__ . '/../../middleware/auth.php';
 require_once __DIR__ . '/../../utils/transaction_ids.php';
+require_once __DIR__ . '/../../utils/renewal_history.php';
 
 function ensureRenewalTables($conn) {
     $conn->query("CREATE TABLE IF NOT EXISTS renewal_settings (
@@ -70,6 +71,7 @@ function ensureRenewalTables($conn) {
     if ($paymentDateCheck->num_rows === 0 && !$conn->query("ALTER TABLE renewal_history ADD COLUMN payment_date DATE DEFAULT NULL AFTER payment_mode")) {
         throw new RuntimeException('Unable to add renewal payment date field: ' . $conn->error);
     }
+    ensureRenewalHistoryPaymentActionType($conn);
 }
 
 function renewalSettings($conn) {

@@ -7,7 +7,11 @@ import './Login.css';
 const Login = () => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
+    const [error, setError] = useState(() => {
+        const message = sessionStorage.getItem('authLogoutMessage') || '';
+        sessionStorage.removeItem('authLogoutMessage');
+        return message;
+    });
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
     const { login } = useAuth();

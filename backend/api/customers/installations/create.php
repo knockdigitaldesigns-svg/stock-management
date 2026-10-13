@@ -307,10 +307,7 @@ try {
         throw new Exception('Device and SIM are allocated to different persons. Please use Stock Transfer to move them to the same person before installation.');
     }
 
-    $currentOwner = $deviceOwner && $simOwner ? $deviceOwner : null;
-    if (!$currentOwner) {
-        $currentOwner = null;
-    }
+    $currentOwner = $deviceOwner ?? $simOwner;
     $expectedType = $currentOwner && $currentOwner['type'] === 'technician'
         ? 'Technician'
         : 'Dealer';
@@ -326,7 +323,7 @@ try {
         })()
         : 'Technician';
     if ($currentOwner && ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))) {
-        throw new Exception('Installation person must match the current Device and SIM owner.');
+        throw new Exception('Installation person must match the current Device or SIM owner.');
     }
 
 
