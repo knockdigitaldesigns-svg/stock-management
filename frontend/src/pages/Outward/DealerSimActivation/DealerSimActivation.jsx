@@ -182,7 +182,6 @@ const DealerSimActivation = () => {
 
     const handleSearch = () => {
         selectionRequestId.current += 1;
-        setSelectedSims({});
         setAllFilteredSimsSelected(false);
         setSelectingAll(false);
         setAppliedFilters({ ...filters });
@@ -205,12 +204,6 @@ const DealerSimActivation = () => {
     };
 
     const toggleSelectAllSims = async () => {
-        if (allFilteredSimsSelected) {
-            selectionRequestId.current += 1;
-            setSelectedSims({});
-            setAllFilteredSimsSelected(false);
-            return;
-        }
         const requestId = ++selectionRequestId.current;
         setSelectingAll(true);
         setError(null);
@@ -218,10 +211,21 @@ const DealerSimActivation = () => {
             const records = await getExportRows();
             if (requestId !== selectionRequestId.current) return;
             const eligibleRecords = records.filter((sim) => getPaymentOutstanding(sim) > 0);
-            setSelectedSims(Object.fromEntries(
-                eligibleRecords.map((sim) => [String(sim.allocation_id), sim])
-            ));
-            setAllFilteredSimsSelected(eligibleRecords.length > 0);
+            const filteredIds = new Set(eligibleRecords.map((sim) => String(sim.allocation_id)));
+            if (allFilteredSimsSelected) {
+                setSelectedSims((current) => Object.fromEntries(
+                    Object.entries(current).filter(([id]) => !filteredIds.has(id))
+                ));
+                setAllFilteredSimsSelected(false);
+            } else {
+                setSelectedSims((current) => ({
+                    ...current,
+                    ...Object.fromEntries(
+                        eligibleRecords.map((sim) => [String(sim.allocation_id), sim])
+                    )
+                }));
+                setAllFilteredSimsSelected(eligibleRecords.length > 0);
+            }
         } catch (selectionError) {
             if (requestId === selectionRequestId.current) {
                 setError(selectionError.response?.data?.message || selectionError.message || 'Unable to select matching SIMs.');
