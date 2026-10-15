@@ -302,26 +302,26 @@ const RenewalsPage = () => {
 
                 {/* DATE FROM */}
                 <div className="filter-group">
-                    <label className="filter-label">From Date</label>
+                    <label className="filter-label">Renewal Date From</label>
                     <input className="form-control filter-input" type="date" value={filters.date_from || ''} onChange={(event) => {
                         if (filters.date_to && event.target.value > filters.date_to) {
                             showGlobalError('From Date cannot be later than To Date.');
                             return;
                         }
                         updateFilter('date_from', event.target.value);
-                    }} aria-label="From Date" />
+                    }} aria-label="Renewal Date From" />
                 </div>
 
                 {/* DATE TO */}
                 <div className="filter-group">
-                    <label className="filter-label">To Date</label>
+                    <label className="filter-label">Renewal Date To</label>
                     <input className="form-control filter-input" type="date" value={filters.date_to || ''} onChange={(event) => {
                         if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
                             showGlobalError('From Date cannot be later than To Date.');
                             return;
                         }
                         updateFilter('date_to', event.target.value);
-                    }} aria-label="To Date" />
+                    }} aria-label="Renewal Date To" />
                 </div>
 
                 {/* VALIDITY */}

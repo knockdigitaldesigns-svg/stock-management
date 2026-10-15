@@ -130,7 +130,8 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
         margin: options.margin,
         styles: { fontSize: 8, ...(options.styles || {}) },
         headStyles: { fillColor: [55, 48, 163], ...(options.headStyles || {}) },
-        columnStyles: options.columnStyles
+        columnStyles: options.columnStyles,
+        ...options.tableOptions
     });
 
     doc.save(`${filename}.pdf`);

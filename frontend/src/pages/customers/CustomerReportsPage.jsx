@@ -144,6 +144,12 @@ const SearchableDropdown = ({ label, value, options, onChange }) => {
     );
 };
 
+const formatReportAmount = (value) => {
+    if (value === null || value === undefined || String(value).trim() === '') return '-';
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount.toFixed(2) : String(value);
+};
+
 const CustomerReportsPage = () => {
     const [filters, setFilters] = useState(emptyFilters());
     const [reports, setReports] = useState([]);
@@ -211,7 +217,46 @@ const CustomerReportsPage = () => {
     };
 
     const handleExportPDF = () => {
-        exportToPDF(exportRows, 'Customer_Reports', 'CUSTOMER REPORTS', exportColumns);
+        const pdfRows = exportRows.map((row) => ({
+            ...row,
+            'Amount Paid': formatReportAmount(row['Amount Paid']),
+            'Amount Pending': formatReportAmount(row['Amount Pending'])
+        }));
+        const columnWidths = [21, 15, 22, 17, 18, 21, 17, 17, 13, 22, 19, 20, 14, 17, 18];
+        const columnStyles = Object.fromEntries(columnWidths.map((cellWidth, index) => [index, { cellWidth }]));
+        columnStyles[13].halign = 'right';
+        columnStyles[14].halign = 'right';
+
+        exportToPDF(pdfRows, 'Customer_Reports', 'CUSTOMER REPORTS', exportColumns, {
+            orientation: 'landscape',
+            format: 'a4',
+            tableOptions: {
+                margin: { top: 10, right: 13, bottom: 13, left: 13 },
+                tableWidth: 271,
+                showHead: 'everyPage',
+                rowPageBreak: 'avoid',
+                theme: 'grid',
+                styles: {
+                    fontSize: 6.2,
+                    cellPadding: 1.3,
+                    overflow: 'linebreak',
+                    valign: 'middle',
+                    lineColor: [203, 213, 225],
+                    lineWidth: 0.1,
+                    textColor: [30, 41, 59]
+                },
+                headStyles: {
+                    fillColor: [55, 48, 163],
+                    textColor: [255, 255, 255],
+                    fontSize: 6.2,
+                    fontStyle: 'bold',
+                    halign: 'center',
+                    valign: 'middle'
+                },
+                alternateRowStyles: { fillColor: [245, 247, 250] },
+                columnStyles
+            }
+        });
     };
 
     return (
