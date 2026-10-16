@@ -9,6 +9,12 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import {
+    buildCustomerSubmission,
+    commitCustomerSubmission,
+    ensureCustomerSubmissionData,
+    saveCustomerDraft
+} from '../../utils/customerSubmission';
 
 const initialForm = {
     deviceCharge: '',
@@ -20,7 +26,8 @@ const initialForm = {
     paymentMode: '',
     transactionId: '',
     cashToTechnician: false,
-    cashToDealer: false
+    cashToDealer: false,
+    cashToEt: false
 };
 
 const normalizeCurrency = (value) => {
@@ -88,9 +95,7 @@ const PaymentDetailsPart2Page = () => {
 
     const getStoredStep4 = () => {
         try {
-            const stored = JSON.parse(
-                sessionStorage.getItem(storageKey) || '{}'
-            );
+            const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
 
             return stored.step4 || {};
         } catch (err) {
@@ -112,11 +117,36 @@ const PaymentDetailsPart2Page = () => {
             setLoading(true);
             setError('');
 
-            const stored = JSON.parse(
-                sessionStorage.getItem(storageKey) || '{}'
+            const stored = await ensureCustomerSubmissionData(
+                JSON.parse(sessionStorage.getItem(storageKey) || '{}'),
+                customerId
             );
 
-            if (stored.new_vehicle_flow || stored.append_vehicle) {
+            if (stored.payment_part2) {
+                const savedPart2 = stored.payment_part2;
+                setIsEditMode(Number(stored.existing_customer_id || 0) > 0);
+                setTotalSaleAmount(normalizeCurrency(
+                    stored.step4?.totalSaleAmount || savedPart2.total_sale_amount
+                ));
+                setForm({
+                    ...initialForm,
+                    paymentMode: stored.step4?.paymentMode || savedPart2.payment_mode || '',
+                    transactionId: stored.step4?.transactionId || savedPart2.transaction_id || '',
+                    amountPaid: String(savedPart2.amount_paid ?? 0),
+                    deviceCharge: String(savedPart2.device_charge ?? 0),
+                    softwareCharge: String(savedPart2.software_charge ?? 0),
+                    technicianCharge: String(savedPart2.technician_charge ?? 0),
+                    simCharge: String(savedPart2.sim_charge ?? 0),
+                    courierCharge: String(savedPart2.courier_charge ?? 0),
+                    cashToTechnician: Boolean(savedPart2.cash_to_technician),
+                    cashToDealer: Boolean(savedPart2.cash_to_dealer),
+                    cashToEt: Boolean(savedPart2.cash_to_et)
+                });
+                return;
+            }
+
+            const isAddingVehicle = stored.append_vehicle || (stored.new_vehicle_flow && !stored.existing_customer_id);
+            if (Number(customerId) < 0 || isAddingVehicle) {
                 setIsEditMode(false);
                 const storedStep4 = stored.step4 || {};
                 setTotalSaleAmount(normalizeCurrency(storedStep4.totalSaleAmount));
@@ -235,7 +265,10 @@ const PaymentDetailsPart2Page = () => {
                     cashCollection.recipient_type === 'Technician',
 
                 cashToDealer:
-                    cashCollection.recipient_type === 'Dealer'
+                    cashCollection.recipient_type === 'Dealer',
+
+                cashToEt:
+                    cashCollection.recipient_type === 'ET'
             });
 
             sessionStorage.setItem(
@@ -335,7 +368,8 @@ const PaymentDetailsPart2Page = () => {
         setForm((previous) => ({
             ...previous,
             cashToTechnician: name === 'cashToTechnician' ? !previous.cashToTechnician : false,
-            cashToDealer: name === 'cashToDealer' ? !previous.cashToDealer : false
+            cashToDealer: name === 'cashToDealer' ? !previous.cashToDealer : false,
+            cashToEt: name === 'cashToEt' ? !previous.cashToEt : false
         }));
         setError('');
         setSuccess('');
@@ -465,6 +499,7 @@ const PaymentDetailsPart2Page = () => {
         !normalizeCurrency(form.courierCharge) &&
         !form.cashToTechnician &&
         !form.cashToDealer &&
+        !form.cashToEt &&
         (!form.amountPaid || normalizeCurrency(form.amountPaid) === 0) &&
         (!form.paymentMode || form.paymentMode === '' || form.paymentMode === '—') &&
         (!form.transactionId || form.transactionId === '' || form.transactionId === '—');
@@ -509,8 +544,9 @@ const PaymentDetailsPart2Page = () => {
         try {
             setSaving(true);
 
-            const stored = JSON.parse(
-                sessionStorage.getItem(storageKey) || '{}'
+            const stored = await ensureCustomerSubmissionData(
+                JSON.parse(sessionStorage.getItem(storageKey) || '{}'),
+                customerId
             );
 
             const step3 = stored.step3 || {};
@@ -593,6 +629,9 @@ const PaymentDetailsPart2Page = () => {
                 cash_to_dealer:
                     form.cashToDealer,
 
+                cash_to_et:
+                    form.cashToEt,
+
                 total_amount:
                     summary.totalAmount,
 
@@ -606,21 +645,43 @@ const PaymentDetailsPart2Page = () => {
                     summary.paymentStatus
             };
 
-            /*
-             * Save/UPDATE payment.
-             */
-            await api.post(
-                '/customers/payments/create.php',
-                paymentPayload
+            const submission = buildCustomerSubmission(stored, paymentPayload);
+            const existingCustomerId = Number(submission.existing_customer_id || 0);
+            const draftId = await saveCustomerDraft(
+                stored.draft_id,
+                existingCustomerId,
+                submission
             );
+            const isVerificationRequired = ['Paid', 'Partially Paid'].includes(paymentPayload.payment_status);
 
-            sessionStorage.removeItem(storageKey);
-
-            setSuccess(
-                isEditMode
+            if (isVerificationRequired) {
+                const response = await api.post('/customers/verification/submit.php', {
+                    submission_id: draftId,
+                    submission_data: submission
+                });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Failed to submit payment for Admin verification.');
+                }
+                sessionStorage.setItem(storageKey, JSON.stringify({
+                    ...stored,
+                    draft_id: draftId,
+                    payment_part2: paymentPayload,
+                    verification_status: 'Pending Verification'
+                }));
+                setSuccess('Payment details submitted successfully for Admin verification.');
+            } else {
+                const committed = await commitCustomerSubmission(submission, draftId);
+                await api.post('/customers/verification/finish.php', {
+                    submission_id: draftId,
+                    customer_id: committed.customerId,
+                    vehicle_id: committed.vehicleId,
+                    payment_id: committed.paymentId
+                });
+                sessionStorage.removeItem(storageKey);
+                setSuccess(isEditMode
                     ? 'Customer payment details updated successfully.'
-                    : 'Customer saved successfully.'
-            );
+                    : 'Customer saved successfully.');
+            }
 
             setTimeout(() => {
                 navigate(
@@ -651,8 +712,6 @@ const PaymentDetailsPart2Page = () => {
             setError('');
 
             const pendingPayload = {
-                customer_id: Number(customerId),
-                payment_step: 2,
                 total_sale_amount: totalSaleAmount,
                 transaction_id: null,
                 payment_mode: null,
@@ -663,17 +722,27 @@ const PaymentDetailsPart2Page = () => {
                 courier_charge: 0,
                     cash_to_technician: false,
                     cash_to_dealer: false,
+                    cash_to_et: false,
                 total_amount: totalSaleAmount,
                 amount_paid: 0,
                 amount_pending: totalSaleAmount,
                 payment_status: 'Pending'
             };
 
-            await api.post(
-                '/customers/payments/create.php',
-                pendingPayload
+            const stored = await ensureCustomerSubmissionData(
+                JSON.parse(sessionStorage.getItem(storageKey) || '{}'),
+                customerId
             );
-
+            const submission = buildCustomerSubmission(stored, pendingPayload);
+            const existingCustomerId = Number(submission.existing_customer_id || 0);
+            const draftId = await saveCustomerDraft(stored.draft_id, existingCustomerId, submission);
+            const committed = await commitCustomerSubmission(submission, draftId);
+            await api.post('/customers/verification/finish.php', {
+                submission_id: draftId,
+                customer_id: committed.customerId,
+                vehicle_id: committed.vehicleId,
+                payment_id: committed.paymentId
+            });
             sessionStorage.removeItem(storageKey);
 
             navigate('/customer-management/details');
@@ -707,7 +776,8 @@ const PaymentDetailsPart2Page = () => {
             courierCharge: '',
             amountPaid: '',
             cashToTechnician: false,
-            cashToDealer: false
+            cashToDealer: false,
+            cashToEt: false
         }));
 
         setError('');
@@ -1042,6 +1112,15 @@ const PaymentDetailsPart2Page = () => {
                                         disabled={saving}
                                     />
                                     Cash to Dealer
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={form.cashToEt}
+                                        onChange={() => handleCashRecipientChange('cashToEt')}
+                                        disabled={saving}
+                                    />
+                                    Direct Cash to ET
                                 </label>
                                 {(form.cashToTechnician || form.cashToDealer) && (
                                     <small style={{ display: 'block', marginTop: '8px', color: '#475569' }}>

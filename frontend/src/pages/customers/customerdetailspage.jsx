@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Plus,
     Search,
@@ -16,16 +16,20 @@ import { useAuth } from '../../context/AuthContext';
 import CustomerExcelUploadModal from './CustomerExcelUploadModal';
 import { showGlobalError } from '../../context/ErrorContext';
 import Pagination from '../../components/Pagination/Pagination';
+import Modal from '../../components/Modal/Modal';
 
 const CustomerDetailsPage = () => {
 
     const navigate = useNavigate();
+    const location = useLocation();
     const { hasPermission } = useAuth();
 
     const [customers, setCustomers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState('');
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -39,7 +43,10 @@ const CustomerDetailsPage = () => {
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
 
-    const [page, setPage] = useState(1);
+    const [page, setPage] = useState(() => {
+        const returnPage = Number(location.state?.customerDetailsPage);
+        return Number.isInteger(returnPage) && returnPage > 0 ? returnPage : 1;
+    });
     const [pageSize, setPageSize] = useState(10);
 
     const canAdd =
@@ -50,6 +57,22 @@ const CustomerDetailsPage = () => {
 
     const canDelete =
         hasPermission('customers.delete');
+
+    const formatInstallationDates = (value) => {
+        const dates = Array.isArray(value)
+            ? value
+            : String(value || '').split(',');
+        const formattedDates = [...new Set(dates
+            .map((date) => String(date).trim())
+            .filter(Boolean)
+            .map((date) => {
+                const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                return match ? `${match[3]}-${match[2]}-${match[1]}` : '';
+            })
+            .filter(Boolean))];
+
+        return formattedDates.length ? formattedDates.join(', ') : '—';
+    };
 
 
     // ============================================================
@@ -392,7 +415,9 @@ const CustomerDetailsPage = () => {
     // ============================================================
 
     const handleView = (id) => {
-        navigate(`/customer-management/details/${id}/view`);
+        navigate(`/customer-management/details/${id}/view`, {
+            state: { customerDetailsPage: page }
+        });
     };
 
 
@@ -403,7 +428,8 @@ const CustomerDetailsPage = () => {
     const handleEdit = (id) => {
 
         navigate(
-            `/customer-management/details/${id}/edit`
+            `/customer-management/details/${id}/edit`,
+            { state: { customerDetailsPage: page } }
         );
 
     };
@@ -413,26 +439,18 @@ const CustomerDetailsPage = () => {
     // DELETE
     // ============================================================
 
-    const handleDelete = async (id) => {
-
-        const confirmed =
-            window.confirm(
-                'Are you sure you want to delete this customer?'
-            );
-
-        if (!confirmed) {
+    const handleDelete = async () => {
+        if (!deleteTarget || deleting) {
             return;
         }
-
-
         try {
-
+            setDeleting(true);
             const response =
                 await api.delete(
                     '/customers/delete.php',
                     {
                         data: {
-                            id: Number(id)
+                            id: Number(deleteTarget.id)
                         }
                     }
                 );
@@ -448,6 +466,7 @@ const CustomerDetailsPage = () => {
             }
 
 
+            setDeleteTarget(null);
             await loadCustomers();
 
         } catch (err) {
@@ -462,7 +481,8 @@ const CustomerDetailsPage = () => {
                 err.message ||
                 'Failed to delete customer.'
             );
-
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -572,6 +592,7 @@ const CustomerDetailsPage = () => {
             'Secondary Mobile',
             'Email',
             'Location',
+            'Installation Date',
             'Pincode',
             'Customer Status',
             'Vehicle No',
@@ -584,7 +605,6 @@ const CustomerDetailsPage = () => {
             'Installation Person Type',
             'Installation Person',
             'Lead Closure By',
-            'Installation Date',
             'Total Sale Amount',
             'Transaction ID',
             'Payment Mode',
@@ -608,6 +628,7 @@ const CustomerDetailsPage = () => {
                 item.secondary_mobile_no || '',
                 item.email || '',
                 item.location || '',
+                formatInstallationDates(item.installation_dates || item.installation_date),
                 item.pincode || '',
                 item.status || 'Active',
                 vehicle.vehicle_no || '',
@@ -620,7 +641,6 @@ const CustomerDetailsPage = () => {
                 item.installation_person_type || '',
                 item.installation_person || '',
                 item.lead_closure || '',
-                item.installation_date ? String(item.installation_date).slice(0, 10) : '',
                 item.total_sale_amount !== null && item.total_sale_amount !== undefined ? item.total_sale_amount : '',
                 item.transaction_id || '',
                 item.payment_mode || '',
@@ -957,6 +977,7 @@ const CustomerDetailsPage = () => {
                                     'Location',
                                     'Vehicle Count',
                                     'Vehicles',
+                                    'Installation Date',
                                     'Total Amount',
                                     'Amount Paid',
                                     'Pending Amount',
@@ -970,11 +991,11 @@ const CustomerDetailsPage = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="11" className="text-center">Loading customers...</td>
+                                    <td colSpan="12" className="text-center">Loading customers...</td>
                                 </tr>
                             ) : paginatedCustomers.length === 0 ? (
                                 <tr>
-                                    <td colSpan="11" className="text-center empty-state">No customer records found.</td>
+                                    <td colSpan="12" className="text-center empty-state">No customer records found.</td>
                                 </tr>
                             ) : (
                                 paginatedCustomers.map((item, index) => {
@@ -986,8 +1007,9 @@ const CustomerDetailsPage = () => {
                                             <td>{item.platform_name || item.platform || '-'}</td>
                                             <td>{item.primary_mobile_no || item.mobile_no || '-'}</td>
                                             <td>{item.location || '-'}</td>
-                                            <td>{item.vehicles.length} {item.vehicles.length === 1 ? 'Vehicle' : 'Vehicles'}</td>
+                                            <td>{item.vehicles.length}</td>
                                             <td>{item.vehicles.map((vehicle) => vehicle.vehicle_no).filter(Boolean).join(', ') || '-'}</td>
+                                            <td>{formatInstallationDates(item.installation_dates || item.installation_date)}</td>
                                             <td>{getDisplayTotalAmount(item)}</td>
                                             <td>{formatCurrency(item.amount_paid)}</td>
                                             <td>{getDisplayPendingAmount(item)}</td>
@@ -1007,7 +1029,7 @@ const CustomerDetailsPage = () => {
                                                         </button>
                                                     )}
                                                     {canDelete && (
-                                                        <button type="button" className="icon-btn delete" title="Delete" onClick={() => handleDelete(id)}>
+                                                        <button type="button" className="icon-btn delete" title="Delete" onClick={() => setDeleteTarget({ id, username: item.username })}>
                                                             <Trash2 size={16} />
                                                         </button>
                                                     )}
@@ -1040,6 +1062,43 @@ const CustomerDetailsPage = () => {
                     }}
                 />
             )}
+
+            <Modal
+                isOpen={Boolean(deleteTarget)}
+                onClose={() => {
+                    if (!deleting) {
+                        setDeleteTarget(null);
+                    }
+                }}
+                title="Delete customer"
+                maxWidth="440px"
+                footer={(
+                    <>
+                        <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={() => setDeleteTarget(null)}
+                            disabled={deleting}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-danger"
+                            onClick={handleDelete}
+                            disabled={deleting}
+                        >
+                            {deleting ? 'Deleting…' : 'Delete'}
+                        </button>
+                    </>
+                )}
+            >
+                <p>
+                    Are you sure you want to delete
+                    {deleteTarget?.username ? ` ${deleteTarget.username}` : ' this customer'}?
+                    This action cannot be undone.
+                </p>
+            </Modal>
 
         </div>
     );

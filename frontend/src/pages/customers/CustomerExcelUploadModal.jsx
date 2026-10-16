@@ -58,7 +58,7 @@ const normalizeImportErrors = (payload, fallback) => {
         return response.map(String).filter(Boolean);
     }
 
-    const errors = response?.data?.errors ?? response?.errors;
+    const errors = response?.data?.validation_errors ?? response?.data?.errors ?? response?.validation_errors ?? response?.errors;
     if (Array.isArray(errors)) {
         return errors.map(String).filter(Boolean);
     }
@@ -76,6 +76,13 @@ const normalizeImportErrors = (payload, fallback) => {
 
     return [fallback];
 };
+
+const formatImportSummary = (summary) => [
+    `Verification Requests Submitted: ${summary.successful_submissions ?? 0}`,
+    `Customer Rows Submitted: ${summary.customer_rows_submitted ?? 0}`,
+    `Duplicate Rows Skipped: ${summary.duplicate_rows ?? 0}`,
+    `Rejected Rows: ${summary.rejected_rows ?? 0}`
+].join('\n');
 
 const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -108,7 +115,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'SIM No 1': '9876543210',
                 'SIM No 2': '',
                 'Device Model': 'VT02',
-                'SIM Validity': '12 Months',
+                'SIM Validity': 12,
                 'Installation Person': 'Ramesh Kumar',
                 'Installation Person Type': 'Technician',
                 'Lead Closure By': 'Direct',
@@ -141,7 +148,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                 'SIM No 1': '9876501234',
                 'SIM No 2': '',
                 'Device Model': 'VT02',
-                'SIM Validity': '12 Months',
+                'SIM Validity': 6,
                 'Installation Person': 'Suresh Onsite Dealer',
                 'Installation Person Type': 'Onsite Dealer',
                 'Lead Closure By': 'Direct',
@@ -229,19 +236,21 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
 
             if (response.data.success) {
                 const summary = response.data.data || {};
-                setSuccessMsg([
-                    `Customers Created: ${summary.customers_created ?? 0}`,
-                    `Existing Customers Reused: ${summary.existing_customers_reused ?? 0}`,
-                    `Vehicles Added: ${summary.vehicles_added ?? 0}`
-                ].join('\n'));
-                setErrors([]);
-                setTimeout(() => {
-                    onSuccess();
-                }, 3000);
+                setSuccessMsg(formatImportSummary(summary));
+                setErrors(summary.validation_errors || []);
+                if ((summary.successful_submissions ?? 0) > 0) {
+                    setTimeout(() => {
+                        onSuccess();
+                    }, 3000);
+                }
             } else {
                 triggerErrors(normalizeImportErrors(response.data, 'Customer import failed without a validation message.'));
             }
         } catch (err) {
+            const summary = err.response?.data?.data;
+            if (summary && Object.hasOwn(summary, 'rejected_rows')) {
+                setSuccessMsg(formatImportSummary(summary));
+            }
             const status = err.response?.status;
             const fallback = status
                 ? `Customer import failed (HTTP ${status}) without a validation message.`
@@ -264,7 +273,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
 
                 <div className="modal-body">
                     {successMsg ? (
-                        <div className="alert alert-success" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className={`alert ${errors.length ? 'alert-warning' : 'alert-success'}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <CheckCircle size={18} />
                             <span style={{ whiteSpace: 'pre-line' }}>{successMsg}</span>
                         </div>
@@ -297,7 +306,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                             </button>
                         </div>
                         <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>
-                            Download the official 31-column template supporting Customer, Vehicle Details, Installation, and Payment breakdowns.
+                            Download the official 31-column template supporting Customer, Vehicle Details, Installation, and Payment breakdowns. Uploaded rows remain pending until approved in Verification.
                         </p>
                     </div>
 

@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS sim_validities (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-INSERT INTO sim_validities (months, status) VALUES (5, 'active'), (12, 'active'), (24, 'active'), (36, 'active')
+INSERT INTO sim_validities (months, status) VALUES (3, 'active'), (5, 'active'), (6, 'active'), (12, 'active'), (24, 'active'), (36, 'active')
 ON DUPLICATE KEY UPDATE status = VALUES(status);
 
 CREATE TABLE IF NOT EXISTS devices (
@@ -783,8 +783,8 @@ CREATE TABLE IF NOT EXISTS customer_cash_collections (
     customer_id INT NOT NULL,
     payment_id INT NOT NULL,
     installation_id INT NOT NULL,
-    recipient_type ENUM('Technician', 'Dealer') NOT NULL,
-    recipient_id INT NOT NULL,
+    recipient_type ENUM('Technician', 'Dealer', 'ET') NOT NULL,
+    recipient_id INT DEFAULT NULL,
     amount_collected DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     amount_remitted DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     pending_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,

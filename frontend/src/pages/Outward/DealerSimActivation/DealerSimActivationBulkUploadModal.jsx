@@ -26,8 +26,8 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
 
     const downloadTemplate = () => {
         const worksheet = XLSX.utils.json_to_sheet([
-            { 'SIM No': '9876501234', 'Dealer Name': 'Anisha', 'Activation Date': '06-10-2026', Validity: '3 Months' },
-            { 'SIM No': '9876501235', 'Dealer Name': 'Raja', 'Activation Date': '06-10-2026', Validity: '6 Months' }
+            { 'SIM No': '9876501234', 'Dealer Name': 'Anisha', 'Activation Date': '06-10-2026', Validity: 12 },
+            { 'SIM No': '9876501235', 'Dealer Name': 'Raja', 'Activation Date': '06-10-2026', Validity: 6 }
         ], { header: expectedColumns });
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'Dealer SIM Activation');
@@ -98,7 +98,7 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
                     sim_no: simNo,
                     dealer_name: String(cellValue(columnIndexes[1])).trim(),
                     activation_date: activationDate,
-                    validity: String(cellValue(columnIndexes[3])).trim()
+                    validity: cellValue(columnIndexes[3])
                 }];
             });
 
@@ -145,7 +145,7 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
                 <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>Instructions</p>
                 <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                     <li>Use the columns: <strong>SIM No, Dealer Name, Activation Date, Validity</strong>.</li>
-                    <li>Enter Activation Date as <strong>DD-MM-YYYY</strong> and choose an existing active validity.</li>
+                    <li>Enter Activation Date as <strong>DD-MM-YYYY</strong> and Validity as the number of months for an existing active validity (for example, <strong>12</strong>).</li>
                     <li>Only .xlsx and .xls files are accepted.</li>
                 </ul>
                 <button

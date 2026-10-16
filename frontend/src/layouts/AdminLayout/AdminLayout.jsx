@@ -13,6 +13,7 @@ import {
     ChevronRight,
     PackageSearch,
     Shield,
+    ShieldCheck,
     UserPlus,
     Bell,
     Lock,
@@ -168,11 +169,22 @@ const canViewCustomerRenewals =
 const canViewSimLifecycle =
     hasPermission('sim_lifecycle.view');
 
+const canViewCustomerVerification =
+    hasPermission('customer_payment_verification.review') &&
+    ['admin', 'super admin', 'super_admin'].includes(
+        String(user?.role?.name || user?.role || '').trim().toLowerCase()
+    );
+
+const canViewMyCustomerVerifications =
+    hasPermission('customers.add') || hasPermission('customers.edit');
+
 const showCustomerManagement =
     canViewCustomerDetails ||
     canViewCustomerReports ||
     canViewCustomerRenewals ||
-    canViewSimLifecycle;
+    canViewSimLifecycle ||
+    canViewCustomerVerification ||
+    canViewMyCustomerVerifications;
     // =========================
     // SETTINGS
     // =========================
@@ -578,6 +590,30 @@ const showCustomerManagement =
                     >
                         <Clock size={18} />
                         <span>SIM Lifecycle</span>
+                    </NavLink>
+                )}
+
+                {canViewCustomerVerification && (
+                    <NavLink
+                        to="/customer-management/verification"
+                        className={({ isActive }) =>
+                            `nav-sub-item ${isActive ? 'active' : ''}`
+                        }
+                    >
+                        <ShieldCheck size={18} />
+                        <span>Verification</span>
+                    </NavLink>
+                )}
+
+                {canViewMyCustomerVerifications && (
+                    <NavLink
+                        to="/customer-management/my-verifications"
+                        className={({ isActive }) =>
+                            `nav-sub-item ${isActive ? 'active' : ''}`
+                        }
+                    >
+                        <FileText size={18} />
+                        <span>My Verification Requests</span>
                     </NavLink>
                 )}
 

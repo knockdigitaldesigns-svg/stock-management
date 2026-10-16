@@ -1,0 +1,323 @@
+.verification-page {
+    --verification-border: #e2e8f0;
+    --verification-muted: #64748b;
+}
+
+.verification-page .page-header {
+    margin-bottom: 1.5rem;
+}
+
+.verification-page .page-header h1 {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0;
+    font-size: clamp(1.4rem, 2vw, 1.8rem);
+    color: var(--brand-navy);
+}
+
+.verification-page .page-header h1 svg {
+    color: var(--brand-blue);
+}
+
+.verification-page .page-header p {
+    margin: 0.4rem 0 0;
+    color: var(--verification-muted);
+    font-size: 0.9rem;
+}
+
+.verification-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 0.45rem;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+    padding: 0.3rem;
+    border: 1px solid var(--verification-border);
+    border-radius: 0.8rem;
+    background: #fff;
+}
+
+.verification-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    min-height: 42px;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    background: transparent;
+    color: #475569;
+    font-size: 0.84rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.verification-tab:hover {
+    background: #f5f8ff;
+    color: var(--brand-navy);
+}
+
+.verification-tab.active {
+    border-color: #c7d8fb;
+    background: #eff5ff;
+    color: var(--brand-blue);
+}
+
+.verification-count {
+    display: inline-flex;
+    min-width: 1.45rem;
+    height: 1.45rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.verification-tab.active .verification-count {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.verification-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+
+.verification-search {
+    display: flex;
+    width: min(100%, 440px);
+    min-height: 42px;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0 0.75rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.65rem;
+    background: #fff;
+    color: #64748b;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.verification-search:focus-within {
+    border-color: var(--brand-blue);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.verification-search .form-control {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+.verification-search .form-control:focus {
+    border: 0;
+    box-shadow: none;
+}
+
+.verification-toolbar > .btn {
+    flex: 0 0 auto;
+}
+
+.verification-table-card {
+    overflow: hidden;
+    border: 1px solid var(--verification-border);
+    border-radius: 0.85rem;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+}
+
+.verification-table-card .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.verification-table {
+    min-width: 920px;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.verification-table th {
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--verification-border);
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+}
+
+.verification-table td {
+    padding: 0.85rem 1rem;
+    color: #334155;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.verification-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.verification-table tbody tr:hover td {
+    background: #f8fbff;
+}
+
+.verification-table .empty-state {
+    height: 100px;
+    color: var(--verification-muted);
+    text-align: center;
+}
+
+.verification-details {
+    display: grid;
+    gap: 1rem;
+}
+
+.verification-rejection-form {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0;
+    color: #334155;
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.verification-rejection-form textarea {
+    display: block;
+    width: 100%;
+    min-height: 104px;
+    box-sizing: border-box;
+    padding: 0.75rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.65rem;
+    color: #1e293b;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.verification-rejection-form textarea:focus {
+    outline: none;
+    border-color: var(--brand-blue);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.verification-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem 1.2rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--verification-border);
+    border-radius: 0.7rem;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.82rem;
+}
+
+.my-verification-rejection {
+    flex: 1 0 100%;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid #fecaca;
+    border-radius: 0.6rem;
+    background: #fff7f7;
+    color: #7f1d1d;
+}
+
+.my-verification-rejection p {
+    margin: 0.25rem 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.my-verification-rejection span {
+    color: #64748b;
+    font-size: 0.78rem;
+}
+
+.verification-section {
+    padding: 1rem;
+    border: 1px solid var(--verification-border);
+    border-radius: 0.75rem;
+    background: #fff;
+}
+
+.verification-section h3 {
+    margin: 0 0 0.8rem;
+    color: var(--brand-navy);
+    font-size: 0.95rem;
+}
+
+.verification-section h4 {
+    margin: 0.8rem 0 0.5rem;
+    color: #334155;
+    font-size: 0.85rem;
+}
+
+.verification-section dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.5rem 1rem;
+    margin: 0;
+}
+
+.verification-section dl > div {
+    min-width: 0;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.verification-section dt {
+    margin-bottom: 0.2rem;
+    color: var(--verification-muted);
+    font-size: 0.72rem;
+    text-transform: capitalize;
+}
+
+.verification-section dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: #1e293b;
+}
+
+.my-verification-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.83rem;
+    font-weight: 500;
+}
+
+@media (max-width: 640px) {
+    .verification-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .verification-search {
+        width: 100%;
+    }
+
+    .verification-toolbar > .btn {
+        width: 100%;
+    }
+
+    .verification-tab {
+        padding-inline: 0.7rem;
+        font-size: 0.78rem;
+    }
+}

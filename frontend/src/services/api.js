@@ -12,7 +12,8 @@ const api = axios.create({
 api.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('token');
-        if (token) {
+        const authorization = config.headers?.Authorization ?? config.headers?.authorization;
+        if (token && !authorization) {
             config.headers['Authorization'] = `Bearer ${token}`;
         }
         return config;
@@ -36,17 +37,44 @@ api.interceptors.response.use(
         const isForbidden = status === 403;
         const isLoginRequest = error.config?.url?.includes('/auth/login.php');
         const isAlreadyOnLoginPage = window.location.pathname === '/login';
+        const requestAuthorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
+        const requestToken = requestAuthorization?.replace(/^Bearer\s+/i, '');
+        const currentToken = localStorage.getItem('token');
+        const requestUsesCurrentSession = requestToken ? requestToken === currentToken : !currentToken;
 
-        if (isUnauthorized && !isLoginRequest && !isAlreadyOnLoginPage) {
-            const inactivityMessage = error.response?.data?.message?.toLowerCase().includes('inactivity')
-                ? 'You have been logged out due to 30 minutes of inactivity. Please log in again.'
+        if (isUnauthorized && !isLoginRequest && !isAlreadyOnLoginPage
+            && !error.config?.skipAuthLogout && requestUsesCurrentSession) {
+            const isInactivityResponse = error.response?.data?.message?.toLowerCase().includes('inactivity');
+            const sharedActivityAt = Number(localStorage.getItem('authLastMeaningfulActivity'));
+            const hasRecentSharedActivity = Number.isFinite(sharedActivityAt)
+                && Date.now() - sharedActivityAt < 15 * 60 * 1000;
+            if (isInactivityResponse && hasRecentSharedActivity) {
+                return Promise.reject(error);
+            }
+            const inactivityMessage = isInactivityResponse
+                ? 'You have been logged out due to 15 minutes of inactivity. Please log in again.'
                 : '';
             sessionStorage.setItem('authLogoutMessage', inactivityMessage);
+            const identity = (() => {
+                try {
+                    const encodedPayload = (requestToken || '').split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+                    const binaryPayload = atob(encodedPayload);
+                    const bytes = Uint8Array.from(binaryPayload, (character) => character.charCodeAt(0));
+                    const payload = JSON.parse(new TextDecoder().decode(bytes));
+                    return { userId: payload.user_id, sessionId: payload.sid };
+                } catch {
+                    return {};
+                }
+            })();
             localStorage.setItem('authSessionEnded', JSON.stringify({
                 at: Date.now(),
-                message: inactivityMessage
+                reason: isInactivityResponse ? 'inactivity' : 'invalid',
+                message: inactivityMessage,
+                ...identity
             }));
-            localStorage.removeItem('token');
+            if (localStorage.getItem('token') === currentToken) {
+                localStorage.removeItem('token');
+            }
             localStorage.removeItem('user');
             localStorage.removeItem('permissions');
             localStorage.removeItem('authLastMeaningfulActivity');

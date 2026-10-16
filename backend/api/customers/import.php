@@ -2,13 +2,11 @@
 
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
-require_once '../../utils/validation.php';
-require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 require_once '../../utils/date.php';
 require_once '../../utils/payment_modes.php';
-require_once '../../utils/transaction_ids.php';
+require_once '../../utils/customer_payment_verification.php';
 
 handlePreflight();
 
@@ -352,7 +350,12 @@ if ($res) {
 // Preload Existing Customers
 $existingCustomersByUsername = [];
 $existingUsernameMobileMap = [];
-$res = $conn->query("SELECT id, username, primary_mobile_no FROM customers ORDER BY id ASC");
+$existingCustomerByKey = [];
+$res = $conn->query(
+    "SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no,
+            email, location, pincode, status
+     FROM customers ORDER BY id ASC"
+);
 if ($res) {
     while ($r = $res->fetch_assoc()) {
         $usernameValue = strtolower(trim((string) $r['username']));
@@ -365,6 +368,7 @@ if ($res) {
         $customerKey = $usernameValue . '|' . $mobileValue;
         if (!isset($existingUsernameMobileMap[$customerKey])) {
             $existingUsernameMobileMap[$customerKey] = (int) $r['id'];
+            $existingCustomerByKey[$customerKey] = $r;
         }
     }
 }
@@ -735,15 +739,21 @@ foreach ($dataRows as $idx => $row) {
     if ($simValidity === '') {
         $allErrors[] = "Row {$rowNumber}: SIM Validity - SIM Validity is required.";
     } else {
-        if (preg_match('/\d+/', $simValidity, $vm)) {
-            $mNum = (int) $vm[0];
+        $mNum = null;
+        if (is_numeric($simValidity) && (float) $simValidity > 0 && floor((float) $simValidity) === (float) $simValidity) {
+            $mNum = (int) $simValidity;
+        } elseif (preg_match('/^(\d+)\s+Months?$/i', $simValidity, $vm)) {
+            $mNum = (int) $vm[1];
+        }
+
+        if ($mNum !== null) {
             if (isset($validityMap[$mNum])) {
                 $validityMonths = $mNum;
             } else {
                 $allErrors[] = "Row {$rowNumber}: SIM Validity - SIM Validity '{$simValidity}' is invalid or inactive.";
             }
         } else {
-            $allErrors[] = "Row {$rowNumber}: SIM Validity - Invalid SIM Validity format.";
+            $allErrors[] = "Row {$rowNumber}: SIM Validity - Enter a positive whole number of months for an active SIM validity.";
         }
     }
 
@@ -913,9 +923,9 @@ foreach ($dataRows as $idx => $row) {
 
     if (!$hasPaymentDetails) {
         // MINIMUM PAYMENT CONDITION: ONLY Total Sale Amount
-        $totalAmount = 0.0;
+        $totalAmount = $totalSaleAmount;
         $amountPaid = 0.0;
-        $amountPending = 0.0;
+        $amountPending = $totalSaleAmount;
         $resolvedPaymentStatus = 'Pending';
     } else {
         // FULL PAYMENT VALIDATION
@@ -1027,6 +1037,7 @@ foreach ($dataRows as $idx => $row) {
         '_row_number' => $rowNumber,
         // Customer
         'platform_id' => $platformId,
+        'platform_name' => $platform,
         'username' => $username,
         'primary_mobile_no' => $primaryMobile,
         'secondary_mobile_no' => $secondaryMobile !== '' ? $secondaryMobile : null,
@@ -1038,6 +1049,7 @@ foreach ($dataRows as $idx => $row) {
         // Vehicle
         'vehicle_no' => $vehicleNo,
         'vehicle_type_id' => $vehicleTypeId,
+        'validity_id' => $validityMap[$validityMonths]['id'] ?? null,
         'device_id' => $deviceInfo ? $deviceInfo['id'] : null,
         'device_model_id' => $deviceModelId,
         'imei_no' => $imeiNo,
@@ -1055,6 +1067,7 @@ foreach ($dataRows as $idx => $row) {
 
         // Installation
         'installation_person_type' => $installationDbPersonType,
+        'installation_person_label' => $normPersonType,
         'installation_person_id' => $installationPersonId,
         'lead_closure_id' => $leadClosureId,
         'installation_date' => $installationDate,
@@ -1071,339 +1084,262 @@ foreach ($dataRows as $idx => $row) {
         'total_amount' => $totalAmount,
         'amount_paid' => $amountPaid,
         'amount_pending' => $amountPending,
-        'payment_status' => $resolvedPaymentStatus
+        'payment_status' => $resolvedPaymentStatus,
+        'submitted_payment_status' => $paymentStatusRaw
     ];
 }
 
 /*
 |--------------------------------------------------------------------------
-| CHECK IF ANY VALIDATION ERRORS OCCURRED
+| STAGE VALIDATED ROWS FOR CUSTOMER VERIFICATION
 |--------------------------------------------------------------------------
 */
 
 if (!empty($allErrors)) {
+    $duplicateRows = [];
+    foreach ($allErrors as $validationError) {
+        if (preg_match('/^Row (\d+):/', $validationError, $matches)) {
+            if (preg_match('/duplicate|already exists/i', $validationError)) {
+                $duplicateRows[(int) $matches[1]] = true;
+            }
+        }
+    }
     $conn->close();
-    sendResponse(
-        false,
-        'Excel validation failed.',
-        ['errors' => array_values(array_unique($allErrors))],
-        [],
-        400
-    );
+    sendResponse(false, 'Excel validation failed. No rows were submitted because this import validates the batch atomically.', [
+        'successful_submissions' => 0,
+        'customer_rows_submitted' => 0,
+        'rejected_rows' => count($dataRows),
+        'duplicate_rows' => count($duplicateRows),
+        'validation_errors' => array_values(array_unique($allErrors))
+    ], [], 400);
 }
 
-/*
-|--------------------------------------------------------------------------
-| ATOMIC DATABASE INSERTION (TRANSACTION)
-|--------------------------------------------------------------------------
-*/
-
-$conn->begin_transaction();
-
-try {
-    // 1. Prepare Customer Insert
-    $custStmt = $conn->prepare(
-        "INSERT INTO customers (
-            platform_id,
-            username,
-            primary_mobile_no,
-            secondary_mobile_no,
-            email,
-            location,
-            pincode,
-            status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    if (!$custStmt) {
-        throw new Exception('Failed to prepare customer insert: ' . $conn->error);
-    }
-
-    // 2. Prepare Vehicle Details Insert
-    $vehStmt = $conn->prepare(
-        "INSERT INTO customer_vehicle_details (
-            customer_id,
-            vehicle_no,
-            vehicle_type_id,
-            device_id,
-            device_model_id,
-            imei_no,
-            sim_id_1,
-            sim_no_1,
-            sim_id_2,
-            sim_no_2,
-            validity_months
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    if (!$vehStmt) {
-        throw new Exception('Failed to prepare vehicle insert: ' . $conn->error);
-    }
-
-    // 3. Prepare Installation Insert
-    $instStmt = $conn->prepare(
-        "INSERT INTO customer_installations (
-            customer_id,
-            installation_person_type,
-            installation_person_id,
-            lead_closure_id,
-            installation_date
-        ) VALUES (?, ?, ?, ?, ?)"
-    );
-    if (!$instStmt) {
-        throw new Exception('Failed to prepare installation insert: ' . $conn->error);
-    }
-
-    // 4. Prepare Payment Insert
-    $payStmt = $conn->prepare(
-        "INSERT INTO customer_payments (
-            customer_id,
-            total_sale_amount,
-            transaction_id,
-            payment_mode,
-            device_charge,
-            software_charge,
-            technician_charge,
-            sim_charge,
-            courier_charge,
-            total_amount,
-            amount_paid,
-            amount_pending,
-            payment_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    if (!$payStmt) {
-        throw new Exception('Failed to prepare payment insert: ' . $conn->error);
-    }
-
-    // 5. Prepare Asset Status Updates & Stock Transactions
-    $updateDeviceStmt = $conn->prepare("UPDATE devices SET status = 'used', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    if (!$updateDeviceStmt) {
-        throw new Exception('Failed to prepare device status update: ' . $conn->error);
-    }
-
-    $updateSimStmt = $conn->prepare("UPDATE sims SET status = 'used', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-    if (!$updateSimStmt) {
-        throw new Exception('Failed to prepare SIM status update: ' . $conn->error);
-    }
-
-    $checkDeviceTxStmt = $conn->prepare(
-        "SELECT id FROM stock_transactions WHERE device_id = ? AND from_owner_type = ? AND from_owner_id = ? AND transaction_type = 'USE' AND usage_type = 'ET' LIMIT 1"
-    );
-    if (!$checkDeviceTxStmt) {
-        throw new Exception('Failed to prepare device stock transaction check: ' . $conn->error);
-    }
-
-    $insertDeviceTxStmt = $conn->prepare(
-        "INSERT INTO stock_transactions (device_id, from_owner_type, from_owner_id, transaction_type, usage_type, transaction_date, notes) VALUES (?, ?, ?, 'USE', 'ET', CURDATE(), 'Customer vehicle completion')"
-    );
-    if (!$insertDeviceTxStmt) {
-        throw new Exception('Failed to prepare device stock transaction insert: ' . $conn->error);
-    }
-
-    $checkSimTxStmt = $conn->prepare(
-        "SELECT id FROM stock_transactions WHERE sim_id = ? AND from_owner_type = ? AND from_owner_id = ? AND transaction_type = 'USE' AND usage_type = 'ET' LIMIT 1"
-    );
-    if (!$checkSimTxStmt) {
-        throw new Exception('Failed to prepare SIM stock transaction check: ' . $conn->error);
-    }
-
-    $insertSimTxStmt = $conn->prepare(
-        "INSERT INTO stock_transactions (sim_id, from_owner_type, from_owner_id, transaction_type, usage_type, transaction_date, notes) VALUES (?, ?, ?, 'USE', 'ET', CURDATE(), 'Customer vehicle completion')"
-    );
-    if (!$insertSimTxStmt) {
-        throw new Exception('Failed to prepare SIM stock transaction insert: ' . $conn->error);
-    }
-
-    $customerKeyToId = [];
-    $reusedCustomerKeys = [];
-    $createdCustomerCount = 0;
-
-    foreach ($validRows as $row) {
-        $customerKey = strtolower(trim((string) $row['username'])) . '|' . trim((string) $row['primary_mobile_no']);
-
-        if (isset($customerKeyToId[$customerKey])) {
-            $customerId = (int) $customerKeyToId[$customerKey];
-        } elseif (isset($existingUsernameMobileMap[$customerKey])) {
-            $customerId = (int) $existingUsernameMobileMap[$customerKey];
-            $reusedCustomerKeys[$customerKey] = true;
-        } else {
-            // A. Insert Customer
-            $custStmt->bind_param(
-                'isssssss',
-                $row['platform_id'],
-                $row['username'],
-                $row['primary_mobile_no'],
-                $row['secondary_mobile_no'],
-                $row['email'],
-                $row['location'],
-                $row['pincode'],
-                $row['customer_status']
-            );
-            if (!$custStmt->execute()) {
-                throw new Exception('Failed to insert customer ' . $row['username'] . ': ' . $custStmt->error);
-            }
-            $customerId = (int) $conn->insert_id;
-            $customerKeyToId[$customerKey] = $customerId;
-            $createdCustomerCount++;
-        }
-
-        // B. Insert Vehicle Details
-        $vehStmt->bind_param(
-            'isiiisisssi',
-            $customerId,
-            $row['vehicle_no'],
-            $row['vehicle_type_id'],
-            $row['device_id'],
-            $row['device_model_id'],
-            $row['imei_no'],
-            $row['sim_id_1'],
-            $row['sim_no_1'],
-            $row['sim_id_2'],
-            $row['sim_no_2'],
-            $row['validity_months']
-        );
-        if (!$vehStmt->execute()) {
-            throw new Exception('Failed to insert vehicle details for ' . $row['username'] . ': ' . $vehStmt->error);
-        }
-
-        // C. Insert Installation Details
-        $instStmt->bind_param(
-            'isiis',
-            $customerId,
-            $row['installation_person_type'],
-            $row['installation_person_id'],
-            $row['lead_closure_id'],
-            $row['installation_date']
-        );
-        if (!$instStmt->execute()) {
-            throw new Exception('Failed to insert installation details for ' . $row['username'] . ': ' . $instStmt->error);
-        }
-
-        // D. Insert Payment
-        $payStmt->bind_param(
-            'idssdddddddds',
-            $customerId,
-            $row['total_sale_amount'],
-            $row['transaction_id'],
-            $row['payment_mode'],
-            $row['device_charge'],
-            $row['software_charge'],
-            $row['technician_charge'],
-            $row['sim_charge'],
-            $row['courier_charge'],
-            $row['total_amount'],
-            $row['amount_paid'],
-            $row['amount_pending'],
-            $row['payment_status']
-        );
-        if (!$payStmt->execute()) {
-            throw new Exception('Failed to insert payment details for ' . $row['username'] . ': ' . $payStmt->error);
-        }
-        reserveTransactionId($conn, (string) ($row['transaction_id'] ?? ''), 'customer_payments', (string) $payStmt->insert_id);
-
-        // E. Consume Device Stock Asset
-        if (!empty($row['device_id'])) {
-            $devId = (int) $row['device_id'];
-            $updateDeviceStmt->bind_param('i', $devId);
-            $updateDeviceStmt->execute();
-
-            if (!empty($row['device_owner_type']) && (int) $row['device_owner_id'] > 0) {
-                $ownerType = (string) $row['device_owner_type'];
-                $ownerId = (int) $row['device_owner_id'];
-                
-                $checkDeviceTxStmt->bind_param('isi', $devId, $ownerType, $ownerId);
-                $checkDeviceTxStmt->execute();
-                $hasTx = $checkDeviceTxStmt->get_result()->num_rows > 0;
-
-                if (!$hasTx) {
-                    $insertDeviceTxStmt->bind_param('isi', $devId, $ownerType, $ownerId);
-                    $insertDeviceTxStmt->execute();
-                }
-            }
-        }
-
-        // F. Consume SIM 1 Stock Asset
-        if (!empty($row['sim_id_1'])) {
-            $sId1 = (int) $row['sim_id_1'];
-            $updateSimStmt->bind_param('i', $sId1);
-            $updateSimStmt->execute();
-
-            if (!empty($row['sim1_owner_type']) && (int) $row['sim1_owner_id'] > 0) {
-                $ownerType = (string) $row['sim1_owner_type'];
-                $ownerId = (int) $row['sim1_owner_id'];
-
-                $checkSimTxStmt->bind_param('isi', $sId1, $ownerType, $ownerId);
-                $checkSimTxStmt->execute();
-                $hasTx = $checkSimTxStmt->get_result()->num_rows > 0;
-
-                if (!$hasTx) {
-                    $insertSimTxStmt->bind_param('isi', $sId1, $ownerType, $ownerId);
-                    $insertSimTxStmt->execute();
-                }
-            }
-        }
-
-        // G. Consume SIM 2 Stock Asset
-        if (!empty($row['sim_id_2'])) {
-            $sId2 = (int) $row['sim_id_2'];
-            $updateSimStmt->bind_param('i', $sId2);
-            $updateSimStmt->execute();
-
-            if (!empty($row['sim2_owner_type']) && (int) $row['sim2_owner_id'] > 0) {
-                $ownerType = (string) $row['sim2_owner_type'];
-                $ownerId = (int) $row['sim2_owner_id'];
-
-                $checkSimTxStmt->bind_param('isi', $sId2, $ownerType, $ownerId);
-                $checkSimTxStmt->execute();
-                $hasTx = $checkSimTxStmt->get_result()->num_rows > 0;
-
-                if (!$hasTx) {
-                    $insertSimTxStmt->bind_param('isi', $sId2, $ownerType, $ownerId);
-                    $insertSimTxStmt->execute();
-                }
-            }
-        }
-
-        $customerSnapshot = customerAuditSnapshot($conn, $customerId);
-        $customerSnapshot['_audit'] = [
-            'source' => 'Excel Import',
-            'file' => $file['name'],
-            'row' => $row['_row_number'] ?? null
+$groups = [];
+foreach ($validRows as $row) {
+    $customerKey = strtolower(trim((string) $row['username'])) . '|' . trim((string) $row['primary_mobile_no']);
+    $customer = [
+        'platform_id' => (int) $row['platform_id'],
+        'platform_name' => $row['platform_name'],
+        'username' => $row['username'],
+        'primary_mobile_no' => $row['primary_mobile_no'],
+        'secondary_mobile_no' => $row['secondary_mobile_no'] ?? '',
+        'email' => $row['email'] ?? '',
+        'location' => $row['location'],
+        'pincode' => $row['pincode'],
+        'status' => $row['customer_status']
+    ];
+    $existingCustomer = $existingCustomerByKey[$customerKey] ?? null;
+    if (!isset($groups[$customerKey])) {
+        $groups[$customerKey] = [
+            'existing_customer_id' => $existingCustomer ? (int) $existingCustomer['id'] : 0,
+            'customer' => $customer,
+            'existing_customer' => $existingCustomer,
+            'rows' => []
         ];
-        writeAuditSnapshot($conn, $customerId, 'Customer', 'Create', null, $customerSnapshot, $currentUser);
+    } elseif ($groups[$customerKey]['customer'] !== $customer) {
+        $allErrors[] = 'Row ' . (int) $row['_row_number'] . ': Customer fields must match across rows for the same username and mobile number.';
+    }
+    $groups[$customerKey]['rows'][] = $row;
+}
+if ($allErrors) {
+    $conn->close();
+    sendResponse(false, 'Excel validation failed. No rows were submitted.', [
+        'successful_submissions' => 0,
+        'customer_rows_submitted' => 0,
+        'rejected_rows' => count($dataRows),
+        'duplicate_rows' => 0,
+        'validation_errors' => array_values(array_unique($allErrors))
+    ], [], 400);
+}
+
+$uploadHash = hash_file('sha256', $file['tmp_name']);
+if (!is_string($uploadHash) || $uploadHash === '') {
+    $conn->close();
+    sendResponse(false, 'Unable to fingerprint the uploaded workbook for safe retry handling.', [], [], 500);
+}
+$userId = (int) ($currentUser['user_id'] ?? 0);
+$lockName = 'customer_excel_verification_import';
+$lockResult = $conn->query("SELECT GET_LOCK('customer_excel_verification_import', 10) AS acquired");
+if (!$lockResult || (int) ($lockResult->fetch_assoc()['acquired'] ?? 0) !== 1) {
+    $conn->close();
+    sendResponse(false, 'Another customer Excel verification import is in progress. Please retry shortly.', [], [], 503);
+}
+
+$stagedSubmissions = 0;
+$submittedRows = 0;
+$duplicateRowCount = 0;
+try {
+    $conn->begin_transaction();
+    $insertSubmission = $conn->prepare(
+        "INSERT INTO customer_payment_verification_submissions
+            (submitter_user_id, existing_customer_id, status, submission_data, submitted_at)
+         VALUES (?, NULLIF(?, 0), 'Pending Verification', ?, CURRENT_TIMESTAMP)"
+    );
+    if (!$insertSubmission) {
+        throw new RuntimeException('Unable to prepare customer verification submission.');
     }
 
-    $custStmt->close();
-    $vehStmt->close();
-    $instStmt->close();
-    $payStmt->close();
-    $updateDeviceStmt->close();
-    $updateSimStmt->close();
-    $checkDeviceTxStmt->close();
-    $insertDeviceTxStmt->close();
-    $checkSimTxStmt->close();
-    $insertSimTxStmt->close();
+    foreach ($groups as $group) {
+        $rowsToStage = [];
+        $rowHashes = [];
+        foreach ($group['rows'] as $row) {
+            $rowForHash = $row;
+            unset($rowForHash['_row_number']);
+            $rowHash = hash('sha256', json_encode($rowForHash, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $duplicateStmt = $conn->prepare(
+                'SELECT id FROM customer_payment_verification_submissions WHERE submission_data LIKE ? LIMIT 1'
+            );
+            $hashPattern = '%' . $rowHash . '%';
+            $duplicateStmt->bind_param('s', $hashPattern);
+            $duplicateStmt->execute();
+            $isDuplicate = $duplicateStmt->get_result()->num_rows > 0;
+            $duplicateStmt->close();
+            if ($isDuplicate) {
+                $duplicateRowCount++;
+                continue;
+            }
+            $row['_row_hash'] = $rowHash;
+            $rowsToStage[] = $row;
+            $rowHashes[] = $rowHash;
+        }
+        if (!$rowsToStage) {
+            continue;
+        }
 
+        $existingCustomerId = (int) $group['existing_customer_id'];
+        $customer = $group['customer'];
+        if ($existingCustomerId > 0) {
+            $pendingStmt = $conn->prepare(
+                "SELECT id FROM customer_payment_verification_submissions
+                 WHERE existing_customer_id = ? AND status IN ('Pending Verification', 'Applying')
+                 LIMIT 1"
+            );
+            $pendingStmt->bind_param('i', $existingCustomerId);
+        } else {
+            $pendingStmt = $conn->prepare(
+                "SELECT id FROM customer_payment_verification_submissions
+                 WHERE status IN ('Pending Verification', 'Applying')
+                   AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(
+                       CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                       '$.customer.username'
+                   ))) = LOWER(?)
+                   AND JSON_UNQUOTE(JSON_EXTRACT(
+                       CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                       '$.customer.primary_mobile_no'
+                   )) = ?
+                 LIMIT 1"
+            );
+            $pendingStmt->bind_param('ss', $customer['username'], $customer['primary_mobile_no']);
+        }
+        $pendingStmt->execute();
+        $pendingCustomer = $pendingStmt->get_result()->num_rows > 0;
+        $pendingStmt->close();
+        if ($pendingCustomer) {
+            $duplicateRowCount += count($rowsToStage);
+            continue;
+        }
+
+        $existingCustomer = $group['existing_customer'];
+        $customerChanged = !$existingCustomer;
+        if ($existingCustomer) {
+            $customerChanged =
+                (int) $existingCustomer['platform_id'] !== (int) $customer['platform_id'] ||
+                (string) $existingCustomer['username'] !== (string) $customer['username'] ||
+                (string) $existingCustomer['primary_mobile_no'] !== (string) $customer['primary_mobile_no'] ||
+                (string) ($existingCustomer['secondary_mobile_no'] ?? '') !== (string) ($customer['secondary_mobile_no'] ?? '') ||
+                (string) ($existingCustomer['email'] ?? '') !== (string) ($customer['email'] ?? '') ||
+                (string) $existingCustomer['location'] !== (string) $customer['location'] ||
+                (string) $existingCustomer['pincode'] !== (string) $customer['pincode'] ||
+                (string) $existingCustomer['status'] !== (string) $customer['status'];
+        }
+
+        $vehicles = [];
+        foreach ($rowsToStage as $vehicleIndex => $row) {
+            $payment = [
+                'total_sale_amount' => $row['total_sale_amount'],
+                'transaction_id' => $row['transaction_id'],
+                'payment_mode' => $row['payment_mode'],
+                'device_charge' => $row['device_charge'],
+                'software_charge' => $row['software_charge'],
+                'technician_charge' => $row['technician_charge'],
+                'sim_charge' => $row['sim_charge'],
+                'courier_charge' => $row['courier_charge'],
+                'cash_to_technician' => false,
+                'cash_to_dealer' => false,
+                'cash_to_et' => false,
+                'total_amount' => $row['total_amount'],
+                'amount_paid' => $row['amount_paid'],
+                'amount_pending' => $row['amount_pending'],
+                'payment_status' => $row['payment_status'],
+                'submitted_payment_status' => $row['submitted_payment_status']
+            ];
+            $vehicles[] = [
+                'vehicle_no' => $row['vehicle_no'],
+                'vehicle_type_id' => $row['vehicle_type_id'],
+                'imei_no' => $row['imei_no'],
+                'sim_no_1' => $row['sim_no_1'],
+                'sim_no_2' => $row['sim_no_2'],
+                'device_model_id' => $row['device_model_id'],
+                'validity_id' => $row['validity_id'],
+                'validity_months' => $row['validity_months'],
+                'append_vehicle' => $existingCustomerId > 0 || $vehicleIndex > 0,
+                'changed' => ['vehicle' => true, 'installation' => true, 'paymentPart1' => true, 'paymentPart2' => true],
+                'installation' => [
+                    'installation_person_type' => $row['installation_person_label'],
+                    'installation_person_id' => $row['installation_person_id'],
+                    'lead_closure_id' => $row['lead_closure_id'],
+                    'installation_date' => $row['installation_date']
+                ],
+                'payment_part1' => [
+                    'total_sale_amount' => $row['total_sale_amount'],
+                    'transaction_id' => $row['transaction_id'],
+                    'payment_mode' => $row['payment_mode']
+                ],
+                'payment_part2' => $payment,
+                'import_row_number' => $row['_row_number']
+            ];
+        }
+        $submissionData = [
+            'source' => 'customer_excel_upload',
+            'existing_customer_id' => $existingCustomerId ?: null,
+            'customer' => $customer,
+            'customer_changed' => $customerChanged,
+            'vehicles' => $vehicles,
+            'payment_part2' => $vehicles[0]['payment_part2'],
+            'import_metadata' => [
+                'file_name' => basename((string) $file['name']),
+                'file_sha256' => $uploadHash,
+                'row_numbers' => array_column($rowsToStage, '_row_number'),
+                'row_hashes' => $rowHashes
+            ]
+        ];
+        $submissionJson = json_encode($submissionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($submissionJson === false || strlen($submissionJson) > 2000000) {
+            throw new RuntimeException('Customer verification snapshot is too large or could not be encoded.');
+        }
+        $insertSubmission->bind_param('iis', $userId, $existingCustomerId, $submissionJson);
+        if (!$insertSubmission->execute()) {
+            throw new RuntimeException('Failed to save an Excel row for Admin verification.');
+        }
+        $submissionId = (int) $insertSubmission->insert_id;
+        insertCustomerPaymentVerificationHistory($conn, $submissionId, 'Draft', 'Pending Verification', null, $userId);
+        $stagedSubmissions++;
+        $submittedRows += count($rowsToStage);
+    }
+    $insertSubmission->close();
     $conn->commit();
-    $conn->close();
-
-    $vehiclesAdded = count($validRows);
-    $existingCustomersReused = count($reusedCustomerKeys);
-    sendResponse(
-        true,
-        'Customer Excel upload completed successfully.',
-        [
-            'customers_created' => $createdCustomerCount,
-            'existing_customers_reused' => $existingCustomersReused,
-            'vehicles_added' => $vehiclesAdded
-        ]
-    );
-
-} catch (InvalidArgumentException $e) {
+} catch (Throwable $error) {
     $conn->rollback();
+    $conn->query("SELECT RELEASE_LOCK('customer_excel_verification_import')");
     $conn->close();
-    sendResponse(false, 'Excel validation failed: ' . $e->getMessage(), [], [], 400);
-} catch (Exception $e) {
-    $conn->rollback();
-    $conn->close();
-    sendResponse(false, 'Failed to import customers: ' . $e->getMessage(), [], [], 500);
+    sendResponse(false, 'Failed to submit customer Excel rows for verification: ' . $error->getMessage(), [], [], 500);
 }
+$conn->query("SELECT RELEASE_LOCK('customer_excel_verification_import')");
+$conn->close();
+sendResponse(true, 'Customer Excel upload processed. Submitted records are pending Admin verification.', [
+    'successful_submissions' => $stagedSubmissions,
+    'customer_rows_submitted' => $submittedRows,
+    'duplicate_rows' => $duplicateRowCount,
+    'rejected_rows' => 0,
+    'validation_errors' => []
+]);

@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../utils/response.php';
 
-define('SESSION_INACTIVITY_TIMEOUT_SECONDS', 1800);
+define('SESSION_INACTIVITY_TIMEOUT_SECONDS', 900);
 
 function generateJWT($payload, $secret) {
     $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
@@ -100,7 +100,7 @@ function authenticate() {
     if (!$sessionMatches || $sessionExpired) {
         if ($sessionMatches && $sessionExpired) {
             $lastActivityCutoff = $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
-            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ? AND (active_session_expires_at <= ? OR UNIX_TIMESTAMP(active_session_created_at) <= ?)');
+            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ? AND (active_session_expires_at IS NULL OR active_session_expires_at <= ? OR active_session_created_at IS NULL OR UNIX_TIMESTAMP(active_session_created_at) <= ?)');
             if ($clearSession) {
                 $clearSession->bind_param('isii', $userId, $sessionId, $currentTime, $lastActivityCutoff);
                 $clearSession->execute();
@@ -119,6 +119,7 @@ function authenticate() {
 }
 
 function isSuperAdminUser($userId = null, $roleName = null) {
+    $roleNames = [];
     if ($userId !== null) {
         $conn = (new Database())->getConnection();
         if (!$conn) {
@@ -132,15 +133,22 @@ function isSuperAdminUser($userId = null, $roleName = null) {
         $row = $result->fetch_assoc();
         $stmt->close();
         $conn->close();
-        $roleName = $row['role_name'] ?? $row['role'] ?? null;
+        if ($row) {
+            $roleNames = [$row['role_name'] ?? null, $row['role'] ?? null];
+        }
+    } elseif ($roleName !== null) {
+        $roleNames[] = $roleName;
     }
 
-    if (!$roleName) {
-        return false;
+    foreach ($roleNames as $candidate) {
+        $normalized = strtolower(trim((string) $candidate));
+        $normalized = preg_replace('/[^a-z0-9]/', '', $normalized);
+        if ($normalized === 'superadmin') {
+            return true;
+        }
     }
 
-    $normalized = strtolower(trim((string) $roleName));
-    return $normalized === 'super admin' || $normalized === 'super_admin';
+    return false;
 }
 
 function ensurePermissionDefinitions($permissionKeys = []) {
@@ -195,6 +203,7 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'stock_transfer.edit' => ['permission_name' => 'Stock Transfer Edit', 'module' => 'stock_transfer', 'action' => 'EDIT'],
         'stock_transfer.delete' => ['permission_name' => 'Stock Transfer Delete', 'module' => 'stock_transfer', 'action' => 'DELETE'],
         'customers.view' => ['permission_name' => 'Customer Details View', 'module' => 'customers', 'action' => 'VIEW'],
+        'customer_payment_verification.review' => ['permission_name' => 'Customer Payment Verification Review', 'module' => 'customer_payment_verification', 'action' => 'REVIEW'],
         'customers.add' => ['permission_name' => 'Customer Details Add', 'module' => 'customers', 'action' => 'ADD'],
         'customers.edit' => ['permission_name' => 'Customer Details Edit', 'module' => 'customers', 'action' => 'EDIT'],
         'customers.delete' => ['permission_name' => 'Customer Details Delete', 'module' => 'customers', 'action' => 'DELETE'],

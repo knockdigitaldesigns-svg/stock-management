@@ -119,6 +119,7 @@ try {
             CASE
                 WHEN vcc.recipient_type = 'Dealer' THEN vcc_dealer.dealer_name
                 WHEN vcc.recipient_type = 'Technician' THEN vcc_technician.technician_name
+                WHEN vcc.recipient_type = 'ET' THEN 'Direct Cash to ET'
                 ELSE NULL
             END AS vehicle_cash_recipient_name,
             sa.owner_type AS device_owner_type,
@@ -302,6 +303,7 @@ try {
             CASE
                 WHEN ccc.recipient_type = 'Dealer' THEN d.dealer_name
                 WHEN ccc.recipient_type = 'Technician' THEN t.technician_name
+                WHEN ccc.recipient_type = 'ET' THEN 'Direct Cash to ET'
                 ELSE NULL
             END AS cash_recipient_name,
             ccc.payment_mode AS cash_payment_mode,

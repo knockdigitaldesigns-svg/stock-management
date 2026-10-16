@@ -420,10 +420,9 @@ const RenewalsPage = () => {
         </> : form.action === 'Renew SIM' ? <>
             <ModalSection title="Renewal Details">
                 <ModalGrid>
-                    <Field label="Previous Expiry Date / Renewal Due Date"><input className="form-control" readOnly value={formatDate(selected?.next_renewal_date)} /></Field>
-                    <Field label="Actual Renewal Processed Date *"><input className="form-control" type="date" required value={form.action_date} onChange={(event) => setForm({ ...form, action_date: event.target.value })} /></Field>
+                    <Field label="Renewal Due Date"><input className="form-control" readOnly value={formatDate(selected?.next_renewal_date)} /></Field>
                     <Field label="Validity *"><select className="form-control" value={form.validity_months} onChange={(event) => setForm({ ...form, validity_months: event.target.value })}><option value="">Select validity</option>{validities.map((validity) => <option key={validity} value={validity}>{formatValidity(validity)}</option>)}</select></Field>
-                    <Field label="Calculated New Expiry / Next Renewal Date"><input className="form-control" readOnly value={formatDate(calculatedDate)} /></Field>
+                    <Field label="Next Renewal Date"><input className="form-control" readOnly value={formatDate(calculatedDate)} /></Field>
                 </ModalGrid>
             </ModalSection>
             <ModalSection title="New Renewal Payment">

@@ -49,7 +49,8 @@ try {
         $simNo = trim((string) ($row['sim_no'] ?? ''));
         $dealerName = trim((string) ($row['dealer_name'] ?? ''));
         $activationDate = trim((string) ($row['activation_date'] ?? ''));
-        $validityLabel = trim((string) ($row['validity'] ?? ''));
+        $validityValue = $row['validity'] ?? '';
+        $validityLabel = trim((string) $validityValue);
         $rowHasErrors = false;
 
         if ($simNo === '') {
@@ -90,15 +91,21 @@ try {
 
         $validityMonths = null;
         if ($validityLabel === '') {
-            $errors[] = "Row {$rowNumber}: Validity is required.";
-            $rowHasErrors = true;
-        } elseif (!preg_match('/^(\d+)\s+Months?$/i', $validityLabel, $validityMatch)) {
-            $errors[] = "Row {$rowNumber}: Invalid validity.";
+            $errors[] = "Row {$rowNumber}: Validity - Validity is required.";
             $rowHasErrors = true;
         } else {
-            $validityMonths = (int) $validityMatch[1];
-            if (!isset($validities[$validityMonths])) {
-                $errors[] = "Row {$rowNumber}: Invalid validity.";
+            $validityMonths = null;
+            if (is_numeric($validityLabel) && (float) $validityLabel > 0 && floor((float) $validityLabel) === (float) $validityLabel) {
+                $validityMonths = (int) $validityLabel;
+            } elseif (preg_match('/^(\d+)\s+Months?$/i', $validityLabel, $validityMatch)) {
+                $validityMonths = (int) $validityMatch[1];
+            }
+
+            if ($validityMonths === null) {
+                $errors[] = "Row {$rowNumber}: Validity - Enter a positive whole number of months for an active SIM validity.";
+                $rowHasErrors = true;
+            } elseif (!isset($validities[$validityMonths])) {
+                $errors[] = "Row {$rowNumber}: Validity - '{$validityLabel}' is not an active supported validity in months.";
                 $rowHasErrors = true;
             }
         }

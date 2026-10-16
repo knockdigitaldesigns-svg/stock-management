@@ -11,6 +11,12 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
+import {
+    buildCustomerSubmission,
+    commitCustomerSubmission,
+    ensureCustomerSubmissionData,
+    saveCustomerDraft
+} from '../../utils/customerSubmission';
 
 const initialForm = {
     totalSaleAmount: '',
@@ -167,7 +173,8 @@ const PaymentDetailsPart1Page = () => {
                 sessionStorage.getItem(storageKey) || '{}'
             );
 
-            if (stored.new_vehicle_flow || stored.append_vehicle) {
+            const isAddingVehicle = stored.append_vehicle || (stored.new_vehicle_flow && !stored.existing_customer_id);
+            if (Number(customerId) < 0 || isAddingVehicle) {
                 setNewVehicleFlow(true);
                 setForm(stored.step4 || initialForm);
                 return;
@@ -354,21 +361,20 @@ const PaymentDetailsPart1Page = () => {
                 sessionStorage.getItem(storageKey) || '{}'
             );
 
+            const nextSession = {
+                ...existing,
+                customer_id: Number(customerId),
+                step4: {
+                    totalSaleAmount: form.totalSaleAmount,
+                    transactionId: form.transactionId,
+                    paymentMode: form.paymentMode
+                }
+            };
             sessionStorage.setItem(
                 storageKey,
-                JSON.stringify({
-                    ...existing,
-                    customer_id: Number(customerId),
-                    step4: {
-                        totalSaleAmount:
-                            form.totalSaleAmount,
-                        transactionId:
-                            form.transactionId,
-                        paymentMode:
-                            form.paymentMode
-                    }
-                })
+                JSON.stringify(nextSession)
             );
+            return nextSession;
         } catch (err) {
             console.error(
                 'Session storage error:',
@@ -381,54 +387,35 @@ const PaymentDetailsPart1Page = () => {
         try {
             setSaving(true);
 
-            const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
-
-            const paymentPayload = {
-                customer_id: Number(customerId),
-                vehicle_id: stored.new_vehicle_flow
-                    ? Number(stored.vehicle_record_id || 0)
-                    : 0,
-
-                /*
-                 * Explicitly identify this as Part 1.
-                 */
-                payment_step: 1,
-
-                total_sale_amount:
-                    Number(form.totalSaleAmount),
-
-                transaction_id:
-                    form.transactionId || null,
-
-                payment_mode:
-                    form.paymentMode || null,
-
-                /*
-                 * Part 1 starts with no charge breakdown.
-                 */
-                device_charge: 0,
-                software_charge: 0,
-                technician_charge: 0,
-                sim_charge: 0,
-                courier_charge: 0,
-
-                total_amount: 0,
-                amount_paid: 0,
-                amount_pending: 0,
-
-                /*
-                 * Sale amount only = Pending.
-                 * Cash / other mode will go to Part 2.
-                 */
-                payment_status: 'Pending'
-            };
-
-            await api.post(
-                '/customers/payments/create.php',
-                paymentPayload
+            const stored = await ensureCustomerSubmissionData(
+                JSON.parse(sessionStorage.getItem(storageKey) || '{}'),
+                customerId
             );
 
-            saveStep4ToSession();
+            const step4 = {
+                totalSaleAmount: form.totalSaleAmount,
+                transactionId: form.transactionId,
+                paymentMode: form.paymentMode
+            };
+            const nextSession = {
+                ...stored,
+                customer_id: Number(customerId),
+                step4
+            };
+            const existingCustomerId = Number(stored.existing_customer_id || customerId) > 0
+                ? Number(stored.existing_customer_id || customerId)
+                : 0;
+            const draftId = await saveCustomerDraft(
+                stored.draft_id,
+                existingCustomerId,
+                nextSession
+            );
+            const persistedSession = {
+                ...nextSession,
+                draft_id: draftId,
+                existing_customer_id: existingCustomerId || null
+            };
+            sessionStorage.setItem(storageKey, JSON.stringify(persistedSession));
 
             /*
              * No Payment Mode:
@@ -438,6 +425,14 @@ const PaymentDetailsPart1Page = () => {
              * -> Finish customer flow
              */
             if (!goToPart2) {
+                const submission = buildCustomerSubmission(persistedSession);
+                const committed = await commitCustomerSubmission(submission, draftId);
+                await api.post('/customers/verification/finish.php', {
+                    submission_id: draftId,
+                    customer_id: committed.customerId,
+                    vehicle_id: committed.vehicleId,
+                    payment_id: committed.paymentId
+                });
                 sessionStorage.removeItem(storageKey);
 
                 setSuccess(

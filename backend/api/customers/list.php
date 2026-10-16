@@ -70,6 +70,21 @@ $sql = "
         END AS installation_person,
         lc.lead_closure_name AS lead_closure,
         ci.installation_date,
+        (
+            SELECT GROUP_CONCAT(
+                DISTINCT DATE_FORMAT(ci_dates.installation_date, '%Y-%m-%d')
+                ORDER BY ci_dates.installation_date
+                SEPARATOR ','
+            )
+            FROM customer_installations ci_dates
+            LEFT JOIN customer_vehicle_details civ_dates
+                ON civ_dates.id = ci_dates.vehicle_id
+            WHERE ci_dates.installation_date IS NOT NULL
+                AND (
+                    ci_dates.customer_id = c.id
+                    OR civ_dates.customer_id = c.id
+                )
+        ) AS installation_dates,
 
         COALESCE(cpa.total_sale_amount, 0) AS total_sale_amount,
         cp.transaction_id,
@@ -188,6 +203,7 @@ while ($row = $result->fetch_assoc()) {
             'installation_person' => $row['installation_person'],
             'lead_closure' => $row['lead_closure'],
             'installation_date' => $row['installation_date'],
+            'installation_dates' => $row['installation_dates'],
             'total_sale_amount' => $row['total_sale_amount'],
             'transaction_id' => $row['transaction_id'],
             'payment_mode' => $row['payment_mode'],
