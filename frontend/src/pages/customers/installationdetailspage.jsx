@@ -10,6 +10,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { saveCustomerDraft } from '../../utils/customerSubmission';
 
 const initialForm = {
     installation_person_type: '',
@@ -284,7 +285,18 @@ const InstallationDetailsPage = () => {
                 ) || '{}'
             );
 
-            if (stored.new_vehicle_flow || stored.append_vehicle) {
+            if (Number(customerId) < 0 || (stored.append_vehicle && !stored.vehicle_record_id)) {
+                setNewVehicleFlow(true);
+                setSameAllocatedOwner(false);
+                setCurrentOwnerResolved(true);
+                setCurrentOwnerName('');
+                setCurrentOwnerLoading(false);
+                setForm({ ...initialForm, ...(stored.step3 || {}) });
+                return;
+            }
+
+            const isAddingVehicle = stored.append_vehicle || (stored.new_vehicle_flow && !stored.existing_customer_id);
+            if (isAddingVehicle) {
                 setNewVehicleFlow(true);
                 const vehicleParam = stored.vehicle_record_id
                     ? `&vehicle_id=${encodeURIComponent(stored.vehicle_record_id)}`
@@ -589,19 +601,18 @@ const InstallationDetailsPage = () => {
                 sessionStorage.getItem(storageKey) || '{}'
             );
 
-            sessionStorage.setItem(
-                storageKey,
-                JSON.stringify({
-                    ...existing,
-                    customer_id: Number(customerId),
-                    step3: {
-                        installation_person_type: form.installation_person_type,
-                        installation_person_id: Number(form.installation_person_id),
-                        lead_closure_id: Number(form.lead_closure_id),
-                        installation_date: form.installation_date
-                    }
-                })
-            );
+            const nextSession = {
+                ...existing,
+                customer_id: Number(customerId),
+                step3: {
+                    installation_person_type: form.installation_person_type,
+                    installation_person_id: Number(form.installation_person_id),
+                    lead_closure_id: Number(form.lead_closure_id),
+                    installation_date: form.installation_date
+                }
+            };
+            sessionStorage.setItem(storageKey, JSON.stringify(nextSession));
+            return nextSession;
         } catch (err) {
             console.error('Session storage error:', err);
         }
@@ -653,19 +664,31 @@ const InstallationDetailsPage = () => {
                 installation_date: form.installation_date
             };
 
-            const response = await api.post(
-                '/customers/installations/create.php',
-                payload
-            );
-
-            if (!response.data?.success) {
-                throw new Error(
-                    response.data?.message ||
-                    'Failed to save installation details.'
+            const storedSession = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+            const updatedSession = saveStep3ToSession();
+            if (storedSession.draft_id || Number(customerId) < 0 || (storedSession.append_vehicle && !storedSession.vehicle_record_id) || isEditMode) {
+                const existingCustomerId = Number(storedSession.existing_customer_id || customerId) > 0
+                    ? Number(storedSession.existing_customer_id || customerId)
+                    : 0;
+                const draftId = await saveCustomerDraft(
+                    storedSession.draft_id,
+                    existingCustomerId,
+                    updatedSession
                 );
+                sessionStorage.setItem(storageKey, JSON.stringify({
+                    ...updatedSession,
+                    draft_id: draftId,
+                    existing_customer_id: existingCustomerId || null
+                }));
+            } else {
+                const response = await api.post(
+                    '/customers/installations/create.php',
+                    payload
+                );
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Failed to save installation details.');
+                }
             }
-
-            saveStep3ToSession();
 
             setSuccess(
                 isEditMode

@@ -15,6 +15,10 @@ import {
 import api from '../../services/api';
 import { showGlobalError } from '../../context/ErrorContext';
 import { useAuth } from '../../context/AuthContext';
+import {
+    commitCustomerSubmission,
+    saveCustomerDraft
+} from '../../utils/customerSubmission';
 
 const sectionCardStyle = {
     background: '#fff',
@@ -108,7 +112,39 @@ const renderValidity = (months) => {
     return value.toLowerCase().includes('month') ? value : `${value} Months`;
 };
 
-const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false }) => (
+const getPaymentPart2Summary = (vehicle) => {
+    const chargeTotal = [
+        vehicle.vehicle_device_charge,
+        vehicle.vehicle_software_charge,
+        vehicle.vehicle_technician_charge,
+        vehicle.vehicle_sim_charge,
+        vehicle.vehicle_courier_charge
+    ].reduce((total, charge) => total + (Number(charge) || 0), 0);
+    const amountPaid = Number(vehicle.vehicle_amount_paid) || 0;
+
+    return {
+        chargeTotal,
+        amountPaid,
+        amountPending: Math.max(chargeTotal - amountPaid, 0),
+        paymentStatus: amountPaid <= 0
+            ? 'Not Paid'
+            : amountPaid < chargeTotal
+                ? 'Partially Paid'
+                : 'Paid'
+    };
+};
+
+const hasCompletedPaymentPart2 = (vehicle) => {
+    const totalSaleAmount = Number(vehicle.vehicle_total_sale_amount) || 0;
+    const { chargeTotal } = getPaymentPart2Summary(vehicle);
+    const totalAmount = Number(vehicle.vehicle_total_amount) || 0;
+
+    return totalSaleAmount > 0
+        && Math.abs(chargeTotal - totalSaleAmount) <= 0.005
+        && Math.abs(totalAmount - totalSaleAmount) <= 0.005;
+};
+
+const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, step }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         <input
@@ -118,6 +154,8 @@ const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false }
             inputMode={digitsOnly ? 'numeric' : undefined}
             maxLength={digitsOnly ? 6 : undefined}
             pattern={digitsOnly ? '[0-9]{6}' : undefined}
+            min={min}
+            step={step}
             style={inputStyle}
         />
     </div>
@@ -157,7 +195,11 @@ const CustomerViewPage = () => {
     const [success, setSuccess] = useState('');
     const [customerChanged, setCustomerChanged] = useState(false);
     const [changedVehicles, setChangedVehicles] = useState({});
-    const [activeEditStep, setActiveEditStep] = useState(1);
+    const [verificationDraftId, setVerificationDraftId] = useState(0);
+    const [activeEditStep, setActiveEditStep] = useState(() => {
+        const requestedStep = Number(new URLSearchParams(location.search).get('step'));
+        return requestedStep >= 1 && requestedStep <= 5 ? requestedStep : 1;
+    });
     const [savedPaymentModes, setSavedPaymentModes] = useState({});
     const [masterData, setMasterData] = useState({
         platforms: [],
@@ -215,29 +257,55 @@ const CustomerViewPage = () => {
                 : data.vehicle
                     ? [data.vehicle]
                     : [];
-
+            const resumeKey = `customer_edit_verification_${customerId}`;
+            const savedDraft = sessionStorage.getItem(resumeKey);
+            let resumedSubmission = null;
+            if (savedDraft) {
+                try {
+                    resumedSubmission = JSON.parse(savedDraft);
+                } catch (draftError) {
+                    console.error('Unable to read resumed customer verification draft:', draftError);
+                    sessionStorage.removeItem(resumeKey);
+                }
+            }
+            const resumedData = resumedSubmission?.submission_data;
+            const resumedVehicles = Array.isArray(resumedData?.vehicles) ? resumedData.vehicles : [];
+            const hydratedVehicles = vehicles.map((vehicle) => {
+                const savedVehicle = resumedVehicles.find(
+                    (item) => Number(item.vehicle_record_id || item.id) === Number(vehicle.id)
+                );
+                return savedVehicle ? { ...vehicle, ...savedVehicle } : vehicle;
+            });
             setCustomerData({
                 customer: data.customer
-                    ? { ...data.customer, vehicles }
+                    ? { ...data.customer, ...(resumedData?.customer || {}), vehicles: hydratedVehicles }
                     : null,
-                vehicles,
+                vehicles: hydratedVehicles,
                 installation: data.installation || null,
                 payment_part1: data.payment_part1 || null,
                 payment_part2: data.payment_part2 || null
             });
             setSelectedEditVehicleId((previous) => (
-                vehicles.some((vehicle) => String(vehicle.id) === String(previous))
+                hydratedVehicles.some((vehicle) => String(vehicle.id) === String(previous))
                     ? previous
-                    : vehicles[0]?.id ?? null
+                    : hydratedVehicles[0]?.id ?? null
             ));
             setSavedPaymentModes(Object.fromEntries(
-                vehicles.map((vehicle) => [
+                hydratedVehicles.map((vehicle) => [
                     vehicle.id,
                     Boolean(String(vehicle.vehicle_payment_mode || '').trim())
                 ])
             ));
-            setCustomerChanged(false);
-            setChangedVehicles({});
+            const resumedChanges = Object.fromEntries(resumedVehicles.map((vehicle) => [
+                vehicle.vehicle_record_id || vehicle.id,
+                vehicle.changed || {}
+            ]));
+            setCustomerChanged(Boolean(resumedData?.customer_changed));
+            setChangedVehicles(resumedChanges);
+            setVerificationDraftId(Number(resumedSubmission?.id || 0));
+            if (resumedSubmission) {
+                sessionStorage.removeItem(resumeKey);
+            }
             return true;
         } catch (err) {
             console.error('Customer view loading error:', err);
@@ -338,12 +406,43 @@ const CustomerViewPage = () => {
         }));
     };
 
+    const updatePaymentPart2Field = (vehicleId, field, value) => {
+        setChangedVehicles((previous) => ({
+            ...previous,
+            [vehicleId]: {
+                ...previous[vehicleId],
+                paymentPart2: true
+            }
+        }));
+        setCustomerData((previous) => ({
+            ...previous,
+            vehicles: previous.vehicles.map((vehicle) => {
+                if (Number(vehicle.id) !== Number(vehicleId)) {
+                    return vehicle;
+                }
+
+                const updatedVehicle = { ...vehicle, [field]: value };
+                const summary = getPaymentPart2Summary(updatedVehicle);
+                return {
+                    ...updatedVehicle,
+                    vehicle_total_amount: summary.chargeTotal,
+                    vehicle_amount_pending: summary.amountPending,
+                    vehicle_payment_status: summary.paymentStatus
+                };
+            })
+        }));
+    };
+
     const handleBack = () => {
-        navigate('/customer-management/details');
+        navigate('/customer-management/details', {
+            state: { customerDetailsPage: location.state?.customerDetailsPage }
+        });
     };
 
     const handleCancelEdit = () => {
-        navigate(`/customer-management/details/${customerId}/view`);
+        navigate(`/customer-management/details/${customerId}/view`, {
+            state: { customerDetailsPage: location.state?.customerDetailsPage }
+        });
     };
 
     const handleAddVehicle = () => {
@@ -372,6 +471,29 @@ const CustomerViewPage = () => {
 
     const handleSave = async ({ advance = false, navigateToStep = null } = {}) => {
         const customer = customerData.customer || {};
+        if (!advance && navigateToStep === null) {
+            for (const vehicle of vehicles) {
+                if (!changedVehicles[vehicle.id]?.paymentPart2) {
+                    continue;
+                }
+
+                const summary = getPaymentPart2Summary(vehicle);
+                const totalSaleAmount = Number(vehicle.vehicle_total_sale_amount) || 0;
+                if (totalSaleAmount <= 0 || Math.abs(summary.chargeTotal - totalSaleAmount) > 0.005) {
+                    triggerError(`Total charges must equal Total Sale Amount of ₹${totalSaleAmount.toLocaleString('en-IN')}.`);
+                    return false;
+                }
+                if (summary.amountPaid > summary.chargeTotal) {
+                    triggerError(`Amount Paid cannot exceed Total Amount of ₹${summary.chargeTotal.toLocaleString('en-IN')}.`);
+                    return false;
+                }
+                if (summary.amountPaid < 0) {
+                    triggerError('Amount Paid cannot be negative.');
+                    return false;
+                }
+            }
+        }
+
         if (
             ((activeEditStep === 4 && advance) || navigateToStep === 5) &&
             !String(selectedEditVehicle?.vehicle_payment_mode || '').trim()
@@ -385,10 +507,65 @@ const CustomerViewPage = () => {
             setError('');
             setSuccess('');
 
-            if (customerChanged) {
-                await api.put('/customers/update.php', {
-                    id: Number(customerId),
+            const submissionVehicles = vehicles
+                .filter((vehicle) => Object.values(changedVehicles[vehicle.id] || {}).some(Boolean))
+                .map((vehicle) => {
+                    const changed = changedVehicles[vehicle.id] || {};
+                    const installationValues = [
+                        vehicle.vehicle_installation_type,
+                        vehicle.vehicle_installation_person_id,
+                        vehicle.vehicle_lead_closure_id,
+                        vehicle.vehicle_installation_date
+                    ];
+                    const hasInstallationData = installationValues.some((value) => value !== null && value !== undefined && value !== '');
+                    const hasCompleteInstallation = installationValues.every((value) => value !== null && value !== undefined && value !== '');
+                    if (changed.installation && hasInstallationData && !hasCompleteInstallation) {
+                        throw new Error(`Complete all installation fields for ${vehicle.vehicle_no || 'the vehicle'}.`);
+                    }
+                    const saleAmount = Number(vehicle.vehicle_total_sale_amount || 0);
+                    if ((changed.paymentPart1 || changed.paymentPart2) && saleAmount <= 0) {
+                        throw new Error(`Enter a total sale amount for ${vehicle.vehicle_no || 'the vehicle'}.`);
+                    }
+                    return {
+                        ...vehicle,
+                        vehicle_record_id: Number(vehicle.id),
+                        changed,
+                        installation: changed.installation && hasCompleteInstallation ? {
+                            installation_person_type: vehicle.vehicle_installation_type,
+                            installation_person_id: Number(vehicle.vehicle_installation_person_id),
+                            lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
+                            installation_date: vehicle.vehicle_installation_date
+                        } : null,
+                        payment_part1: changed.paymentPart1 ? {
+                            total_sale_amount: saleAmount,
+                            transaction_id: vehicle.vehicle_transaction_id || '',
+                            payment_mode: vehicle.vehicle_payment_mode || ''
+                        } : null,
+                        payment_part2: changed.paymentPart2 ? {
+                            total_sale_amount: saleAmount,
+                            transaction_id: vehicle.vehicle_transaction_id || '',
+                            payment_mode: vehicle.vehicle_payment_mode || '',
+                            device_charge: Number(vehicle.vehicle_device_charge || 0),
+                            software_charge: Number(vehicle.vehicle_software_charge || 0),
+                            technician_charge: Number(vehicle.vehicle_technician_charge || 0),
+                            sim_charge: Number(vehicle.vehicle_sim_charge || 0),
+                            courier_charge: Number(vehicle.vehicle_courier_charge || 0),
+                            cash_to_technician: vehicle.vehicle_cash_recipient_type === 'Technician',
+                            cash_to_dealer: vehicle.vehicle_cash_recipient_type === 'Dealer',
+                            cash_to_et: vehicle.vehicle_cash_recipient_type === 'ET',
+                            total_amount: Number(vehicle.vehicle_total_amount || 0),
+                            amount_paid: Number(vehicle.vehicle_amount_paid || 0),
+                            amount_pending: Number(vehicle.vehicle_amount_pending || 0),
+                            payment_status: vehicle.vehicle_payment_status || 'Not Paid'
+                        } : null
+                    };
+                });
+            const submission = {
+                existing_customer_id: Number(customerId),
+                customer_changed: customerChanged,
+                customer: {
                     platform_id: Number(customer.platform_id || 0),
+                    platform_name: customer.platform_name || '',
                     username: String(customer.username || '').trim(),
                     primary_mobile_no: String(customer.primary_mobile_no || '').trim(),
                     secondary_mobile_no: String(customer.secondary_mobile_no || '').trim(),
@@ -396,95 +573,68 @@ const CustomerViewPage = () => {
                     location: String(customer.location || '').trim(),
                     pincode: String(customer.pincode || '').trim(),
                     status: customer.status || 'Active'
+                },
+                vehicles: submissionVehicles
+            };
+            const verificationPayment = submissionVehicles.find((vehicle) =>
+                vehicle.payment_part2 &&
+                ['Paid', 'Partially Paid'].includes(vehicle.payment_part2.payment_status)
+            )?.payment_part2;
+            if (verificationPayment) {
+                submission.payment_part2 = verificationPayment;
+            }
+
+            let savedDraftId = verificationDraftId;
+            if (customerChanged || submissionVehicles.length > 0) {
+                savedDraftId = await saveCustomerDraft(
+                    verificationDraftId,
+                    Number(customerId),
+                    submission
+                );
+                setVerificationDraftId(savedDraftId);
+            }
+
+            if (!advance && navigateToStep === null && verificationPayment) {
+                const response = await api.post('/customers/verification/submit.php', {
+                    submission_id: savedDraftId,
+                    submission_data: submission
                 });
-            }
-
-            for (const vehicle of vehicles) {
-                const changed = changedVehicles[vehicle.id] || {};
-                if (changed.vehicle) {
-                    await api.put('/customers/vehicle_details/update.php', {
-                        id: Number(vehicle.id || 0),
-                        customer_id: Number(customerId),
-                        vehicle_no: String(vehicle.vehicle_no || '').trim(),
-                        vehicle_type_id: Number(vehicle.vehicle_type_id || 0),
-                        device_model_id: Number(vehicle.device_model_id || 0),
-                        imei_no: String(vehicle.imei_no || '').trim(),
-                        sim_no_1: String(vehicle.sim_no_1 || '').trim(),
-                        sim_no_2: String(vehicle.sim_no_2 || '').trim(),
-                        validity_id: Number(vehicle.validity_id || 0)
-                    });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Failed to submit for Admin verification.');
                 }
-
-                const installationValues = [
-                    vehicle.vehicle_installation_type,
-                    vehicle.vehicle_installation_person_id,
-                    vehicle.vehicle_lead_closure_id,
-                    vehicle.vehicle_installation_date
-                ];
-                const hasInstallationData = installationValues.some((value) => value !== null && value !== undefined && value !== '');
-                const hasCompleteInstallation = installationValues.every((value) => value !== null && value !== undefined && value !== '');
-                if (changed.installation && hasInstallationData && !hasCompleteInstallation) {
-                    throw new Error(`Complete all installation fields for ${vehicle.vehicle_no || 'the vehicle'}.`);
-                }
-                if (changed.installation && hasCompleteInstallation) {
-                    await api.post('/customers/installations/create.php', {
-                        customer_id: Number(customerId),
-                        vehicle_id: Number(vehicle.id),
-                        installation_person_type: vehicle.vehicle_installation_type,
-                        installation_person_id: Number(vehicle.vehicle_installation_person_id),
-                        lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
-                        installation_date: vehicle.vehicle_installation_date
-                    });
-                }
-
-                const saleAmount = Number(vehicle.vehicle_total_sale_amount || 0);
-                if ((changed.paymentPart1 || changed.paymentPart2) && saleAmount <= 0) {
-                    throw new Error(`Enter a total sale amount for ${vehicle.vehicle_no || 'the vehicle'}.`);
-                }
-                if (changed.paymentPart1 || changed.paymentPart2) {
-                    await api.post('/customers/payments/create.php', {
-                        customer_id: Number(customerId),
-                        vehicle_id: Number(vehicle.id),
-                        payment_step: changed.paymentPart2 ? 2 : 1,
-                        total_sale_amount: saleAmount,
-                        transaction_id: vehicle.vehicle_transaction_id || '',
-                        payment_mode: vehicle.vehicle_payment_mode || '',
-                        ...(changed.paymentPart2 ? {
-                            device_charge: Number(vehicle.vehicle_device_charge || 0),
-                            software_charge: Number(vehicle.vehicle_software_charge || 0),
-                            technician_charge: Number(vehicle.vehicle_technician_charge || 0),
-                            sim_charge: Number(vehicle.vehicle_sim_charge || 0),
-                            courier_charge: Number(vehicle.vehicle_courier_charge || 0),
-                            total_amount: Number(vehicle.vehicle_total_amount || 0),
-                            amount_paid: Number(vehicle.vehicle_amount_paid || 0),
-                            amount_pending: Number(vehicle.vehicle_amount_pending || 0),
-                            payment_status: vehicle.vehicle_payment_status || 'Not Paid'
-                        } : {}),
-                        cash_to_technician: vehicle.vehicle_cash_recipient_type === 'Technician',
-                        cash_to_dealer: vehicle.vehicle_cash_recipient_type === 'Dealer'
-                    });
-                }
-            }
-
-            if (advance || navigateToStep !== null) {
-                if (!await loadCustomerDetails()) {
-                    return false;
-                }
-            } else {
+                await loadCustomerDetails();
+                setVerificationDraftId(0);
+                setSuccess('Payment details submitted successfully for Admin verification.');
+            } else if (!advance && navigateToStep === null && savedDraftId > 0) {
+                const committed = await commitCustomerSubmission(submission, savedDraftId);
+                await api.post('/customers/verification/finish.php', {
+                    submission_id: savedDraftId,
+                    customer_id: committed.customerId,
+                    vehicle_id: committed.vehicleId,
+                    payment_id: committed.paymentId
+                });
+                await loadCustomerDetails();
+                setVerificationDraftId(0);
+            } else if (!advance && navigateToStep === null && savedDraftId === 0) {
                 setCustomerChanged(false);
                 setChangedVehicles({});
             }
+
             if (advance && activeEditStep < 5) {
-                setSuccess('Changes saved successfully.');
+                setSuccess(savedDraftId > 0 ? 'Changes saved as a draft.' : 'No changes to save.');
                 setActiveEditStep((step) => step + 1);
             } else if (navigateToStep !== null) {
-                setSuccess('');
+                setSuccess(savedDraftId > 0 ? 'Changes saved as a draft.' : '');
                 setActiveEditStep(navigateToStep);
             } else {
-                setSuccess('Customer details updated successfully.');
-                setTimeout(() => {
-                    navigate(`/customer-management/details/${customerId}/view`);
-                }, 250);
+                if (!verificationPayment) {
+                    setSuccess('Customer details updated successfully.');
+                    setTimeout(() => {
+                        navigate(`/customer-management/details/${customerId}/view`, {
+                            state: { customerDetailsPage: location.state?.customerDetailsPage }
+                        });
+                    }, 250);
+                }
             }
             return true;
         } catch (err) {
@@ -576,11 +726,13 @@ const CustomerViewPage = () => {
                         </div>
                         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                             {hasPermission('customers.edit') && (
-                                <button type="button" className="btn btn-primary" onClick={() => navigate(`/customer-management/details/${customerId}/edit`)}>
+                                <button type="button" className="btn btn-primary" onClick={() => navigate(`/customer-management/details/${customerId}/edit`, {
+                                    state: { customerDetailsPage: location.state?.customerDetailsPage }
+                                })}>
                                     Edit Customer
                                 </button>
                             )}
-                            <button type="button" className="btn btn-secondary" onClick={() => navigate('/customer-management/details')}>
+                            <button type="button" className="btn btn-secondary" onClick={handleBack}>
                                 <ArrowLeft size={16} /> Back to Customer Details
                             </button>
                         </div>
@@ -1071,29 +1223,59 @@ const CustomerViewPage = () => {
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                                     {isEditMode ? (
                                         <>
-                                            <EditField label="Device Charge" value={vehicle.vehicle_device_charge} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_device_charge', value)} type="number" />
-                                            <EditField label="Software Charge" value={vehicle.vehicle_software_charge} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_software_charge', value)} type="number" />
-                                            <EditField label="Technician Charge" value={vehicle.vehicle_technician_charge} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_technician_charge', value)} type="number" />
-                                            <EditField label="SIM Charge" value={vehicle.vehicle_sim_charge} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_sim_charge', value)} type="number" />
-                                            <EditField label="Courier Charge" value={vehicle.vehicle_courier_charge} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_courier_charge', value)} type="number" />
-                                            <EditField label="Total Amount" value={vehicle.vehicle_total_amount} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_total_amount', value)} type="number" />
-                                            <EditField label="Amount Paid" value={vehicle.vehicle_amount_paid} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_amount_paid', value)} type="number" />
-                                            <div style={fieldStyle}><strong>Amount Pending</strong><span>{renderValue(vehicle.vehicle_amount_pending)}</span></div>
-                                            <div style={fieldStyle}><strong>Payment Status</strong><span>{renderValue(vehicle.vehicle_payment_status)}</span></div>
-                                            <EditSelect
-                                                label="Cash Collection Recipient"
-                                                value={vehicle.vehicle_cash_recipient_type || ''}
-                                                onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_cash_recipient_type', value)}
-                                                options={['', 'Technician', 'Dealer']}
-                                                getValue={(option) => option}
-                                                getLabel={(option) => option || 'None'}
+                                            {[
+                                                ['Device Charge', 'vehicle_device_charge'],
+                                                ['Software Charge', 'vehicle_software_charge'],
+                                                ['Technician Charge', 'vehicle_technician_charge'],
+                                                ['SIM Charge', 'vehicle_sim_charge'],
+                                                ['Courier Charge', 'vehicle_courier_charge']
+                                            ].map(([label, field]) => (
+                                                <EditField
+                                                    key={field}
+                                                    label={label}
+                                                    value={!hasCompletedPaymentPart2(vehicle) && Number(vehicle[field]) === 0 ? '' : vehicle[field]}
+                                                    onChange={(value) => updatePaymentPart2Field(vehicle.id, field, value)}
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                />
+                                            ))}
+                                            <div style={fieldStyle}>
+                                                <strong>Total Amount</strong>
+                                                <input
+                                                    type="number"
+                                                    value={getPaymentPart2Summary(vehicle).chargeTotal}
+                                                    readOnly
+                                                    style={inputStyle}
+                                                />
+                                                {!hasCompletedPaymentPart2(vehicle) && (
+                                                    <small style={{ color: '#dc2626' }}>
+                                                        ✕ Total charges must equal Total Sale Amount of ₹{(Number(vehicle.vehicle_total_sale_amount) || 0).toLocaleString('en-IN')}.
+                                                    </small>
+                                                )}
+                                            </div>
+                                            <div style={fieldStyle}>
+                                                <strong>Cash Collection Recipient</strong>
+                                                <label><input type="checkbox" checked={vehicle.vehicle_cash_recipient_type === 'Technician'} onChange={() => updateVehicleField(vehicle.id, 'vehicle_cash_recipient_type', vehicle.vehicle_cash_recipient_type === 'Technician' ? '' : 'Technician')} /> Cash to Technician</label>
+                                                <label><input type="checkbox" checked={vehicle.vehicle_cash_recipient_type === 'Dealer'} onChange={() => updateVehicleField(vehicle.id, 'vehicle_cash_recipient_type', vehicle.vehicle_cash_recipient_type === 'Dealer' ? '' : 'Dealer')} /> Cash to Dealer</label>
+                                                <label><input type="checkbox" checked={vehicle.vehicle_cash_recipient_type === 'ET'} onChange={() => updateVehicleField(vehicle.id, 'vehicle_cash_recipient_type', vehicle.vehicle_cash_recipient_type === 'ET' ? '' : 'ET')} /> Direct Cash to ET</label>
+                                            </div>
+                                            <EditField
+                                                label="Amount Paid"
+                                                value={vehicle.vehicle_amount_paid}
+                                                onChange={(value) => updatePaymentPart2Field(vehicle.id, 'vehicle_amount_paid', value)}
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
                                             />
+                                            <div style={fieldStyle}><strong>Amount Pending</strong><span>{getPaymentPart2Summary(vehicle).amountPending.toFixed(2)}</span></div>
+                                            <div style={fieldStyle}><strong>Payment Status</strong><span>{getPaymentPart2Summary(vehicle).paymentStatus}</span></div>
                                             <div style={fieldStyle}><strong>Cash Recipient Name</strong><span>{renderValue(vehicle.vehicle_cash_recipient_name)}</span></div>
                                             <div style={fieldStyle}><strong>Payment Mode</strong><span>{renderValue(vehicle.vehicle_payment_mode)}</span></div>
                                             <div style={fieldStyle}><strong>Transaction ID</strong><span>{renderValue(vehicle.vehicle_transaction_id)}</span></div>
                                         </>
                                     ) : (
-                                        <>
+                                        hasCompletedPaymentPart2(vehicle) ? <>
                                             <div style={fieldStyle}><strong>Device Charge</strong><span>{renderValue(vehicle.vehicle_device_charge)}</span></div>
                                             <div style={fieldStyle}><strong>Software Charge</strong><span>{renderValue(vehicle.vehicle_software_charge)}</span></div>
                                             <div style={fieldStyle}><strong>Technician Charge</strong><span>{renderValue(vehicle.vehicle_technician_charge)}</span></div>
@@ -1107,6 +1289,9 @@ const CustomerViewPage = () => {
                                             <div style={fieldStyle}><strong>Payment Mode</strong><span>{renderValue(vehicle.vehicle_payment_mode)}</span></div>
                                             <div style={fieldStyle}><strong>Transaction ID</strong><span>{renderValue(vehicle.vehicle_transaction_id)}</span></div>
                                         </>
+                                        : <div className="alert alert-warning" style={{ gridColumn: '1 / -1', margin: 0 }}>
+                                            Payment Part 2 has not been completed. Edit this customer to enter the charge breakdown.
+                                        </div>
                                     )}
                                 </div>
                             </div>

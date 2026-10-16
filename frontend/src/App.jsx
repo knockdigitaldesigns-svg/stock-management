@@ -93,6 +93,12 @@ import CustomerViewPage
 import CustomerReportsPage
     from './pages/customers/CustomerReportsPage';
 
+import CustomerPaymentVerificationPage
+    from './pages/customers/CustomerPaymentVerificationPage';
+
+import MyCustomerVerificationsPage
+    from './pages/customers/MyCustomerVerificationsPage';
+
 import RenewalsPage
     from './pages/renewals/renewalspage';
 
@@ -485,6 +491,27 @@ function App() {
                                 permission="customer_reports.view"
                             >
                                 <CustomerReportsPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/customer-management/verification"
+                        element={
+                            <ProtectedRoute
+                                permission="customer_payment_verification.review"
+                                role={['Admin', 'Super Admin', 'super_admin']}
+                            >
+                                <CustomerPaymentVerificationPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/customer-management/my-verifications"
+                        element={
+                            <ProtectedRoute permission={['customers.add', 'customers.edit']}>
+                                <MyCustomerVerificationsPage />
                             </ProtectedRoute>
                         }
                     />

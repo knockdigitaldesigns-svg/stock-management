@@ -4,6 +4,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/customer_payment_verification.php';
 
 handlePreflight();
 
@@ -12,12 +13,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $currentUser = authenticate();
-requirePermission('customers.add');
 
 $data = json_decode(file_get_contents('php://input'));
 
 if (!$data) {
     sendResponse(false, 'Invalid request data.', [], [], 400);
+}
+$verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
+if ($verificationSubmissionId > 0) {
+    requireAnyPermission(['customers.add', CUSTOMER_PAYMENT_VERIFICATION_PERMISSION]);
+} else {
+    requirePermission('customers.add');
 }
 
 
@@ -52,6 +58,7 @@ $location = trim(
 $pincode = trim(
     (string) ($data->pincode ?? '')
 );
+$status = trim((string) ($data->status ?? 'Active'));
 $mobileReuseConfirmed = filter_var($data->mobile_reuse_confirmed ?? false, FILTER_VALIDATE_BOOLEAN);
 
 
@@ -79,6 +86,9 @@ if ($location === '') {
 
 if ($pincode === '') {
     sendResponse(false, 'Pincode is required.', [], [], 400);
+}
+if (!in_array($status, ['Active', 'Inactive'], true)) {
+    sendResponse(false, 'Customer status must be Active or Inactive.', [], [], 400);
 }
 
 
@@ -201,6 +211,119 @@ if (!$conn) {
 */
 
 $conn->begin_transaction();
+if ($verificationSubmissionId > 0) {
+    $draftStmt = $conn->prepare(
+        'SELECT submitter_user_id, reviewer_user_id, status, linked_customer_id,
+                linked_vehicle_id, linked_payment_id
+         FROM customer_payment_verification_submissions
+         WHERE id = ? FOR UPDATE'
+    );
+    $draftStmt->bind_param('i', $verificationSubmissionId);
+    $draftStmt->execute();
+    $draft = $draftStmt->get_result()->fetch_assoc();
+    $draftStmt->close();
+    $currentUserId = (int) ($currentUser['user_id'] ?? 0);
+    $isOwnerDraft = $draft && (int) $draft['submitter_user_id'] === $currentUserId && $draft['status'] === 'Draft';
+    $isApplyingDraft = $draft && (int) ($draft['reviewer_user_id'] ?? 0) === $currentUserId && $draft['status'] === 'Applying';
+    if (!$draft || (!$isOwnerDraft && !$isApplyingDraft)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'This customer draft is not available for commit.', [], [], 403);
+    }
+    if (!empty($draft['linked_customer_id'])) {
+        $linkedCustomerId = (int) $draft['linked_customer_id'];
+        $customerStmt = $conn->prepare(
+            'SELECT id FROM customers
+             WHERE id = ? AND verification_submission_id = ?
+             LIMIT 1'
+        );
+        $customerStmt->bind_param('ii', $linkedCustomerId, $verificationSubmissionId);
+        $customerStmt->execute();
+        $linkedCustomer = $customerStmt->get_result()->fetch_assoc();
+        $customerStmt->close();
+        if ($linkedCustomer) {
+            $conn->commit();
+            $conn->close();
+            sendResponse(true, 'Customer already created for this submission.', ['customer_id' => $linkedCustomerId, 'action' => 'existing']);
+        }
+
+        $customerStmt = $conn->prepare(
+            'SELECT id FROM customers
+             WHERE verification_submission_id = ?
+             LIMIT 1 FOR UPDATE'
+        );
+        $customerStmt->bind_param('i', $verificationSubmissionId);
+        $customerStmt->execute();
+        $createdCustomer = $customerStmt->get_result()->fetch_assoc();
+        $customerStmt->close();
+        if ($createdCustomer) {
+            $linkedCustomerId = (int) $createdCustomer['id'];
+            $repairStmt = $conn->prepare(
+                'UPDATE customer_payment_verification_submissions
+                 SET linked_customer_id = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            );
+            $repairStmt->bind_param('ii', $linkedCustomerId, $verificationSubmissionId);
+            if (!$repairStmt->execute()) {
+                $repairStmt->close();
+                $conn->rollback();
+                $conn->close();
+                sendResponse(false, 'Unable to restore the customer link for this submission.', [], [], 500);
+            }
+            $repairStmt->close();
+            $conn->commit();
+            $conn->close();
+            sendResponse(true, 'Customer already created for this submission.', ['customer_id' => $linkedCustomerId, 'action' => 'existing']);
+        }
+
+        $linkedRecords = [
+            [
+                'id' => (int) ($draft['linked_vehicle_id'] ?? 0),
+                'query' => 'SELECT id FROM customer_vehicle_details WHERE id = ? LIMIT 1'
+            ],
+            [
+                'id' => (int) ($draft['linked_payment_id'] ?? 0),
+                'query' => 'SELECT id FROM customer_payments WHERE id = ? LIMIT 1'
+            ]
+        ];
+        foreach ($linkedRecords as $linkedRecord) {
+            if ($linkedRecord['id'] <= 0) {
+                continue;
+            }
+            $recordStmt = $conn->prepare($linkedRecord['query']);
+            $recordStmt->bind_param('i', $linkedRecord['id']);
+            $recordStmt->execute();
+            $recordExists = $recordStmt->get_result()->num_rows > 0;
+            $recordStmt->close();
+            if ($recordExists) {
+                $conn->rollback();
+                $conn->close();
+                sendResponse(
+                    false,
+                    'This submission has linked vehicle or payment records but its customer is missing. Manual reconciliation is required before approval can resume.',
+                    [],
+                    [],
+                    409
+                );
+            }
+        }
+
+        $clearLinkStmt = $conn->prepare(
+            'UPDATE customer_payment_verification_submissions
+             SET linked_customer_id = NULL, linked_vehicle_id = NULL,
+                 linked_payment_id = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?'
+        );
+        $clearLinkStmt->bind_param('i', $verificationSubmissionId);
+        if (!$clearLinkStmt->execute()) {
+            $clearLinkStmt->close();
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Unable to repair stale approval progress for this submission.', [], [], 500);
+        }
+        $clearLinkStmt->close();
+    }
+}
 $stmt = $conn->prepare(
     "SELECT id
      FROM platforms
@@ -333,20 +456,23 @@ $stmt = $conn->prepare(
         email,
         location,
         pincode,
-        status
+        status,
+        verification_submission_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'Active')"
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0))"
 );
 
 $stmt->bind_param(
-    'issssss',
+    'isssssssi',
     $platformId,
     $username,
     $primaryMobile,
     $secondaryValue,
     $emailValue,
     $location,
-    $pincode
+    $pincode,
+    $status,
+    $verificationSubmissionId
 );
 
 if (!$stmt->execute()) {
@@ -369,6 +495,20 @@ if (!$stmt->execute()) {
 $customerId = $conn->insert_id;
 
 $stmt->close();
+$linkStmt = $conn->prepare(
+    'UPDATE customer_payment_verification_submissions
+     SET linked_customer_id = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?'
+);
+if (!$linkStmt) {
+    throw new RuntimeException('Failed to link the customer to its submission.');
+}
+$linkStmt->bind_param('ii', $customerId, $verificationSubmissionId);
+if ($verificationSubmissionId > 0 && !$linkStmt->execute()) {
+    $linkStmt->close();
+    throw new RuntimeException('Failed to save the customer submission link.');
+}
+$linkStmt->close();
 $createdCustomer = [
     'platform_id' => $platformId,
     'username' => $username,
@@ -377,7 +517,7 @@ $createdCustomer = [
     'email' => $emailValue,
     'location' => $location,
     'pincode' => $pincode,
-    'status' => 'Active'
+    'status' => $status
 ];
 try {
     writeCreatedFields($conn, $customerId, 'Customer', $createdCustomer, $currentUser);

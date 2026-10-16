@@ -16,6 +16,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { saveCustomerDraft } from '../../utils/customerSubmission';
 
 
 const initialForm = {
@@ -636,7 +637,7 @@ const CustomerVehicleDetailsPage = () => {
 
         const requestedAddNewVehicle =
             !routeLooksLikeEdit &&
-            (Boolean(stored.append_vehicle) || new URLSearchParams(location.search).get('mode') === 'add');
+            ((Boolean(stored.append_vehicle) && !stored.step2) || new URLSearchParams(location.search).get('mode') === 'add');
 
         if (requestedAddNewVehicle) {
             setAppendVehicle(true);
@@ -651,7 +652,14 @@ const CustomerVehicleDetailsPage = () => {
             return;
         }
 
-        setAppendVehicle(false);
+        setAppendVehicle(Boolean(stored.append_vehicle));
+
+        if (Number(customerId) < 0) {
+            setVehicleRecordId(null);
+            setLoadedVehicleFromApi(false);
+            setForm(stored.step2 ? mapVehicleToForm(stored.step2, masterData.simValidities) : { ...initialForm });
+            return;
+        }
 
 
         /*
@@ -1626,40 +1634,18 @@ const CustomerVehicleDetailsPage = () => {
                 getStoredCustomerData();
 
 
-            sessionStorage.setItem(
-                storageKey,
-                JSON.stringify({
-
-                    ...existing,
-
-                    customer_id:
-                        Number(customerId),
-
-                    append_vehicle: false,
-
-                    vehicle_record_id:
-                        savedRecordId ||
-                        vehicleRecordId ||
-                        existing.vehicle_record_id ||
-                        null,
-
-                    existing_vehicle_imei:
-                        existingVehicleImei ||
-                        form.imei_no,
-
-                    existing_vehicle_sim_1:
-                        existingVehicleSim1 ||
-                        form.sim_no_1,
-
-                    existing_vehicle_sim_2:
-                        existingVehicleSim2 ||
-                        form.sim_no_2,
-
-                    step2:
-                        payload
-
-                })
-            );
+            const nextSession = {
+                ...existing,
+                customer_id: Number(customerId),
+                append_vehicle: Boolean(appendVehicle),
+                vehicle_record_id: savedRecordId || vehicleRecordId || existing.vehicle_record_id || null,
+                existing_vehicle_imei: existingVehicleImei || form.imei_no,
+                existing_vehicle_sim_1: existingVehicleSim1 || form.sim_no_1,
+                existing_vehicle_sim_2: existingVehicleSim2 || form.sim_no_2,
+                step2: payload
+            };
+            sessionStorage.setItem(storageKey, JSON.stringify(nextSession));
+            return nextSession;
 
         } catch (err) {
 
@@ -1668,6 +1654,7 @@ const CustomerVehicleDetailsPage = () => {
                 err
             );
 
+            throw err;
         }
 
     };
@@ -1767,6 +1754,7 @@ const CustomerVehicleDetailsPage = () => {
 
             setSaving(true);
 
+            const existing = getStoredCustomerData();
 
             const payload = {
 
@@ -1808,6 +1796,8 @@ const CustomerVehicleDetailsPage = () => {
 
 
             let response;
+            let savedRecordId = Number(existing.vehicle_record_id || 0);
+            const needsDraft = Boolean(existing.draft_id) || Number(customerId) < 0 || appendVehicle || isEditMode;
 
 
             /*
@@ -1816,9 +1806,7 @@ const CustomerVehicleDetailsPage = () => {
             |--------------------------------------------------------------------------
             */
 
-            if (
-                vehicleRecordId
-            ) {
+            if (!needsDraft && vehicleRecordId) {
 
                 response =
                     await api.put(
@@ -1841,7 +1829,7 @@ const CustomerVehicleDetailsPage = () => {
             |--------------------------------------------------------------------------
             */
 
-            else {
+            else if (!needsDraft) {
 
                 response =
                     await api.post(
@@ -1852,9 +1840,7 @@ const CustomerVehicleDetailsPage = () => {
             }
 
 
-            if (
-                !response.data?.success
-            ) {
+            if (!needsDraft && !response.data?.success) {
 
                 throw new Error(
                     response.data?.message ||
@@ -1870,14 +1856,15 @@ const CustomerVehicleDetailsPage = () => {
             |--------------------------------------------------------------------------
             */
 
-            const savedRecordId =
-                Number(
+            if (!needsDraft) {
+                savedRecordId = Number(
                     vehicleRecordId ||
                     response.data?.data?.id ||
                     response.data?.data?.vehicle_id ||
                     response.data?.data?.vehicle_record_id ||
                     0
                 );
+            }
 
 
             if (
@@ -1914,10 +1901,25 @@ const CustomerVehicleDetailsPage = () => {
             |--------------------------------------------------------------------------
             */
 
-            saveStep2ToSession(
+            const updatedSession = saveStep2ToSession(
                 payload,
                 savedRecordId || null
             );
+            if (needsDraft) {
+                const existingCustomerId = Number(existing.existing_customer_id || customerId) > 0
+                    ? Number(existing.existing_customer_id || customerId)
+                    : 0;
+                const draftId = await saveCustomerDraft(
+                    existing.draft_id,
+                    existingCustomerId,
+                    updatedSession
+                );
+                sessionStorage.setItem(storageKey, JSON.stringify({
+                    ...updatedSession,
+                    draft_id: draftId,
+                    existing_customer_id: existingCustomerId || null
+                }));
+            }
 
 
             setSuccess(

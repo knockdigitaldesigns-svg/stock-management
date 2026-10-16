@@ -55,6 +55,7 @@ $simNo2 = trim((string) ($data->sim_no_2 ?? ''));
 $validityId = isset($data->validity_id) ? (int) $data->validity_id : 0;
 $validityMonthsParam = isset($data->validity_months) ? (int) $data->validity_months : 0;
 $appendVehicle = filter_var($data->append_vehicle ?? false, FILTER_VALIDATE_BOOLEAN);
+$verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
 
 /*
 |--------------------------------------------------------------------------
@@ -130,6 +131,59 @@ if (!$conn) {
 $conn->begin_transaction();
 
 try {
+    if ($verificationSubmissionId > 0) {
+        $draftStmt = $conn->prepare(
+            'SELECT submitter_user_id, reviewer_user_id, status
+             FROM customer_payment_verification_submissions
+             WHERE id = ? FOR UPDATE'
+        );
+        $draftStmt->bind_param('i', $verificationSubmissionId);
+        $draftStmt->execute();
+        $draft = $draftStmt->get_result()->fetch_assoc();
+        $draftStmt->close();
+        $currentUserId = (int) ($currentUser['user_id'] ?? 0);
+        $isOwnerDraft = $draft && (int) $draft['submitter_user_id'] === $currentUserId && $draft['status'] === 'Draft';
+        $isApplyingDraft = $draft && (int) ($draft['reviewer_user_id'] ?? 0) === $currentUserId && $draft['status'] === 'Applying';
+        if (!$draft || (!$isOwnerDraft && !$isApplyingDraft)) {
+            throw new RuntimeException('This customer draft is not available for commit.');
+        }
+        $existingSubmissionVehicleStmt = $conn->prepare(
+            'SELECT id FROM customer_vehicle_details
+             WHERE verification_submission_id = ? AND customer_id = ?
+               AND UPPER(TRIM(vehicle_no)) = UPPER(TRIM(?))
+             LIMIT 1 FOR UPDATE'
+        );
+        if (!$existingSubmissionVehicleStmt) {
+            throw new RuntimeException('Unable to check a previously committed submission vehicle.');
+        }
+        $existingSubmissionVehicleStmt->bind_param('iis', $verificationSubmissionId, $customerId, $vehicleNo);
+        $existingSubmissionVehicleStmt->execute();
+        $existingSubmissionVehicle = $existingSubmissionVehicleStmt->get_result()->fetch_assoc();
+        $existingSubmissionVehicleStmt->close();
+        if ($existingSubmissionVehicle) {
+            $vehicleDetailsId = (int) $existingSubmissionVehicle['id'];
+            $linkStmt = $conn->prepare(
+                'UPDATE customer_payment_verification_submissions
+                 SET linked_vehicle_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            );
+            if (!$linkStmt) {
+                throw new RuntimeException('Unable to refresh the linked verification vehicle.');
+            }
+            $linkStmt->bind_param('ii', $vehicleDetailsId, $verificationSubmissionId);
+            if (!$linkStmt->execute()) {
+                $linkStmt->close();
+                throw new RuntimeException('Unable to refresh the linked verification vehicle.');
+            }
+            $linkStmt->close();
+            $conn->commit();
+            $conn->close();
+            sendResponse(true, 'Vehicle already created for this submission.', [
+                'id' => $vehicleDetailsId,
+                'customer_id' => $customerId
+            ]);
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
     | CUSTOMER CHECK
@@ -650,15 +704,16 @@ try {
                 sim_no_1,
                 sim_id_2,
                 sim_no_2,
-                validity_months
+                validity_months,
+                verification_submission_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0))'
         );
         if (!$stmt) {
             throw new Exception('Failed to prepare customer vehicle insert.');
         }
         $stmt->bind_param(
-            'isiiisisssi',
+            'isiiisisssii',
             $customerId,
             $vehicleNo,
             $vehicleTypeId,
@@ -669,7 +724,8 @@ try {
             $simNo1,
             $simId2,
             $cleanSimNo2,
-            $validityMonths
+            $validityMonths,
+            $verificationSubmissionId
         );
         if (!$stmt->execute()) {
             $stmt->close();
@@ -677,6 +733,22 @@ try {
         }
         $vehicleDetailsId = (int) $conn->insert_id;
         $stmt->close();
+        if ($verificationSubmissionId > 0) {
+            $linkStmt = $conn->prepare(
+                'UPDATE customer_payment_verification_submissions
+                 SET linked_vehicle_id = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            );
+            if (!$linkStmt) {
+                throw new RuntimeException('Failed to link the vehicle to its submission.');
+            }
+            $linkStmt->bind_param('ii', $vehicleDetailsId, $verificationSubmissionId);
+            if (!$linkStmt->execute()) {
+                $linkStmt->close();
+                throw new RuntimeException('Failed to save the vehicle submission link.');
+            }
+            $linkStmt->close();
+        }
         writeCreatedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', [
             'customer_id' => $customerId, 'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId,
             'device_id' => $deviceId, 'device_model_id' => $deviceModelId, 'imei_no' => $imeiNo,

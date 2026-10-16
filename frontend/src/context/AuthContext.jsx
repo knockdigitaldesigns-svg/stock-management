@@ -2,10 +2,30 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import api from '../services/api';
 
 const AuthContext = createContext(null);
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const ACTIVITY_STORAGE_THROTTLE_MS = 250;
+const EXPIRY_RECHECK_GRACE_MS = 250;
 const ACTIVITY_STORAGE_KEY = 'authLastMeaningfulActivity';
 const SESSION_END_STORAGE_KEY = 'authSessionEnded';
-const INACTIVITY_MESSAGE = 'You have been logged out due to 30 minutes of inactivity. Please log in again.';
+const INACTIVITY_MESSAGE = 'You have been logged out due to 15 minutes of inactivity. Please log in again.';
+
+const getSessionIdentity = (token) => {
+    if (!token) return null;
+    try {
+        const encodedPayload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const binaryPayload = atob(encodedPayload);
+        const bytes = Uint8Array.from(binaryPayload, (character) => character.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder().decode(bytes));
+        return { userId: payload.user_id, sessionId: payload.sid };
+    } catch {
+        return null;
+    }
+};
+
+const getLatestSharedActivity = (fallback = 0) => {
+    const sharedActivity = Number(localStorage.getItem(ACTIVITY_STORAGE_KEY));
+    return Number.isFinite(sharedActivity) ? Math.max(fallback, sharedActivity) : fallback;
+};
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(() => {
@@ -63,7 +83,8 @@ export const AuthProvider = ({ children }) => {
             if (token) {
                 await api.post('/auth/logout.php', {}, {
                     headers: { Authorization: `Bearer ${token}` },
-                    skipGlobalError: true
+                    skipGlobalError: true,
+                    skipAuthLogout: true
                 });
             }
         } catch (error) {
@@ -71,6 +92,12 @@ export const AuthProvider = ({ children }) => {
                 console.error('Failed to invalidate the server session during logout.', error);
             }
         }
+        if (token && localStorage.getItem('token') !== token) return;
+        localStorage.setItem(SESSION_END_STORAGE_KEY, JSON.stringify({
+            at: Date.now(),
+            reason: 'logout',
+            ...(getSessionIdentity(token) || {})
+        }));
         setUser(null);
         setPermissions([]);
         localStorage.removeItem('token');
@@ -84,17 +111,70 @@ export const AuthProvider = ({ children }) => {
 
         let timeoutId;
         let isEndingSession = false;
-        lastActivityRef.current = Number(localStorage.getItem(ACTIVITY_STORAGE_KEY)) || Date.now();
+        const storedActivity = Number(localStorage.getItem(ACTIVITY_STORAGE_KEY));
+        lastActivityRef.current = Number.isFinite(storedActivity) && storedActivity > 0
+            ? storedActivity
+            : Date.now();
         lastActivityWriteRef.current = 0;
         lastActivitySyncRef.current = 0;
 
-        const endForInactivity = () => {
+        const endForInactivity = async () => {
             if (isEndingSession) return;
+            lastActivityRef.current = getLatestSharedActivity(lastActivityRef.current);
+            if (Date.now() - lastActivityRef.current < INACTIVITY_TIMEOUT_MS) {
+                scheduleExpiry();
+                return;
+            }
+
             isEndingSession = true;
-            sessionStorage.setItem('authLogoutMessage', INACTIVITY_MESSAGE);
+            const token = localStorage.getItem('token');
+            let endStatus = 'ended';
+            let tokenInvalid = false;
+            if (token) {
+                try {
+                    const response = await api.post('/auth/logout.php', { reason: 'inactivity' }, {
+                        skipGlobalError: true,
+                        skipAuthLogout: true
+                    });
+                    const result = response.data?.data;
+                    endStatus = result?.status || 'ended';
+                    if (endStatus === 'active') {
+                        const serverActivity = Number(result.last_activity_at) * 1000;
+                        if (Number.isFinite(serverActivity) && serverActivity > lastActivityRef.current) {
+                            lastActivityRef.current = serverActivity;
+                            localStorage.setItem(ACTIVITY_STORAGE_KEY, String(serverActivity));
+                        }
+                    }
+                } catch (error) {
+                    tokenInvalid = error.response?.status === 401;
+                    if (!tokenInvalid) {
+                        console.error('Unable to confirm inactivity with the server.', error);
+                    }
+                }
+            }
+
+            const activityAfterRequest = getLatestSharedActivity(lastActivityRef.current);
+            if (!tokenInvalid && (Date.now() - activityAfterRequest < INACTIVITY_TIMEOUT_MS || endStatus === 'active')) {
+                lastActivityRef.current = activityAfterRequest;
+                isEndingSession = false;
+                scheduleExpiry();
+                return;
+            }
+
+            if (token && localStorage.getItem('token') !== token) {
+                isEndingSession = false;
+                return;
+            }
+            const identity = getSessionIdentity(token);
+            const message = endStatus === 'replaced'
+                ? 'Your session is no longer valid. Please log in again.'
+                : INACTIVITY_MESSAGE;
+            sessionStorage.setItem('authLogoutMessage', message);
             localStorage.setItem(SESSION_END_STORAGE_KEY, JSON.stringify({
                 at: Date.now(),
-                message: INACTIVITY_MESSAGE
+                reason: 'inactivity',
+                message,
+                ...(identity || {})
             }));
             localStorage.removeItem('token');
             localStorage.removeItem('user');
@@ -109,30 +189,26 @@ export const AuthProvider = ({ children }) => {
 
         const scheduleExpiry = () => {
             window.clearTimeout(timeoutId);
-            const sharedLastActivity = Number(localStorage.getItem(ACTIVITY_STORAGE_KEY));
-            if (Number.isFinite(sharedLastActivity) && sharedLastActivity > lastActivityRef.current) {
-                lastActivityRef.current = sharedLastActivity;
-            }
+            lastActivityRef.current = getLatestSharedActivity(lastActivityRef.current);
             const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityRef.current);
             if (remaining <= 0) {
-                endForInactivity();
+                timeoutId = window.setTimeout(endForInactivity, EXPIRY_RECHECK_GRACE_MS);
                 return;
             }
             timeoutId = window.setTimeout(scheduleExpiry, remaining);
         };
 
         const recordMeaningfulActivity = () => {
-            if (isEndingSession) return;
             const now = Date.now();
             lastActivityRef.current = now;
-            if (now - lastActivityWriteRef.current >= 1000) {
+            if (now - lastActivityWriteRef.current >= ACTIVITY_STORAGE_THROTTLE_MS) {
                 localStorage.setItem(ACTIVITY_STORAGE_KEY, String(now));
                 lastActivityWriteRef.current = now;
             }
             scheduleExpiry();
             if (now - lastActivitySyncRef.current >= 60_000) {
                 lastActivitySyncRef.current = now;
-                api.post('/auth/activity.php', {}, { skipGlobalError: true }).catch((error) => {
+                api.post('/auth/activity.php', {}, { skipGlobalError: true, skipAuthLogout: true }).catch((error) => {
                     if (error.response?.status !== 401) {
                         console.error('Unable to record authenticated user activity.', error);
                     }
@@ -155,6 +231,15 @@ export const AuthProvider = ({ children }) => {
                 } catch (error) {
                     console.error('Unable to read cross-tab session end event.', error);
                 }
+                const identity = getSessionIdentity(localStorage.getItem('token'));
+                if (endEvent.sessionId && (
+                    endEvent.sessionId !== identity?.sessionId
+                    || String(endEvent.userId) !== String(identity?.userId)
+                )) return;
+                if (endEvent.reason === 'inactivity'
+                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < INACTIVITY_TIMEOUT_MS) {
+                    return;
+                }
                 if (endEvent.message) {
                     sessionStorage.setItem('authLogoutMessage', endEvent.message);
                 }
@@ -169,6 +254,21 @@ export const AuthProvider = ({ children }) => {
                 }
             }
             if (event.key === 'token' && !event.newValue && window.location.pathname !== '/login') {
+                let endEvent = {};
+                try {
+                    endEvent = JSON.parse(localStorage.getItem(SESSION_END_STORAGE_KEY) || '{}');
+                } catch (error) {
+                    console.error('Unable to read cross-tab session end event.', error);
+                }
+                const oldIdentity = getSessionIdentity(event.oldValue);
+                const matchesEndEvent = endEvent.sessionId === oldIdentity?.sessionId
+                    && String(endEvent.userId) === String(oldIdentity?.userId);
+                if (matchesEndEvent && endEvent.reason === 'inactivity'
+                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < INACTIVITY_TIMEOUT_MS) {
+                    localStorage.setItem('token', event.oldValue);
+                    return;
+                }
+                if (matchesEndEvent) return;
                 setUser(null);
                 setPermissions([]);
                 window.location.assign('/login');
@@ -180,6 +280,10 @@ export const AuthProvider = ({ children }) => {
             window.addEventListener(eventName, recordMeaningfulActivity, { passive: true });
         });
         window.addEventListener('storage', onStorage);
+        const refreshExpiry = () => scheduleExpiry();
+        window.addEventListener('focus', refreshExpiry);
+        window.addEventListener('pageshow', refreshExpiry);
+        document.addEventListener('visibilitychange', refreshExpiry);
         scheduleExpiry();
 
         return () => {
@@ -188,6 +292,9 @@ export const AuthProvider = ({ children }) => {
                 window.removeEventListener(eventName, recordMeaningfulActivity);
             });
             window.removeEventListener('storage', onStorage);
+            window.removeEventListener('focus', refreshExpiry);
+            window.removeEventListener('pageshow', refreshExpiry);
+            document.removeEventListener('visibilitychange', refreshExpiry);
         };
     }, [user]);
 

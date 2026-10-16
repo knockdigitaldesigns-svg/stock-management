@@ -320,8 +320,8 @@ $tables = [
         customer_id INT NOT NULL,
         payment_id INT NOT NULL,
         installation_id INT NOT NULL,
-        recipient_type ENUM('Technician', 'Dealer') NOT NULL,
-        recipient_id INT NOT NULL,
+        recipient_type ENUM('Technician', 'Dealer', 'ET') NOT NULL,
+        recipient_id INT DEFAULT NULL,
         amount_collected DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         amount_remitted DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         pending_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -710,7 +710,7 @@ if ($defaultValidity && ($defaultRow = $defaultValidity->fetch_assoc())) {
     $defaultValidityId = (int) $defaultRow['id'];
     $conn->query("UPDATE sims SET sim_type = 'Voice', sim_validity_id = $defaultValidityId WHERE sim_type IS NULL OR sim_validity_id IS NULL");
 }
-$conn->query("INSERT IGNORE INTO sim_validities (months, status) VALUES (5, 'active'), (12, 'active'), (24, 'active'), (36, 'active')");
+$conn->query("INSERT IGNORE INTO sim_validities (months, status) VALUES (3, 'active'), (5, 'active'), (6, 'active'), (12, 'active'), (24, 'active'), (36, 'active')");
 $defaultValidity = $conn->query("SELECT id FROM sim_validities WHERE months = 12 LIMIT 1");
 if ($defaultValidity && ($defaultRow = $defaultValidity->fetch_assoc())) {
     $conn->query("UPDATE sims SET sim_type = 'Voice', sim_validity_id = " . (int) $defaultRow['id'] . " WHERE sim_type IS NULL OR sim_validity_id IS NULL");
@@ -771,6 +771,7 @@ $permissionDefinitions = [
     ['stock_transfer.edit', 'Stock Transfer Edit', 'stock_transfer', 'EDIT'],
     ['stock_transfer.delete', 'Stock Transfer Delete', 'stock_transfer', 'DELETE'],
     ['customers.view', 'Customer Details View', 'customers', 'VIEW'],
+    ['customer_payment_verification.review', 'Customer Payment Verification Review', 'customer_payment_verification', 'REVIEW'],
     ['customers.add', 'Customer Details Add', 'customers', 'ADD'],
     ['customers.edit', 'Customer Details Edit', 'customers', 'EDIT'],
     ['customers.delete', 'Customer Details Delete', 'customers', 'DELETE'],

@@ -15,6 +15,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import Modal from '../../components/Modal/Modal';
+import { saveCustomerDraft } from '../../utils/customerSubmission';
 
 const initialForm = {
     platform_id: '',
@@ -32,7 +33,7 @@ const CustomerCreatePage = () => {
 
     const { hasPermission } = useAuth();
 
-    const isEditMode = Boolean(customerId);
+    const isEditMode = Number(customerId) > 0;
 
     const [form, setForm] = useState(initialForm);
 
@@ -187,6 +188,15 @@ const CustomerCreatePage = () => {
 const loadCustomer = async () => {
     if (!customerId) {
         setForm(initialForm);
+        return;
+    }
+    if (Number(customerId) < 0) {
+        restoreSessionData();
+        return;
+    }
+    const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+    if (stored.draft_id && stored.step1) {
+        setForm({ ...initialForm, ...stored.step1 });
         return;
     }
     // Fetch fresh data from the backend API.
@@ -356,7 +366,7 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false, customData = null) => {
+    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false, customData = null, draftId = 0, existingCustomerId = 0) => {
         try {
             const existing = JSON.parse(
                 sessionStorage.getItem(
@@ -368,7 +378,10 @@ const loadCustomer = async () => {
                 ...existing,
                 customer_id: Number(id),
                 append_vehicle: appendVehicle,
-                new_vehicle_flow: newVehicleFlow
+                new_vehicle_flow: newVehicleFlow,
+                draft_id: Number(draftId || existing.draft_id || 0),
+                existing_customer_id: Number(existingCustomerId || existing.existing_customer_id || 0) || null,
+                customer_changed: Boolean(existing.customer_changed || (isEditMode && Number(existingCustomerId || id) > 0))
             };
 
             if (appendVehicle) {
@@ -484,89 +497,21 @@ const loadCustomer = async () => {
                     form.pincode.trim()
             };
 
-            let response;
-            let appendVehicle = false;
-
-            /*
-            |--------------------------------------------------------------------------
-            | EDIT
-            |--------------------------------------------------------------------------
-            */
-
-            if (isEditMode) {
-                response = await api.put(
-                    '/customers/update.php',
-                    {
-                        id: Number(customerId),
-                        ...payload
-                    }
-                );
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | CREATE
-            |--------------------------------------------------------------------------
-            */
-
-            else {
-                try {
-                    response = await api.post(
-                        '/customers/create.php',
-                        payload,
-                        { skipGlobalError: true }
-                    );
-                } catch (err) {
-                    const resData = err.response?.data;
-                    const code = resData?.data?.code || resData?.code;
-
-                    if (code === 'EXISTING_CUSTOMER_SAME_MOBILE') {
-                        const existingId = resData?.data?.customer_id || resData?.data?.customer?.id;
-                        setDuplicateCustomerModal({
-                            customerId: existingId,
-                            customer: resData?.data?.customer,
-                            message: resData?.message
-                        });
-                        setSaving(false);
-                        return;
-                    }
-
-                    if (code === 'USERNAME_EXISTS_DIFFERENT_MOBILE') {
-                        triggerError('Username already exists with a different mobile number.');
-                        setSaving(false);
-                        return;
-                    }
-
-                    throw err;
-                }
-            }
-
-            if (!response.data?.success) {
-                throw new Error(
-                    response.data?.message ||
-                    'Failed to save customer details.'
-                );
-            }
-
-            const savedId = Number(
-                customerId ||
-                response.data?.data?.customer_id ||
-                response.data?.data?.id
+            const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+            const draftId = await saveCustomerDraft(
+                stored.draft_id,
+                isEditMode ? Number(customerId) : 0,
+                { ...stored, step1: payload }
             );
-
-            if (!savedId) {
-                throw new Error(
-                    'Customer ID was not returned by the server.'
-                );
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | PRESERVE STEP 1
-            |--------------------------------------------------------------------------
-            */
-
-            saveStep1Session(savedId, true, appendVehicle);
+            const savedId = isEditMode ? Number(customerId) : -draftId;
+            saveStep1Session(
+                savedId,
+                true,
+                false,
+                payload,
+                draftId,
+                isEditMode ? Number(customerId) : 0
+            );
 
             setSuccess(
                 isEditMode
@@ -591,6 +536,22 @@ const loadCustomer = async () => {
                 err
             );
 
+            const responseData = err.response?.data;
+            const code = responseData?.data?.code || responseData?.code;
+            if (code === 'EXISTING_CUSTOMER_SAME_MOBILE') {
+                const duplicateData = responseData?.data || responseData;
+                setDuplicateCustomerModal({
+                    customerId: duplicateData.customer_id || duplicateData.customer?.id,
+                    customer: duplicateData.customer,
+                    message: responseData?.message
+                });
+                return;
+            }
+            if (code === 'USERNAME_EXISTS_DIFFERENT_MOBILE') {
+                triggerError('Username already exists with a different mobile number.');
+                return;
+            }
+
             triggerError(
                 err.response?.data?.message ||
                 err.message ||
@@ -601,7 +562,7 @@ const loadCustomer = async () => {
         }
     };
 
-    const handleDuplicateYes = () => {
+    const handleDuplicateYes = async () => {
         if (!duplicateCustomerModal?.customerId) return;
         const existingId = Number(duplicateCustomerModal.customerId);
         const existingCustomerData = duplicateCustomerModal.customer || {};
@@ -617,7 +578,18 @@ const loadCustomer = async () => {
         };
 
         setDuplicateCustomerModal(null);
-        saveStep1Session(existingId, true, true, step1Data);
+        try {
+            const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+            const draftId = await saveCustomerDraft(
+                stored.draft_id,
+                existingId,
+                { ...stored, step1: step1Data, append_vehicle: true }
+            );
+            saveStep1Session(existingId, true, true, step1Data, draftId, existingId);
+        } catch (err) {
+            triggerError(err.response?.data?.message || err.message || 'Failed to save customer draft.');
+            return;
+        }
 
         setSuccess('Existing customer selected. Continuing to add vehicle...');
 

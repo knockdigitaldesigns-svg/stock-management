@@ -4,6 +4,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/customer_payment_verification.php';
 
 handlePreflight();
 
@@ -14,12 +15,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'PUT' &&
 }
 
 $currentUser = authenticate();
-requirePermission('customers.edit');
 
 $data = json_decode(file_get_contents('php://input'));
 
 if (!$data) {
     sendResponse(false, 'Invalid request data.', [], [], 400);
+}
+$verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
+if ($verificationSubmissionId > 0) {
+    requireAnyPermission(['customers.edit', CUSTOMER_PAYMENT_VERIFICATION_PERMISSION]);
+} else {
+    requirePermission('customers.edit');
 }
 
 
@@ -405,6 +411,9 @@ $newCustomer = [
 
 $conn->begin_transaction();
 try {
+    if ($verificationSubmissionId > 0) {
+        assertCustomerVerificationCommitAccess($conn, $verificationSubmissionId, (int) ($currentUser['user_id'] ?? 0));
+    }
     writeChangedFields($conn, $customerId, 'Customer', $oldCustomer, $newCustomer, $currentUser);
 
 $stmt = $conn->prepare(
