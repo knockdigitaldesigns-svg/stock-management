@@ -1,12 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
+import { formatDate } from '../../../utils/date';
 import { showGlobalError } from '../../../context/ErrorContext';
+import { useAuth } from '../../../context/AuthContext';
 
-const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
-    const getStatusLabel = (item) => item?.status_label || item?.sim_status || (item?.status === 'used' ? 'Used for Customer' : item?.status || 'Allocated');
+const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
+    const { user } = useAuth();
+    const roleName = String(user?.role?.name ?? user?.role ?? '').trim().toLowerCase().replace(/[\s_-]/g, '');
+    const isSuperAdmin = roleName === 'superadmin';
+    const getStatusLabel = (item) => {
+        if (item?.is_used_for_customer || item?.is_used_for_et || item?.usage_type) {
+            return item?.status_label || `Used for ${String(item.usage_type || 'Customer').replace(/^./, (letter) => letter.toUpperCase())}`;
+        }
+        return item?.sim_status || item?.status || item?.status_label || 'Allocated';
+    };
     
     const initialSoftware = Array.isArray(dealer?.software_list) && dealer.software_list.length > 0
         ? dealer.software_list
@@ -29,6 +40,9 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
     const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const [stockSuccess, setStockSuccess] = useState('');
 
     const triggerError = (msg) => {
         setError(msg);
@@ -55,21 +69,47 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
         });
     };
 
+    const fetchAllocatedStock = useCallback(async () => {
+        const response = await api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer?.id}`);
+        if (!response.data.success) {
+            throw new Error(response.data.message || 'Unable to load allocated stock.');
+        }
+        setAllocatedStock(response.data.data || { devices: [], sims: [] });
+        if (response.data.data?.summary) {
+            setStockSummary(response.data.data.summary);
+        }
+    }, [dealer?.id]);
+
     useEffect(() => {
         let active = true;
-        api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer?.id}`)
-            .then((response) => {
-                if (active && response.data.success) {
-                    setAllocatedStock(response.data.data || { devices: [], sims: [] });
-                    if (response.data.data?.summary) {
-                        setStockSummary(response.data.data.summary);
-                    }
-                }
-            })
+        fetchAllocatedStock()
             .catch(() => { if (active) triggerError('Unable to load allocated stock.'); })
             .finally(() => { if (active) setStockLoading(false); });
         return () => { active = false; };
-    }, [dealer?.id]);
+    }, [fetchAllocatedStock]);
+
+    const deleteDealerAllocation = async () => {
+        if (!isSuperAdmin || !deleteTarget || !dealer?.id) return;
+        setDeleting(true);
+        setStockSuccess('');
+        try {
+            const response = await api.post('/stock/delete.php', {
+                allocation_id: Number(deleteTarget.allocation_id),
+                dealer_id: Number(dealer.id)
+            });
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Unable to delete dealer allocation.');
+            }
+            setDeleteTarget(null);
+            setStockSuccess(response.data.message || 'Dealer allocation deleted successfully.');
+            await fetchAllocatedStock();
+            onStockUpdated?.();
+        } catch (deleteError) {
+            triggerError(deleteError.response?.data?.message || deleteError.message || 'Unable to delete dealer allocation.');
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -116,20 +156,21 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
     };
 
     return (
-        <Modal
-            isOpen={Boolean(dealer)}
-            onClose={onClose}
-            title="Edit Dealer"
-            maxWidth="560px"
-            footer={
-                <>
-                    <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
-                    <button type="submit" form="edit-dealer-form" className="btn btn-primary" disabled={loading}>
-                        {loading ? 'Saving...' : 'Save Changes'}
-                    </button>
-                </>
-            }
-        >
+        <>
+            <Modal
+                isOpen={Boolean(dealer)}
+                onClose={onClose}
+                title="Edit Dealer"
+                maxWidth="560px"
+                footer={
+                    <>
+                        <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
+                        <button type="submit" form="edit-dealer-form" className="btn btn-primary" disabled={loading}>
+                            {loading ? 'Saving...' : 'Save Changes'}
+                        </button>
+                    </>
+                }
+            >
             <form id="edit-dealer-form" onSubmit={handleSubmit}>
                 {error && <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>{error}</div>}
 
@@ -237,11 +278,69 @@ const EditDealerModal = ({ dealer, onClose, onSuccess }) => {
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={dealer?.total_amount > 0 ? dealer?.payment_status : 'No Payment Required'} readOnly /></div>
                 <hr />
                 <h4>Allocated Devices (Total: {stockSummary.total_device || 0}, Used: {stockSummary.used_device || 0}, Available: {stockSummary.available_device || 0})</h4>
-                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : <div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Software</th><th>Device Status</th></tr></thead><tbody>{allocatedStock.devices.map((item) => <tr key={item.allocation_id || item.id}><td>{item.model_name}</td><td>{item.imei_no}</td><td>{item.software || '-'}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
+                {stockSuccess && <div className="alert alert-success" role="status">{stockSuccess}</div>}
+                {stockLoading ? <p>Loading allocated devices...</p> : allocatedStock.devices.length === 0 ? <p>No devices currently allocated.</p> : (
+                    <div className="table-container">
+                        <table>
+                            <thead><tr><th>Device Model</th><th>IMEI No</th><th>Allocation Date</th><th>Software</th><th>Device Status</th>{isSuperAdmin && <th>Actions</th>}</tr></thead>
+                            <tbody>{allocatedStock.devices.map((item) => (
+                                <tr key={item.allocation_id || item.id}>
+                                    <td>{item.model_name}</td>
+                                    <td>{item.imei_no}</td>
+                                    <td>{formatDate(item.allocation_date)}</td>
+                                    <td>{item.software || '-'}</td>
+                                    <td>{getStatusLabel(item)}</td>
+                                    {isSuperAdmin && <td><button type="button" className="icon-btn delete" title="Delete device allocation" aria-label={`Delete device ${item.imei_no} allocation`} onClick={() => setDeleteTarget({ ...item, asset_type: 'device' })}><Trash2 size={16} /></button></td>}
+                                </tr>
+                            ))}</tbody>
+                        </table>
+                    </div>
+                )}
                 <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
-                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>SIM Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id || item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
+                {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : (
+                    <div className="table-container">
+                        <table>
+                            <thead><tr><th>SIM No</th><th>SIM Type</th><th>Allocation Date</th><th>SIM Status</th>{isSuperAdmin && <th>Actions</th>}</tr></thead>
+                            <tbody>{allocatedStock.sims.map((item) => (
+                                <tr key={item.allocation_id || item.id}>
+                                    <td>{item.sim_no}</td>
+                                    <td>{item.sim_type || '-'}</td>
+                                    <td>{formatDate(item.allocation_date)}</td>
+                                    <td>{getStatusLabel(item)}</td>
+                                    {isSuperAdmin && <td><button type="button" className="icon-btn delete" title="Delete SIM allocation" aria-label={`Delete SIM ${item.sim_no} allocation`} onClick={() => setDeleteTarget({ ...item, asset_type: 'sim' })}><Trash2 size={16} /></button></td>}
+                                </tr>
+                            ))}</tbody>
+                        </table>
+                    </div>
+                )}
             </form>
-        </Modal>
+            </Modal>
+            {deleteTarget && (
+                <Modal
+                    isOpen
+                    onClose={() => !deleting && setDeleteTarget(null)}
+                    title={`Delete dealer ${deleteTarget.asset_type} allocation`}
+                    maxWidth="480px"
+                    footer={
+                        <>
+                            <button type="button" className="btn btn-outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</button>
+                            <button type="button" className="btn btn-danger" onClick={deleteDealerAllocation} disabled={deleting || !isSuperAdmin}>
+                                {deleting ? 'Deleting...' : 'Confirm Delete'}
+                            </button>
+                        </>
+                    }
+                >
+                    <p>Remove this {deleteTarget.asset_type} allocation from the selected dealer?</p>
+                    <div className="details-grid">
+                        <div><strong>{deleteTarget.asset_type === 'device' ? 'Device IMEI' : 'SIM number'}:</strong> {deleteTarget.asset_type === 'device' ? deleteTarget.imei_no : deleteTarget.sim_no}</div>
+                        <div><strong>Dealer:</strong> {dealer?.dealer_name}</div>
+                        <div><strong>Allocation date:</strong> {formatDate(deleteTarget.allocation_date)}</div>
+                        <div><strong>Allocation status:</strong> {getStatusLabel(deleteTarget)}</div>
+                    </div>
+                    <p>The asset master and history are retained. Allocations with usage, lifecycle, payment, transfer, installation, or courier history cannot be removed.</p>
+                </Modal>
+            )}
+        </>
     );
 };
 

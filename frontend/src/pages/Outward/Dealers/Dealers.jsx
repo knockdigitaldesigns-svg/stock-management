@@ -333,6 +333,7 @@ const Dealers = () => {
                         setEditingDealer(null);
                         fetchDealers();
                     }}
+                    onStockUpdated={fetchDealers}
                 />
             )}
 
