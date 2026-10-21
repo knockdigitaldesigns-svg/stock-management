@@ -1,0 +1,76 @@
+.renewals-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.renewals-export {
+    position: relative;
+}
+
+.renewals-export-toggle {
+    white-space: nowrap;
+}
+
+.renewals-export-menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 20;
+    min-width: 210px;
+    padding: 0.35rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    box-shadow: var(--shadow-md);
+}
+
+.renewals-export-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.65rem 0.75rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.renewals-export-menu button:hover,
+.renewals-export-menu button:focus-visible {
+    background: #eef4ff;
+    outline: none;
+}
+
+.renewals-export-menu button:disabled {
+    color: var(--text-secondary);
+    cursor: wait;
+}
+
+.renewals-export-notice {
+    margin: -0.75rem 0 1rem;
+    color: var(--success-color);
+    font-size: 0.8125rem;
+}
+
+.renewals-export-notice.is-empty {
+    color: var(--text-secondary);
+}
+
+@media (max-width: 600px) {
+    .renewals-toolbar-actions {
+        width: 100%;
+    }
+
+    .renewals-toolbar-actions > button,
+    .renewals-export,
+    .renewals-export-toggle {
+        flex: 1;
+    }
+
+    .renewals-export-toggle {
+        width: 100%;
+    }
+}

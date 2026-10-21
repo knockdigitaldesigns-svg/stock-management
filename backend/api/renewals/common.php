@@ -93,6 +93,50 @@ function renewalBind($stmt, $types, $values) {
     call_user_func_array([$stmt, 'bind_param'], $bindings);
 }
 
+function renewalListFilters($filters) {
+    $where = [];
+    $params = [];
+    $types = '';
+    $search = trim((string)($filters['search'] ?? ''));
+    if ($search !== '') {
+        $where[] = '(c.username LIKE ? OR c.primary_mobile_no LIKE ? OR cv.imei_no LIKE ? OR cv.sim_no_1 LIKE ? OR cv.sim_no_2 LIKE ? OR dt.device_type LIKE ?)';
+        $like = "%$search%";
+        array_push($params, $like, $like, $like, $like, $like, $like);
+        $types .= 'ssssss';
+    }
+    if (!empty($filters['status'])) {
+        $where[] = 'cr.sim_status = ?';
+        $params[] = $filters['status'];
+        $types .= 's';
+    }
+    if (isset($filters['validity']) && $filters['validity'] !== '') {
+        $where[] = 'cr.validity_months = ?';
+        $params[] = (int)$filters['validity'];
+        $types .= 'i';
+    }
+    if (!empty($filters['date'])) {
+        $where[] = 'ci.installation_date = ?';
+        $params[] = $filters['date'];
+        $types .= 's';
+    }
+    if (!empty($filters['date_from'])) {
+        $where[] = 'cr.next_renewal_date >= ?';
+        $params[] = $filters['date_from'];
+        $types .= 's';
+    }
+    if (!empty($filters['date_to'])) {
+        $where[] = 'cr.next_renewal_date <= ?';
+        $params[] = $filters['date_to'];
+        $types .= 's';
+    }
+
+    return [
+        'condition' => $where ? ' WHERE ' . implode(' AND ', $where) : '',
+        'params' => $params,
+        'types' => $types
+    ];
+}
+
 function renewalAddCalendarMonths(string $dateValue, int $months): string
 {
     $date = DateTimeImmutable::createFromFormat('!Y-m-d', $dateValue);
