@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Eye, History, Pencil, RotateCcw, Trash2, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Eye, History, Pencil, RotateCcw, Trash2, Search, ChevronDown } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
+import './renewalspage.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUSES = ['Active', 'Deactive', 'Expired', 'Safe Custody'];
@@ -14,6 +18,11 @@ const EMPTY_FORM = { action: '', action_date: '', reactivation_date: '', validit
 const display = (value) => value === null || value === undefined || value === '' ? '-' : value;
 const formatDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '-';
 const formatDateTime = (value) => value ? `${formatDate(value)} ${String(value).slice(11, 19)}` : '-';
+const formatExportDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '';
+const protectSpreadsheetValue = (value) => {
+    if (typeof value !== 'string') return value ?? '';
+    return /^[\t\r\n ]*[=+\-@]/.test(value) ? `'${value}` : value;
+};
 const formatValidity = (value) => `${value} ${Number(value) === 1 ? 'Month' : 'Months'}`;
 const localDateToday = () => {
     const date = new Date();
@@ -45,6 +54,7 @@ const ModalGrid = ({ children }) => (
 const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 16, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}><h4 style={{ margin: '0 0 14px', borderBottom: '1px solid #e2e8f0', paddingBottom: 9, color: '#17243b', fontSize: 14, fontWeight: 700 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : key === 'validity_months' && record?.[key] ? formatValidity(record[key]) : display(record?.[key]); const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <input className="form-control" type="date" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
 
 const RenewalsPage = () => {
+    const exportMenuRef = useRef(null);
     const [rows, setRows] = useState([]);
     const [filters, setFilters] = useState(EMPTY_FILTERS);
     const [validities, setValidities] = useState([]);
@@ -56,6 +66,9 @@ const RenewalsPage = () => {
     const [history, setHistory] = useState([]);
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [exportMenuOpen, setExportMenuOpen] = useState(false);
+    const [exportNotice, setExportNotice] = useState('');
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [closeOldRenewalPayment, setCloseOldRenewalPayment] = useState(false);
     const [oldRenewalPayment, setOldRenewalPayment] = useState({
@@ -82,6 +95,23 @@ const RenewalsPage = () => {
 
     useEffect(() => { load(1, filters); }, [filters.search, filters.date_from, filters.date_to, filters.validity, filters.status]);
 
+    useEffect(() => {
+        if (!exportMenuOpen) return undefined;
+        const closeMenu = (event) => {
+            if (event.type === 'keydown' && event.key === 'Escape') {
+                setExportMenuOpen(false);
+            } else if (event.type === 'pointerdown' && !exportMenuRef.current?.contains(event.target)) {
+                setExportMenuOpen(false);
+            }
+        };
+        document.addEventListener('pointerdown', closeMenu);
+        document.addEventListener('keydown', closeMenu);
+        return () => {
+            document.removeEventListener('pointerdown', closeMenu);
+            document.removeEventListener('keydown', closeMenu);
+        };
+    }, [exportMenuOpen]);
+
     const localYears = useMemo(() => [...new Set([...years, ...rows.flatMap((row) => [row.installation_date, row.next_renewal_date]).filter(Boolean).map((date) => Number(String(date).slice(0, 4)))])].sort((a, b) => b - a), [years, rows]);
     const pending = Math.max(0, Number(form.payment_amount || 0) - Number(form.amount_paid || 0));
     const paymentStatus = Number(form.amount_paid || 0) <= 0 ? 'Not Paid' : Number(form.amount_paid || 0) < Number(form.payment_amount || 0) ? 'Partially Paid' : 'Paid';
@@ -98,6 +128,109 @@ const RenewalsPage = () => {
     }, [form.action, form.installation_date, form.validity_months, selected?.next_renewal_date]);
 
     const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+    const exportRenewals = async (fileType) => {
+        setExportMenuOpen(false);
+        setExportNotice('');
+        setExporting(true);
+        try {
+            const exportFilters = Object.fromEntries(
+                Object.entries(filters).filter(([, value]) => value !== '')
+            );
+            const records = [];
+            let page = 1;
+            let totalPages = 1;
+
+            do {
+                const response = await api.get('/renewals/export.php', {
+                    params: { ...exportFilters, page, page_size: 500 }
+                });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Unable to export renewal records.');
+                }
+                const data = response.data?.data || {};
+                records.push(...(Array.isArray(data.renewals) ? data.renewals : []));
+                totalPages = Math.max(1, Number(data.pagination?.total_pages) || 1);
+                page += 1;
+            } while (page <= totalPages);
+
+            if (records.length === 0) {
+                setExportNotice('No renewal records available to export.');
+                return;
+            }
+
+            const headers = [
+                'S.No',
+                'Customer Name',
+                'Mobile Number',
+                'Vehicle Number',
+                'Device Details / IMEI',
+                'SIM Number',
+                'SIM Number 2',
+                'Installation Date',
+                'Renewal / Expiry Date',
+                'Renewal Status',
+                'Installation Person',
+                'Dealer Name'
+            ];
+            const dataRows = records.map((record, index) => [
+                index + 1,
+                record.username || '',
+                record.primary_mobile_no || '',
+                record.vehicle_no || '',
+                [
+                    record.device_model ? `Device: ${record.device_model}` : '',
+                    record.imei_no ? `IMEI: ${record.imei_no}` : ''
+                ].filter(Boolean).join(' / '),
+                record.sim_no_1 || '',
+                record.sim_no_2 || '',
+                formatExportDate(record.installation_date),
+                formatExportDate(record.next_renewal_date),
+                record.sim_status || '',
+                record.installation_person || '',
+                record.installation_person_type === 'Dealer' ? (record.installation_person || '') : ''
+            ]);
+            const fileDate = localDateToday().split('-').reverse().join('-');
+            const fileName = `Eagletrazer_Renewals_${fileDate}`;
+
+            if (fileType === 'xlsx') {
+                const worksheet = XLSX.utils.aoa_to_sheet([
+                    headers,
+                    ...dataRows.map((row) => row.map(protectSpreadsheetValue))
+                ]);
+                worksheet['!cols'] = [8, 24, 16, 18, 30, 18, 18, 18, 20, 18, 24, 24].map((wch) => ({ wch }));
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Renewals');
+                XLSX.writeFile(workbook, `${fileName}.xlsx`, { bookType: 'xlsx' });
+            } else {
+                const doc = new jsPDF({ orientation: 'landscape', format: 'a3' });
+                doc.setFontSize(14);
+                doc.text('Eagletrazer Renewals', 14, 11);
+                doc.setFontSize(8);
+                doc.text(`Generated on: ${fileDate}`, 14, 16);
+                autoTable(doc, {
+                    head: [headers],
+                    body: dataRows,
+                    startY: 21,
+                    showHead: 'everyPage',
+                    styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+                    headStyles: { fillColor: [37, 99, 235] },
+                    margin: { left: 10, right: 10 },
+                    didDrawPage: () => {
+                        const pageNumber = doc.getNumberOfPages();
+                        doc.setFontSize(8);
+                        doc.text(`Page ${pageNumber}`, doc.internal.pageSize.getWidth() - 20, doc.internal.pageSize.getHeight() - 7);
+                    }
+                });
+                doc.save(`${fileName}.pdf`);
+            }
+
+            setExportNotice(`Exported ${records.length} renewal records.`);
+        } catch (error) {
+            showGlobalError(error.response?.data?.message || error.message || 'Failed to export renewals.');
+        } finally {
+            setExporting(false);
+        }
+    };
     const openView = async (row) => {
         try { const response = await api.get(`/renewals/view.php?renewal_id=${row.id}`); setSelected(response.data?.data?.renewal || row); setModal('view'); }
         catch (error) { showGlobalError(error.response?.data?.message || 'Failed to load renewal details.'); }
@@ -287,7 +420,26 @@ const RenewalsPage = () => {
     ];
 
     return <div className="page-container"><div className="card">
-        <div className="page-header"><div><h2>Renewals</h2><p className="page-subtitle">Review upcoming SIM renewals and manage lifecycle actions.</p></div><button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button></div>
+        <div className="page-header"><div><h2>Renewals</h2><p className="page-subtitle">Review upcoming SIM renewals and manage lifecycle actions.</p></div><div className="renewals-toolbar-actions">
+            <div className="renewals-export" ref={exportMenuRef}>
+                <button
+                    className="btn btn-outline renewals-export-toggle"
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={exportMenuOpen}
+                    onClick={() => setExportMenuOpen((open) => !open)}
+                    disabled={exporting}
+                >
+                    <Download size={16} /> {exporting ? 'Exporting...' : 'Export'} <ChevronDown size={15} />
+                </button>
+                {exportMenuOpen && <div className="renewals-export-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => exportRenewals('xlsx')} disabled={exporting}>Export to Excel (.xlsx)</button>
+                    <button type="button" role="menuitem" onClick={() => exportRenewals('pdf')} disabled={exporting}>Export to PDF (.pdf)</button>
+                </div>}
+            </div>
+            <button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button>
+        </div></div>
+        {exportNotice && <div className={`renewals-export-notice${exportNotice.startsWith('No renewal') ? ' is-empty' : ''}`} role="status">{exportNotice}</div>}
         <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
             <div className="table-filter-grid">
                 
