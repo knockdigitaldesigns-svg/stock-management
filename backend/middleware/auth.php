@@ -134,7 +134,11 @@ function isSuperAdminUser($userId = null, $roleName = null) {
         $stmt->close();
         $conn->close();
         if ($row) {
-            $roleNames = [$row['role_name'] ?? null, $row['role'] ?? null];
+            $effectiveRole = trim((string) ($row['role_name'] ?? ''));
+            if ($effectiveRole === '') {
+                $effectiveRole = (string) ($row['role'] ?? '');
+            }
+            $roleNames = [$effectiveRole];
         }
     } elseif ($roleName !== null) {
         $roleNames[] = $roleName;
