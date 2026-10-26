@@ -8,6 +8,7 @@ require_once '../../utils/renewal_history.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/transaction_ids.php';
 require_once '../../utils/stock_allocation_payment.php';
+require_once '../../utils/renewal_undo.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -238,6 +239,7 @@ try {
     $logActionDate = null;
     $logNewRenewalDate = null;
     $logNewValidityMonths = null;
+    $undoPreviousState = null;
     
     function getValidityMonths($conn, $vid, $requireActive = false) {
         $vStmt = $conn->prepare("SELECT months, status FROM sim_validities WHERE id = ? LIMIT 1");
@@ -388,6 +390,12 @@ try {
             // Record payment against existing renewal balances without changing SIM lifecycle dates.
         } else {
             throw new Exception('Invalid action');
+        }
+    }
+
+    if (in_array($action, ['renew', 'reactivate'], true)) {
+        if (renewalUndoSchemaReady($conn)) {
+            $undoPreviousState = loadDealerSimUndoState($conn, $id, true);
         }
     }
 
@@ -564,31 +572,65 @@ try {
             if ($vRow) $oldValidityMonths = (int) $vRow['months'];
         }
         
+        $undoResultState = $undoPreviousState !== null
+            ? loadDealerSimUndoState($conn, $id, true)
+            : null;
+        $previousStateJson = $undoPreviousState === null ? null : encodeRenewalUndoState($undoPreviousState);
+        $resultStateJson = $undoResultState === null ? null : encodeRenewalUndoState($undoResultState);
+        $hasUndoSchema = renewalUndoSchemaReady($conn);
+        $undoColumns = $hasUndoSchema ? ', previous_state_json, result_state_json' : '';
+        $undoValues = $hasUndoSchema ? ', ?, ?' : '';
         $histSql = "INSERT INTO renewal_history
                     (renewal_id, allocation_id, customer_id, action_type, action_date, old_status, new_status,
                      old_validity_months, new_validity_months, old_renewal_date, new_renewal_date,
-                     payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by)
-                    VALUES (0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)";
+                     payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by$undoColumns)
+                    VALUES (0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?$undoValues)";
         $histStmt = $conn->prepare($histSql);
+        if (!$histStmt) {
+            throw new RuntimeException('Unable to prepare SIM lifecycle renewal history: ' . $conn->error);
+        }
         $userId = $currentUser['id'] ?? null;
-        $histStmt->bind_param('issssiissdddsssi',
-            $id,
-            $actionTypeLog,
-            $logActionDate,
-            $oldStatus,
-            $newStatus,
-            $oldValidityMonths,
-            $logNewValidityMonths,
-            $oldExpiry,
-            $logNewRenewalDate,
-            $paymentAmount,
-            $paymentPaid,
-            $paymentPending,
-            $paymentMode,
-            $paymentDate,
-            $transactionId,
-            $userId
-        );
+        if ($hasUndoSchema) {
+            $histStmt->bind_param('issssiissdddsssiss',
+                $id,
+                $actionTypeLog,
+                $logActionDate,
+                $oldStatus,
+                $newStatus,
+                $oldValidityMonths,
+                $logNewValidityMonths,
+                $oldExpiry,
+                $logNewRenewalDate,
+                $paymentAmount,
+                $paymentPaid,
+                $paymentPending,
+                $paymentMode,
+                $paymentDate,
+                $transactionId,
+                $userId,
+                $previousStateJson,
+                $resultStateJson
+            );
+        } else {
+            $histStmt->bind_param('issssiissdddsssi',
+                $id,
+                $actionTypeLog,
+                $logActionDate,
+                $oldStatus,
+                $newStatus,
+                $oldValidityMonths,
+                $logNewValidityMonths,
+                $oldExpiry,
+                $logNewRenewalDate,
+                $paymentAmount,
+                $paymentPaid,
+                $paymentPending,
+                $paymentMode,
+                $paymentDate,
+                $transactionId,
+                $userId
+            );
+        }
         if (!$histStmt->execute()) throw new Exception('Failed to write SIM lifecycle history: ' . $histStmt->error);
         $historyId = (int)$histStmt->insert_id;
         $histStmt->close();

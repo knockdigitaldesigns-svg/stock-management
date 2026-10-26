@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../utils/response.php';
 require_once __DIR__ . '/../../middleware/auth.php';
 require_once __DIR__ . '/../../utils/transaction_ids.php';
 require_once __DIR__ . '/../../utils/renewal_history.php';
+require_once __DIR__ . '/../../utils/renewal_undo.php';
 
 function ensureRenewalTables($conn) {
     $conn->query("CREATE TABLE IF NOT EXISTS renewal_settings (
@@ -20,6 +21,7 @@ function ensureRenewalTables($conn) {
     $conn->query("CREATE TABLE IF NOT EXISTS customer_renewals (
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         customer_id INT NOT NULL,
+        vehicle_id INT DEFAULT NULL,
         installation_date DATE NOT NULL,
         next_renewal_date DATE DEFAULT NULL,
         validity_months INT NOT NULL,
@@ -30,11 +32,81 @@ function ensureRenewalTables($conn) {
         safe_custody_date DATE DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_customer_renewal_customer (customer_id),
+        UNIQUE KEY uq_customer_renewal_vehicle (vehicle_id),
+        INDEX idx_customer_renewal_customer (customer_id),
         INDEX idx_customer_next_renewal (next_renewal_date),
         INDEX idx_customer_sim_status (sim_status),
-        CONSTRAINT fk_customer_renewal_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON UPDATE CASCADE ON DELETE CASCADE
+        CONSTRAINT fk_customer_renewal_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        CONSTRAINT fk_customer_renewal_vehicle FOREIGN KEY (vehicle_id) REFERENCES customer_vehicle_details(id) ON UPDATE CASCADE ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $vehicleColumn = $conn->query("SHOW COLUMNS FROM customer_renewals LIKE 'vehicle_id'");
+    if (!$vehicleColumn) throw new RuntimeException('Unable to check renewal vehicle schema: ' . $conn->error);
+    if ($vehicleColumn->num_rows === 0 && !$conn->query("ALTER TABLE customer_renewals ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id")) {
+        throw new RuntimeException('Unable to add renewal vehicle relationship: ' . $conn->error);
+    }
+
+    $legacyBackfill = $conn->query("UPDATE customer_renewals cr
+        INNER JOIN (
+            SELECT cr.id AS renewal_id,
+                CASE
+                    WHEN COUNT(DISTINCT cv.id) = 1 THEN MIN(cv.id)
+                    ELSE MIN(CASE WHEN cv.validity_months = cr.validity_months THEN cv.id END)
+                END AS vehicle_id
+            FROM customer_renewals cr
+            INNER JOIN customer_installations ci
+                ON ci.customer_id = cr.customer_id
+               AND ci.installation_date = cr.installation_date
+            INNER JOIN customer_vehicle_details cv
+                ON cv.id = ci.vehicle_id
+               AND cv.customer_id = cr.customer_id
+            LEFT JOIN customer_renewals linked
+                ON linked.vehicle_id = cv.id
+               AND linked.id <> cr.id
+            WHERE cr.vehicle_id IS NULL
+            GROUP BY cr.id
+            HAVING (
+                COUNT(DISTINCT cv.id) = 1
+                OR COUNT(DISTINCT CASE
+                    WHEN cv.validity_months = cr.validity_months THEN cv.id
+                END) = 1
+            )
+            AND COUNT(DISTINCT linked.id) = 0
+        ) matched ON matched.renewal_id = cr.id
+        SET cr.vehicle_id = matched.vehicle_id
+        WHERE cr.vehicle_id IS NULL");
+    if (!$legacyBackfill) throw new RuntimeException('Unable to link existing renewal records to vehicles: ' . $conn->error);
+
+    $customerUniqueIndex = $conn->query("SHOW INDEX FROM customer_renewals WHERE Key_name = 'uq_customer_renewal_customer'");
+    if (!$customerUniqueIndex) throw new RuntimeException('Unable to check legacy renewal index: ' . $conn->error);
+    if ($customerUniqueIndex->num_rows > 0 && !$conn->query("ALTER TABLE customer_renewals DROP INDEX uq_customer_renewal_customer")) {
+        throw new RuntimeException('Unable to remove customer-level renewal uniqueness: ' . $conn->error);
+    }
+
+    $vehicleUniqueIndex = $conn->query("SHOW INDEX FROM customer_renewals WHERE Key_name = 'uq_customer_renewal_vehicle'");
+    if (!$vehicleUniqueIndex) throw new RuntimeException('Unable to check renewal vehicle index: ' . $conn->error);
+    if ($vehicleUniqueIndex->num_rows === 0 && !$conn->query("ALTER TABLE customer_renewals ADD UNIQUE KEY uq_customer_renewal_vehicle (vehicle_id)")) {
+        throw new RuntimeException('Unable to add vehicle-level renewal uniqueness: ' . $conn->error);
+    }
+
+    $customerIndex = $conn->query("SHOW INDEX FROM customer_renewals WHERE Key_name = 'idx_customer_renewal_customer'");
+    if (!$customerIndex) throw new RuntimeException('Unable to check renewal customer index: ' . $conn->error);
+    if ($customerIndex->num_rows === 0 && !$conn->query("ALTER TABLE customer_renewals ADD INDEX idx_customer_renewal_customer (customer_id)")) {
+        throw new RuntimeException('Unable to add renewal customer index: ' . $conn->error);
+    }
+
+    $vehicleForeignKey = $conn->query("SELECT 1 FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'customer_renewals'
+          AND CONSTRAINT_NAME = 'fk_customer_renewal_vehicle'
+        LIMIT 1");
+    if (!$vehicleForeignKey) throw new RuntimeException('Unable to check renewal vehicle constraint: ' . $conn->error);
+    if ($vehicleForeignKey->num_rows === 0 && !$conn->query("ALTER TABLE customer_renewals
+        ADD CONSTRAINT fk_customer_renewal_vehicle
+        FOREIGN KEY (vehicle_id) REFERENCES customer_vehicle_details(id)
+        ON UPDATE CASCADE ON DELETE CASCADE")) {
+        throw new RuntimeException('Unable to add renewal vehicle constraint: ' . $conn->error);
+    }
 
     $colCheck = $conn->query("SHOW COLUMNS FROM customer_renewals LIKE 'safe_custody_date'");
     if ($colCheck && $colCheck->num_rows === 0) {
@@ -61,6 +133,11 @@ function ensureRenewalTables($conn) {
         transaction_id CHAR(6) DEFAULT NULL,
         changed_by INT DEFAULT NULL,
         notes TEXT NULL,
+        previous_state_json LONGTEXT DEFAULT NULL,
+        result_state_json LONGTEXT DEFAULT NULL,
+        undone_at DATETIME DEFAULT NULL,
+        undone_by INT DEFAULT NULL,
+        undo_reason VARCHAR(500) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
@@ -99,10 +176,10 @@ function renewalListFilters($filters) {
     $types = '';
     $search = trim((string)($filters['search'] ?? ''));
     if ($search !== '') {
-        $where[] = '(c.username LIKE ? OR c.primary_mobile_no LIKE ? OR cv.imei_no LIKE ? OR cv.sim_no_1 LIKE ? OR cv.sim_no_2 LIKE ? OR dt.device_type LIKE ?)';
+        $where[] = '(c.username LIKE ? OR c.primary_mobile_no LIKE ? OR c.secondary_mobile_no LIKE ? OR cv.vehicle_no LIKE ? OR cv.imei_no LIKE ? OR cv.sim_no_1 LIKE ? OR cv.sim_no_2 LIKE ? OR dt.device_type LIKE ?)';
         $like = "%$search%";
-        array_push($params, $like, $like, $like, $like, $like, $like);
-        $types .= 'ssssss';
+        array_push($params, $like, $like, $like, $like, $like, $like, $like, $like);
+        $types .= 'ssssssss';
     }
     if (!empty($filters['status'])) {
         $where[] = 'cr.sim_status = ?';
@@ -165,29 +242,70 @@ function renewalInitialize($conn, $settings) {
     if ($deactiveDays <= 0) $deactiveDays = 10;
 
     $sql = "INSERT INTO customer_renewals
-        (customer_id, installation_date, next_renewal_date, validity_months, sim_status, expired_to_safe_days, safe_to_deactive_days)
-        SELECT c.id, ci.installation_date,
+        (customer_id, vehicle_id, installation_date, next_renewal_date, validity_months, sim_status, expired_to_safe_days, safe_to_deactive_days)
+        SELECT c.id, cv.id, ci.installation_date,
             DATE_ADD(ci.installation_date, INTERVAL cv.validity_months MONTH),
             cv.validity_months, 'Active', ?, ?
         FROM customers c
-        INNER JOIN customer_vehicle_details cv ON cv.id = (
-            SELECT id FROM customer_vehicle_details WHERE customer_id = c.id ORDER BY id DESC LIMIT 1
-        )
-        INNER JOIN customer_installations ci ON ci.id = (
-            SELECT id FROM customer_installations WHERE customer_id = c.id ORDER BY id DESC LIMIT 1
-        )
-        WHERE cv.validity_months > 0 AND ci.installation_date IS NOT NULL AND ci.installation_date != '0000-00-00'
-          AND NOT EXISTS (SELECT 1 FROM customer_renewals cr WHERE cr.customer_id = c.id)";
+        INNER JOIN customer_vehicle_details cv ON cv.customer_id = c.id
+        INNER JOIN customer_installations ci
+            ON ci.vehicle_id = cv.id
+           AND ci.customer_id = c.id
+        WHERE cv.validity_months > 0
+          AND ci.installation_date IS NOT NULL
+          AND ci.installation_date != '0000-00-00'
+          AND NOT EXISTS (
+              SELECT 1 FROM customer_renewals cr
+              WHERE cr.vehicle_id = cv.id
+          )";
     $stmt = $conn->prepare($sql);
-    if ($stmt) {
-        $stmt->bind_param('ii', $expiredDays, $deactiveDays);
-        $stmt->execute();
+    if (!$stmt) throw new RuntimeException('Unable to prepare vehicle-level renewal initialization: ' . $conn->error);
+    $stmt->bind_param('ii', $expiredDays, $deactiveDays);
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
         $stmt->close();
+        throw new RuntimeException('Unable to initialize vehicle-level renewal records: ' . $error);
     }
+    $stmt->close();
 }
 
-function renewalRowQuery() {
-    return "SELECT cr.*, COALESCE(cr.last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type IN ('Renew SIM', 'Reactivate SIM'))) AS last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type = 'Reactivate SIM') AS reactivation_date, c.id AS customer_record_id, c.platform_id, c.status AS customer_status, c.username, c.primary_mobile_no, c.secondary_mobile_no, c.email, c.location, c.pincode,
+function renewalCountQuery() {
+    return "SELECT COUNT(*) AS total
+        FROM customer_renewals cr
+        INNER JOIN customers c ON c.id = cr.customer_id
+        INNER JOIN customer_vehicle_details cv ON cv.id = cr.vehicle_id AND cv.customer_id = c.id
+        LEFT JOIN device_types dt ON dt.id = cv.device_model_id
+        LEFT JOIN customer_installations ci ON ci.vehicle_id = cv.id AND ci.customer_id = c.id";
+}
+
+function renewalRowQuery($conn) {
+    $undoHistorySelect = renewalUndoSchemaReady($conn)
+        ? "undo_candidate.id AS undo_history_id,"
+        : 'NULL AS undo_history_id,';
+    $undoHistoryJoin = renewalUndoSchemaReady($conn)
+        ? "LEFT JOIN renewal_history undo_candidate ON undo_candidate.id = (
+            SELECT candidate.id
+            FROM renewal_history candidate
+            WHERE candidate.renewal_id = cr.id
+              AND candidate.action_type IN ('Renew SIM', 'Reactivate SIM')
+              AND candidate.previous_state_json IS NOT NULL
+              AND candidate.result_state_json IS NOT NULL
+              AND candidate.undone_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM renewal_history later
+                  WHERE later.renewal_id = cr.id
+                    AND later.id > candidate.id
+                    AND NOT (
+                        later.action_type = 'Renewal Payment'
+                        AND later.source_history_id = candidate.id
+                    )
+              )
+            ORDER BY candidate.id DESC
+            LIMIT 1
+        )"
+        : '';
+    return "SELECT cr.*, COALESCE(cr.last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type IN ('Renew SIM', 'Reactivate SIM'))) AS last_renewed_date, (SELECT MAX(rh.action_date) FROM renewal_history rh WHERE rh.renewal_id = cr.id AND rh.action_type = 'Reactivate SIM') AS reactivation_date, $undoHistorySelect c.id AS customer_record_id, c.platform_id, c.status AS customer_status, c.username, c.primary_mobile_no, c.secondary_mobile_no, c.email, c.location, c.pincode,
         p.platform_name, cv.id AS vehicle_record_id, cv.vehicle_type_id, cv.device_model_id, cv.device_id, cv.sim_id_1, cv.sim_id_2,
         cv.vehicle_no, cv.imei_no, cv.sim_no_1, cv.sim_no_2, cv.validity_months AS vehicle_validity_months,
         (SELECT sv.id FROM sim_validities sv WHERE sv.months = cv.validity_months LIMIT 1) AS validity_id,
@@ -208,14 +326,10 @@ function renewalRowQuery() {
         FROM customer_renewals cr
         INNER JOIN customers c ON c.id = cr.customer_id
         LEFT JOIN platforms p ON p.id = c.platform_id
-        LEFT JOIN customer_vehicle_details cv ON cv.id = (
-            SELECT id FROM customer_vehicle_details WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1
-        )
+        INNER JOIN customer_vehicle_details cv ON cv.id = cr.vehicle_id AND cv.customer_id = c.id
         LEFT JOIN device_types dt ON dt.id = cv.device_model_id
         LEFT JOIN vehicle_types vt ON vt.id = cv.vehicle_type_id
-        LEFT JOIN customer_installations ci ON ci.id = (
-            SELECT id FROM customer_installations WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1
-        )
+        LEFT JOIN customer_installations ci ON ci.vehicle_id = cv.id AND ci.customer_id = c.id
         LEFT JOIN technicians t ON t.id = ci.installation_person_id AND ci.installation_person_type = 'Technician'
         LEFT JOIN dealers d ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
         LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
@@ -227,10 +341,11 @@ function renewalRowQuery() {
             FROM renewal_history
             WHERE action_type IN ('Renew SIM', 'Reactivate SIM')
             GROUP BY renewal_id
-        ) payment_summary ON payment_summary.renewal_id = cr.id";
+        ) payment_summary ON payment_summary.renewal_id = cr.id
+        $undoHistoryJoin";
 }
 
-function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newValidity, $newDate, $payment = [], $notes = null, $actionDate = null) {
+function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newValidity, $newDate, $payment = [], $notes = null, $actionDate = null, $previousState = null, $resultState = null) {
     $amount = (float)($payment['payment_amount'] ?? 0);
     $paid = (float)($payment['amount_paid'] ?? 0);
     $pending = (float)($payment['amount_pending'] ?? 0);
@@ -239,8 +354,16 @@ function renewalHistoryInsert($conn, $row, $action, $userId, $newStatus, $newVal
     $transaction = normalizeTransactionId($payment['transaction_id'] ?? '');
     $transaction = $transaction !== '' ? $transaction : null;
     $actionDate = $actionDate ?: date('Y-m-d');
-    $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->bind_param('iissssiissdddsssis', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $paymentDate, $transaction, $userId, $notes);
+    if ($previousState !== null || $resultState !== null) {
+        requireRenewalUndoSchema($conn);
+        $previousStateJson = $previousState === null ? null : encodeRenewalUndoState($previousState);
+        $resultStateJson = $resultState === null ? null : encodeRenewalUndoState($resultState);
+        $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by, notes, previous_state_json, result_state_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('iissssiissdddsssisss', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $paymentDate, $transaction, $userId, $notes, $previousStateJson, $resultStateJson);
+    } else {
+        $stmt = $conn->prepare('INSERT INTO renewal_history (renewal_id, customer_id, action_type, action_date, old_status, new_status, old_validity_months, new_validity_months, old_renewal_date, new_renewal_date, payment_amount, amount_paid, amount_pending, payment_mode, payment_date, transaction_id, changed_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('iissssiissdddsssis', $row['id'], $row['customer_id'], $action, $actionDate, $row['sim_status'], $newStatus, $row['validity_months'], $newValidity, $row['next_renewal_date'], $newDate, $amount, $paid, $pending, $mode, $paymentDate, $transaction, $userId, $notes);
+    }
     $success = $stmt->execute();
     $historyId = $success ? (string) $stmt->insert_id : '';
     if ($success) {

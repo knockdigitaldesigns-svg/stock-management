@@ -8,7 +8,7 @@ import TableFilterBar from '../../../components/TableFilterBar/TableFilterBar';
 import Pagination from '../../../components/Pagination/Pagination';
 import Modal from '../../../components/Modal/Modal';
 import { useAuth } from '../../../context/AuthContext';
-import { Ban, Download, Edit2, Eye, Play, RotateCw, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { Ban, Download, Edit2, Eye, Play, RotateCw, ShieldCheck, Trash2, Undo2, Upload } from 'lucide-react';
 import DealerSimActivationEditModal from './DealerSimActivationEditModal';
 import DealerSimActivationBulkUploadModal from './DealerSimActivationBulkUploadModal';
 import DealerSimActivationBulkPaymentModal from './DealerSimActivationBulkPaymentModal';
@@ -69,6 +69,9 @@ const DealerSimActivation = () => {
     const [activeSimModal, setActiveSimModal] = useState(null);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleting, setDeleting] = useState(false);
+    const [undoTarget, setUndoTarget] = useState(null);
+    const [undoReason, setUndoReason] = useState('');
+    const [undoing, setUndoing] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
     const [uploadSuccess, setUploadSuccess] = useState('');
     const [selectedSims, setSelectedSims] = useState({});
@@ -159,6 +162,26 @@ const DealerSimActivation = () => {
             setError(err.response?.data?.message || 'Error fetching SIMs');
         } finally {
             if (fetchId === latestFetchId.current) setLoading(false);
+        }
+    };
+
+    const undoRenewal = async () => {
+        if (!undoTarget || !undoReason.trim() || undoing) return;
+        try {
+            setUndoing(true);
+            await api.post('/dealers/sim_activation_undo_renewal.php', {
+                allocation_id: Number(undoTarget.allocation_id),
+                history_id: Number(undoTarget.undo_history_id),
+                reason: undoReason.trim()
+            });
+            setUndoTarget(null);
+            setUndoReason('');
+            setUploadSuccess('Dealer SIM renewal was undone successfully.');
+            await fetchSims();
+        } catch (err) {
+            showGlobalError(err.response?.data?.message || err.message || 'Unable to undo the dealer SIM renewal.');
+        } finally {
+            setUndoing(false);
         }
     };
 
@@ -574,6 +597,20 @@ const DealerSimActivation = () => {
                                                         )}
                                                     </>
                                                 )}
+                                                {isSuperAdmin && sim.undo_history_id && (
+                                                    <button
+                                                        type="button"
+                                                        className="icon-btn"
+                                                        onClick={() => {
+                                                            setUndoReason('');
+                                                            setUndoTarget(sim);
+                                                        }}
+                                                        title="Undo Renewal"
+                                                        aria-label={`Undo latest renewal for SIM ${sim.sim_no}`}
+                                                    >
+                                                        <Undo2 size={16} />
+                                                    </button>
+                                                )}
                                                 {canDeleteActivation && (
                                                     <button
                                                         type="button"
@@ -642,6 +679,37 @@ const DealerSimActivation = () => {
                     )}
                 >
                     <p>Delete the activation for SIM <strong>{deleteTarget.sim_no}</strong>? The SIM will be returned to available stock.</p>
+                </Modal>
+            )}
+            {undoTarget && (
+                <Modal
+                    isOpen
+                    onClose={() => !undoing && setUndoTarget(null)}
+                    title="Undo Dealer SIM Renewal"
+                    maxWidth="560px"
+                    footer={(
+                        <>
+                            <button type="button" className="btn btn-outline" onClick={() => setUndoTarget(null)} disabled={undoing}>Cancel</button>
+                            <button type="button" className="btn btn-danger" onClick={undoRenewal} disabled={undoing || !undoReason.trim()}>
+                                {undoing ? 'Undoing...' : 'Confirm Undo Renewal'}
+                            </button>
+                        </>
+                    )}
+                >
+                    <p>Undoing restores this SIM to the exact state recorded before the selected renewal. This does not remove the dealer, SIM, or payment history.</p>
+                    <dl className="renewal-undo-details">
+                        <dt>Dealer</dt><dd>{undoTarget.dealer_name || '-'}</dd>
+                        <dt>Username</dt><dd>Not applicable</dd>
+                        <dt>Mobile</dt><dd>{undoTarget.dealer_mobile_no || '-'}</dd>
+                        <dt>Vehicle No</dt><dd>Not applicable</dd>
+                        <dt>SIM No</dt><dd>{undoTarget.sim_no || '-'}</dd>
+                        <dt>Current Renewal Date</dt><dd>{formatDate(undoTarget.renewal_date)}</dd>
+                        <dt>Current Validity</dt><dd>{undoTarget.validity_months ? `${undoTarget.validity_months} Months` : '-'}</dd>
+                    </dl>
+                    <label className="form-group">
+                        <span className="form-label">Undo Reason *</span>
+                        <textarea className="form-control" maxLength={500} value={undoReason} onChange={(event) => setUndoReason(event.target.value)} required />
+                    </label>
                 </Modal>
             )}
             {isBulkUploadOpen && (

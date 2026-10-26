@@ -61,8 +61,8 @@ const CustomerCreatePage = () => {
         platform_id: showValidation && !form.platform_id ? 'Platform is required.' : '',
         username: !form.username.trim()
             ? (showValidation ? 'Username is required.' : '')
-            : !/^[a-zA-Z0-9._-]+$/.test(form.username.trim())
-            ? 'Username can contain only letters, numbers, dot, underscore and hyphen.'
+            : !/^[a-zA-Z0-9.@_-]+$/.test(form.username.trim())
+            ? 'Username can contain only letters, numbers, @, dot, underscore and hyphen.'
             : '',
         primary_mobile_no: !form.primary_mobile_no
             ? (showValidation ? 'Primary mobile number is required.' : '')
@@ -327,13 +327,13 @@ const loadCustomer = async () => {
         if (fieldErrors.username) return fieldErrors.username;
 
         if (
-            !/^[a-zA-Z0-9._-]+$/.test(
+            !/^[a-zA-Z0-9.@_-]+$/.test(
                 form.username.trim()
             )
         ) {
             return (
                 'Username can contain only letters, ' +
-                'numbers, dot, underscore and hyphen.'
+                'numbers, @, dot, underscore and hyphen.'
             );
         }
 
