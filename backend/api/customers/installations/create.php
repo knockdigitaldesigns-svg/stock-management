@@ -586,7 +586,7 @@ try {
     | 4. Existing installation check
     |--------------------------------------------------------------------------
     |
-    | One installation record per customer.
+    | One installation record per vehicle.
     |--------------------------------------------------------------------------
     */
 
@@ -711,15 +711,15 @@ try {
         |--------------------------------------------------------------------------
         */
 
-        $renewalCheck = $conn->prepare(
+        $renewalCheck = $vehicleId > 0 ? $conn->prepare(
             'SELECT id, last_renewed_date, validity_months
              FROM customer_renewals
-             WHERE customer_id = ?
+             WHERE vehicle_id = ?
              LIMIT 1'
-        );
+        ) : null;
 
         if ($renewalCheck) {
-            $renewalCheck->bind_param('i', $customerId);
+            $renewalCheck->bind_param('i', $vehicleId);
             $renewalCheck->execute();
 
             $renewalResult = $renewalCheck->get_result();
@@ -796,14 +796,14 @@ try {
                 $vehicleStmt = $conn->prepare(
                     'SELECT validity_months
                      FROM customer_vehicle_details
-                     WHERE customer_id = ?
+                     WHERE id = ?
+                       AND customer_id = ?
                        AND validity_months > 0
-                     ORDER BY created_at DESC, id DESC
                      LIMIT 1'
                 );
 
                 if ($vehicleStmt) {
-                    $vehicleStmt->bind_param('i', $customerId);
+                    $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
                     $vehicleStmt->execute();
 
                     $vehicleResult = $vehicleStmt->get_result();
@@ -842,19 +842,21 @@ try {
                         $renewalInsert = $conn->prepare(
                             'INSERT INTO customer_renewals (
                                 customer_id,
+                                vehicle_id,
                                 installation_date,
                                 next_renewal_date,
                                 validity_months,
                                 sim_status,
                                 expired_to_safe_days,
                                 safe_to_deactive_days
-                             ) VALUES (?, ?, ?, ?, \'Active\', ?, ?)'
+                             ) VALUES (?, ?, ?, ?, ?, \'Active\', ?, ?)'
                         );
 
                         if ($renewalInsert) {
                             $renewalInsert->bind_param(
-                                'issiii',
+                                'iissiii',
                                 $customerId,
+                                $vehicleId,
                                 $installationDate,
                                 $nextRenewalDate,
                                 $validityMonths,
@@ -955,23 +957,23 @@ try {
     | 6b. Auto-create renewal record for new installation
     |--------------------------------------------------------------------------
     |
-    | When a new installation is created, automatically create a
-    | customer_renewals record if one does not already exist and
-    | the customer has vehicle details with validity_months > 0.
+    | When a new vehicle installation is created, automatically create a
+    | renewal record if one does not already exist and the vehicle has
+    | validity_months > 0.
     |
     | next_renewal_date = installation_date + validity_months
     |--------------------------------------------------------------------------
     */
 
-    $renewalExists = $conn->prepare(
+    $renewalExists = $vehicleId > 0 ? $conn->prepare(
         'SELECT id
          FROM customer_renewals
-         WHERE customer_id = ?
+         WHERE vehicle_id = ?
          LIMIT 1'
-    );
+    ) : null;
 
     if ($renewalExists) {
-        $renewalExists->bind_param('i', $customerId);
+        $renewalExists->bind_param('i', $vehicleId);
         $renewalExists->execute();
 
         $renewalExistsResult = $renewalExists->get_result();
@@ -984,14 +986,14 @@ try {
             $vehicleStmt = $conn->prepare(
                 'SELECT validity_months
                  FROM customer_vehicle_details
-                 WHERE customer_id = ?
+                 WHERE id = ?
+                   AND customer_id = ?
                    AND validity_months > 0
-                 ORDER BY created_at DESC, id DESC
                  LIMIT 1'
             );
 
             if ($vehicleStmt) {
-                $vehicleStmt->bind_param('i', $customerId);
+                $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
                 $vehicleStmt->execute();
 
                 $vehicleResult = $vehicleStmt->get_result();
@@ -1027,19 +1029,21 @@ try {
                     $renewalInsert = $conn->prepare(
                         'INSERT INTO customer_renewals (
                             customer_id,
+                            vehicle_id,
                             installation_date,
                             next_renewal_date,
                             validity_months,
                             sim_status,
                             expired_to_safe_days,
                             safe_to_deactive_days
-                         ) VALUES (?, ?, ?, ?, \'Active\', ?, ?)'
+                         ) VALUES (?, ?, ?, ?, ?, \'Active\', ?, ?)'
                     );
 
                     if ($renewalInsert) {
                         $renewalInsert->bind_param(
-                            'issiii',
+                            'iissiii',
                             $customerId,
+                            $vehicleId,
                             $installationDate,
                             $nextRenewalDate,
                             $validityMonths,

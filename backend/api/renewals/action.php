@@ -22,6 +22,12 @@ try {
     $stmt = $conn->prepare('SELECT * FROM customer_renewals WHERE id = ? FOR UPDATE');
     $stmt->bind_param('i', $renewalId); $stmt->execute(); $current = $stmt->get_result()->fetch_assoc(); $stmt->close();
     if (!$current) throw new Exception('Renewal not found.');
+    $undoPreviousState = null;
+    if (in_array($action, ['Renew SIM', 'Reactivate SIM'], true)) {
+        if (renewalUndoSchemaReady($conn)) {
+            $undoPreviousState = loadCustomerRenewalUndoState($conn, $renewalId, true);
+        }
+    }
     $lifecycleExpiredDays = $payload['expired_to_safe_days'] ?? $current['expired_to_safe_days'];
     $lifecycleDeactiveDays = $payload['safe_to_deactive_days'] ?? $current['safe_to_deactive_days'];
     if (filter_var($lifecycleExpiredDays, FILTER_VALIDATE_INT) === false || filter_var($lifecycleDeactiveDays, FILTER_VALIDATE_INT) === false || (int)$lifecycleExpiredDays < 0 || (int)$lifecycleDeactiveDays < 0) {
@@ -194,15 +200,17 @@ try {
         $newInstallationDate = $installationDatePayload;
 
         /* Update customer_installations table as well */
-        $instUpdate = $conn->prepare(
-            'UPDATE customer_installations
-             SET installation_date = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE customer_id = ?'
-        );
-        if ($instUpdate) {
-            $instUpdate->bind_param('si', $newInstallationDate, $current['customer_id']);
-            $instUpdate->execute();
-            $instUpdate->close();
+        if (!empty($current['vehicle_id'])) {
+            $instUpdate = $conn->prepare(
+                'UPDATE customer_installations
+                 SET installation_date = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE vehicle_id = ? AND customer_id = ?'
+            );
+            if ($instUpdate) {
+                $instUpdate->bind_param('sii', $newInstallationDate, $current['vehicle_id'], $current['customer_id']);
+                $instUpdate->execute();
+                $instUpdate->close();
+            }
         }
 
         /*
@@ -338,7 +346,10 @@ try {
         throw new Exception('Failed to update renewal: ' . $error);
     }
     $update->close();
-    if ($action !== '' && !renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes, $historyActionDate)) throw new Exception('Failed to save renewal history.');
+    $undoResultState = $undoPreviousState !== null
+        ? loadCustomerRenewalUndoState($conn, $renewalId, true)
+        : null;
+    if ($action !== '' && !renewalHistoryInsert($conn, $current, $action, $userId, $newStatus, $newValidity, $newDate, $payment, $notes, $historyActionDate, $undoPreviousState, $undoResultState)) throw new Exception('Failed to save renewal history.');
     $conn->commit(); $conn->close();
     sendResponse(true, 'Renewal action completed successfully.', ['status' => $newStatus, 'next_renewal_date' => $newDate, 'last_renewed_date' => $lastRenewedDate, 'installation_date' => $newInstallationDate]);
 } catch (Throwable $error) {

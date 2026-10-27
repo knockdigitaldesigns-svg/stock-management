@@ -527,8 +527,10 @@ foreach ($dataRows as $idx => $row) {
     // Username
     if ($username === '') {
         $allErrors[] = "Row {$rowNumber}: Username - Username is required.";
-    } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
-        $allErrors[] = "Row {$rowNumber}: Username - Username can contain only letters, numbers, dot, underscore and hyphen.";
+    } elseif (strlen($username) > 100) {
+        $allErrors[] = "Row {$rowNumber}: Username - Username must not exceed 100 characters.";
+    } elseif (!preg_match('/^[a-zA-Z0-9.@_-]+$/', $username)) {
+        $allErrors[] = "Row {$rowNumber}: Username - Username can contain only letters, numbers, @, dot, underscore and hyphen.";
     } else {
         $lowerUser = strtolower($username);
         if (isset($batchUsernameMobiles[$lowerUser]) && $batchUsernameMobiles[$lowerUser] !== $primaryMobile) {

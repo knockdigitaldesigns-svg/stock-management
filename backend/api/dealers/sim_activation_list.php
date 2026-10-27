@@ -2,6 +2,7 @@
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/renewal_history.php';
+require_once '../../utils/renewal_undo.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -221,6 +222,27 @@ if ($validity_id > 0) {
 }
 
 $whereSql = "WHERE " . implode(' AND ', $whereClauses);
+$undoHistorySelect = renewalUndoSchemaReady($conn)
+    ? "(SELECT candidate.id
+        FROM renewal_history candidate
+        WHERE candidate.allocation_id = sa.id
+          AND candidate.action_type IN ('Renew SIM', 'Reactivate SIM')
+          AND candidate.previous_state_json IS NOT NULL
+          AND candidate.result_state_json IS NOT NULL
+          AND candidate.undone_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM renewal_history later
+              WHERE later.allocation_id = sa.id
+                AND later.id > candidate.id
+                AND NOT (
+                    later.action_type = 'Renewal Payment'
+                    AND later.source_history_id = candidate.id
+                )
+          )
+        ORDER BY candidate.id DESC
+        LIMIT 1) AS undo_history_id"
+    : 'NULL AS undo_history_id';
 
 // Count total
 $countQuery = "SELECT COUNT(*) as total FROM stock_allocations sa 
@@ -261,6 +283,7 @@ $query = "SELECT
             sa.sim_id,
             d.id as dealer_id,
             d.dealer_name,
+            d.mobile_no AS dealer_mobile_no,
             s.sim_no,
             s.sim_type,
             COALESCE(sa.sim_given_date, sa.allocation_date) as given_date,
@@ -285,7 +308,8 @@ $query = "SELECT
                 WHEN $totalPaymentPaidExpression > 0 THEN 'Partially Paid'
                 ELSE 'Not Paid'
             END AS payment_status,
-            v.months as validity_months
+            v.months as validity_months,
+            $undoHistorySelect
           FROM stock_allocations sa 
           JOIN sims s ON sa.sim_id = s.id 
           JOIN dealers d ON sa.owner_id = d.id

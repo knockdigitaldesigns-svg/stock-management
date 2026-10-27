@@ -88,6 +88,10 @@ if ($username === '') {
     sendResponse(false, 'Username is required.', [], [], 400);
 }
 
+if (strlen($username) > 100) {
+    sendResponse(false, 'Username must not exceed 100 characters.', [], [], 400);
+}
+
 if ($primaryMobile === '') {
     sendResponse(false, 'Primary mobile number is required.', [], [], 400);
 }
@@ -124,10 +128,10 @@ if (!in_array($status, ['Active', 'Inactive'], true)) {
 |--------------------------------------------------------------------------
 */
 
-if (!preg_match('/^[a-zA-Z0-9._-]+$/', $username)) {
+if (!preg_match('/^[a-zA-Z0-9.@_-]+$/', $username)) {
     sendResponse(
         false,
-        'Username can contain only letters, numbers, dot, underscore and hyphen.',
+        'Username can contain only letters, numbers, @, dot, underscore and hyphen.',
         [],
         [],
         400

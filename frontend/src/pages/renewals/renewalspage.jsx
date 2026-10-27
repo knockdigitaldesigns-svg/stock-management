@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eye, History, Pencil, RotateCcw, Trash2, Search, ChevronDown } from 'lucide-react';
+import { Download, Eye, History, Pencil, RotateCcw, Trash2, Search, ChevronDown, Undo2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -8,6 +8,7 @@ import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
+import { useAuth } from '../../context/AuthContext';
 import './renewalspage.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -54,6 +55,11 @@ const ModalGrid = ({ children }) => (
 const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 16, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}><h4 style={{ margin: '0 0 14px', borderBottom: '1px solid #e2e8f0', paddingBottom: 9, color: '#17243b', fontSize: 14, fontWeight: 700 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : key === 'validity_months' && record?.[key] ? formatValidity(record[key]) : display(record?.[key]); const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <input className="form-control" type="date" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
 
 const RenewalsPage = () => {
+    const { currentUser } = useAuth();
+    const roleName = typeof currentUser?.role === 'string'
+        ? currentUser.role
+        : currentUser?.role?.name || currentUser?.role_name || '';
+    const isSuperAdmin = String(roleName).trim().toLowerCase().replace(/[\s_-]/g, '') === 'superadmin';
     const exportMenuRef = useRef(null);
     const [rows, setRows] = useState([]);
     const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -70,6 +76,9 @@ const RenewalsPage = () => {
     const [exportMenuOpen, setExportMenuOpen] = useState(false);
     const [exportNotice, setExportNotice] = useState('');
     const [deleteTarget, setDeleteTarget] = useState(null);
+    const [undoTarget, setUndoTarget] = useState(null);
+    const [undoReason, setUndoReason] = useState('');
+    const [undoing, setUndoing] = useState(false);
     const [closeOldRenewalPayment, setCloseOldRenewalPayment] = useState(false);
     const [oldRenewalPayment, setOldRenewalPayment] = useState({
         amount_paid: '',
@@ -249,6 +258,24 @@ const RenewalsPage = () => {
     const openHistory = async () => {
         try { const response = await api.get(`/renewals/history.php?renewal_id=${selected.id}`); setHistory(response.data?.data?.history || []); setModal('history'); }
         catch (error) { showGlobalError(error.response?.data?.message || 'Failed to load renewal history.'); }
+    };
+    const undoRenewal = async () => {
+        if (!undoTarget || !undoReason.trim() || undoing) return;
+        try {
+            setUndoing(true);
+            await api.post('/renewals/undo.php', {
+                renewal_id: Number(undoTarget.id),
+                history_id: Number(undoTarget.undo_history_id),
+                reason: undoReason.trim()
+            });
+            setUndoTarget(null);
+            setUndoReason('');
+            await load(pagination.page, filters);
+        } catch (error) {
+            showGlobalError(error.response?.data?.message || error.message || 'Unable to undo this renewal.');
+        } finally {
+            setUndoing(false);
+        }
     };
     const executeAction = async () => {
         if (!selected) return;
@@ -448,7 +475,7 @@ const RenewalsPage = () => {
                     <label className="filter-label">Search</label>
                     <div className="search-input-wrapper">
                         <Search size={16} className="search-icon" />
-                        <input className="form-control filter-input has-icon table-filter-search" placeholder="Search username, mobile, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
+                        <input className="form-control filter-input has-icon table-filter-search" placeholder="Search username, mobile, vehicle, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
                     </div>
                 </div>
 
@@ -506,7 +533,7 @@ const RenewalsPage = () => {
                 </button>
             </div>
         </div>
-        <div className="table-container"><table><thead><tr>{['Installation Date', 'Username', 'Mobile No', 'IMEI No', 'SIM No', 'Device Model', 'Next Renewal Date', 'Platform', 'Validity', 'Total Amount', 'Amount Paid', 'Pending Amount', 'Payment Status', 'SIM Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan="15">Loading renewals...</td></tr> : rows.length === 0 ? <tr><td colSpan="15">No renewal records found.</td></tr> : rows.map((row) => <tr key={row.id}><td>{formatDate(row.installation_date)}</td><td>{display(row.username)}</td><td>{display(row.primary_mobile_no)}</td><td>{display(row.imei_no)}</td><td>{display(row.sim_no_1)}</td><td>{display(row.device_model)}</td><td>{formatDate(row.next_renewal_date)}</td><td>{display(row.platform_name)}</td><td>{display(row.validity_months)} Months</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_payment_amount).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_paid || 0).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_pending || 0).toFixed(2)}` : '-'}</td><td>{row.payment_status ? <span className={`badge ${row.payment_status === 'Paid' ? 'badge-success' : row.payment_status === 'Partially Paid' ? 'badge-warning' : 'badge-danger'}`}>{row.payment_status}</span> : '-'}</td><td><span className="badge">{display(row.sim_status)}</span></td><td><div style={{ display: 'flex', gap: 6 }}><button className="btn" type="button" title="View" onClick={() => openView(row)}><Eye size={16} /></button><button className="btn" type="button" title="Edit" onClick={() => openEdit(row)}><Pencil size={16} /></button><button className="btn btn-danger" type="button" title="Delete" onClick={() => { setDeleteTarget(row); setModal('delete'); }}><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
+        <div className="table-container"><table><thead><tr>{['Installation Date', 'Username', 'Mobile No', 'Vehicle No', 'IMEI No', 'SIM No', 'Device Model', 'Next Renewal Date', 'Platform', 'Validity', 'Total Amount', 'Amount Paid', 'Pending Amount', 'Payment Status', 'SIM Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan="16">Loading renewals...</td></tr> : rows.length === 0 ? <tr><td colSpan="16">No renewal records found.</td></tr> : rows.map((row) => <tr key={row.id}><td>{formatDate(row.installation_date)}</td><td>{display(row.username)}</td><td>{display(row.primary_mobile_no)}</td><td>{display(row.vehicle_no)}</td><td>{display(row.imei_no)}</td><td>{display(row.sim_no_1)}</td><td>{display(row.device_model)}</td><td>{formatDate(row.next_renewal_date)}</td><td>{display(row.platform_name)}</td><td>{display(row.validity_months)} Months</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_payment_amount).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_paid).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_pending).toFixed(2)}` : '-'}</td><td>{row.payment_status ? <span className={`badge ${row.payment_status === 'Paid' ? 'badge-success' : row.payment_status === 'Partially Paid' ? 'badge-warning' : 'badge-danger'}`}>{row.payment_status}</span> : '-'}</td><td><span className="badge">{display(row.sim_status)}</span></td><td><div style={{ display: 'flex', gap: 6 }}><button className="btn" type="button" title="View" onClick={() => openView(row)}><Eye size={16} /></button><button className="btn" type="button" title="Edit" onClick={() => openEdit(row)}><Pencil size={16} /></button>{isSuperAdmin && row.undo_history_id && <button className="btn" type="button" title="Undo Renewal" aria-label={`Undo renewal for ${row.vehicle_no}`} onClick={() => { setUndoTarget(row); setUndoReason(''); }}><Undo2 size={16} /></button>}<button className="btn btn-danger" type="button" title="Delete" onClick={() => { setDeleteTarget(row); setModal('delete'); }}><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
         <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => load(page, filters)} onPageSizeChange={(size) => load(1, filters, size)} itemName="renewals" />
     </div>
 
@@ -514,7 +541,7 @@ const RenewalsPage = () => {
         {selected && <><InfoSection title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><InfoSection title="Installation Details" record={selected} fields={[['Installation Person', 'installation_person'], ['Installation Person Type', 'installation_person_type'], ['Lead Closure', 'lead_closure'], ['Installation Date', 'installation_date', true]]} /><InfoSection title="Renewal Details" record={selected} fields={renewalDetailFields} /></>}
     </Modal>
 
-    <Modal isOpen={modal === 'history'} onClose={() => setModal('view')} title="Renewal History" maxWidth="1150px"><div className="table-container"><table><thead><tr>{['Date', 'Action', 'Old Status', 'New Status', 'Old Validity', 'New Validity', 'Old Renewal Date', 'New Renewal Date', 'Amount', 'Paid', 'Pending', 'Payment Mode', 'Payment Date', 'Transaction ID', 'Changed By'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{history.length ? history.map((item) => <tr key={item.id}><td>{formatDateTime(item.action_date)}</td><td>{item.action_type}</td><td>{display(item.old_status)}</td><td>{display(item.new_status)}</td><td>{display(item.old_validity_months)}</td><td>{display(item.new_validity_months)}</td><td>{formatDate(item.old_renewal_date)}</td><td>{formatDate(item.new_renewal_date)}</td><td>{display(item.payment_amount)}</td><td>{display(item.amount_paid)}</td><td>{display(item.amount_pending)}</td><td>{display(item.payment_mode)}</td><td>{formatDate(item.payment_date)}</td><td>{display(item.transaction_id)}</td><td>{display(item.changed_by_name)}</td></tr>) : <tr><td colSpan="15">No history found.</td></tr>}</tbody></table></div></Modal>
+    <Modal isOpen={modal === 'history'} onClose={() => setModal('view')} title="Renewal History" maxWidth="1450px"><div className="table-container"><table><thead><tr>{['Date', 'Action', 'Old Status', 'New Status', 'Old Validity', 'New Validity', 'Old Renewal Date', 'New Renewal Date', 'Amount', 'Paid', 'Pending', 'Payment Mode', 'Payment Date', 'Transaction ID', 'Changed By', 'Undone At', 'Undone By', 'Undo Reason'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{history.length ? history.map((item) => <tr key={item.id}><td>{formatDateTime(item.created_at || item.action_date)}</td><td>{item.action_type}</td><td>{display(item.old_status)}</td><td>{display(item.new_status)}</td><td>{display(item.old_validity_months)}</td><td>{display(item.new_validity_months)}</td><td>{formatDate(item.old_renewal_date)}</td><td>{formatDate(item.new_renewal_date)}</td><td>{display(item.payment_amount)}</td><td>{display(item.amount_paid)}</td><td>{display(item.amount_pending)}</td><td>{display(item.payment_mode)}</td><td>{formatDate(item.payment_date)}</td><td>{display(item.transaction_id)}</td><td>{display(item.changed_by_name)}</td><td>{formatDateTime(item.undone_at)}</td><td>{display(item.undone_by_name)}</td><td>{display(item.undo_reason)}</td></tr>) : <tr><td colSpan="18">No history found.</td></tr>}</tbody></table></div></Modal>
 
     <Modal isOpen={modal === 'edit'} onClose={closeActionModal} title={`Renewal Action - ${selected?.username || ''}`} maxWidth="1100px" className="renewal-edit-modal" footer={<><button className="btn" type="button" onClick={closeActionModal}>Cancel</button><button className="btn btn-primary" type="button" disabled={saving} onClick={executeAction}>{saving ? 'Saving...' : 'Save Action'}</button></>}>
         {selected && <>
@@ -628,6 +655,21 @@ const RenewalsPage = () => {
         )}
     </Modal>
     <Modal isOpen={modal === 'delete'} onClose={() => setModal(null)} title="Delete Renewal" maxWidth="460px" footer={<><button className="btn" type="button" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-danger" type="button" disabled={saving} onClick={deleteRenewal}>{saving ? 'Deleting...' : 'Delete'}</button></>}><p>Are you sure you want to delete this renewal record?</p></Modal>
+    <Modal isOpen={Boolean(undoTarget)} onClose={() => { if (!undoing) setUndoTarget(null); }} title="Undo Renewal" maxWidth="560px" footer={<><button className="btn" type="button" disabled={undoing} onClick={() => setUndoTarget(null)}>Cancel</button><button className="btn btn-danger" type="button" disabled={undoing || !undoReason.trim()} onClick={undoRenewal}>{undoing ? 'Undoing...' : 'Confirm Undo'}</button></>}>
+        {undoTarget && <div>
+            <p>This will restore the previous renewal state for this vehicle. Confirm only if this specific renewal transaction should be reversed.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
+                <div><strong>Customer</strong><div>{undoTarget.customer_record_id ? `Customer #${undoTarget.customer_record_id}` : '-'}</div></div>
+                <div><strong>Username</strong><div>{display(undoTarget.username)}</div></div>
+                <div><strong>Mobile</strong><div>{display(undoTarget.primary_mobile_no)}</div></div>
+                <div><strong>Vehicle</strong><div>{display(undoTarget.vehicle_no)}</div></div>
+                <div><strong>SIM</strong><div>{display(undoTarget.sim_no_1)}</div></div>
+                <div><strong>Current renewal date</strong><div>{formatDate(undoTarget.next_renewal_date)}</div></div>
+                <div><strong>Current validity</strong><div>{display(undoTarget.validity_months)} months</div></div>
+            </div>
+            <Field label="Reason for undo"><textarea className="form-control" rows="3" value={undoReason} onChange={(event) => setUndoReason(event.target.value)} maxLength={500} required /></Field>
+        </div>}
+    </Modal>
     <Modal isOpen={modal === 'confirm'} onClose={() => setModal('edit')} title={form.action}><p>{form.action === 'Deactivate SIM' ? 'Are you sure you want to deactivate this SIM?' : 'Move this SIM to Safe Custody without changing its saved expiry date?'}</p><div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button className="btn" type="button" onClick={() => setModal('edit')}>Cancel</button><button className="btn btn-danger" type="button" disabled={saving} onClick={saveAction}>Confirm</button></div></Modal>
     </div>;
 };

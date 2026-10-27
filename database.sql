@@ -652,6 +652,7 @@ CREATE TABLE IF NOT EXISTS customer_installations (
     id INT NOT NULL AUTO_INCREMENT,
 
     customer_id INT NOT NULL,
+    vehicle_id INT DEFAULT NULL,
 
     installation_person_type
         ENUM('Technician', 'Dealer')
@@ -859,6 +860,7 @@ CREATE TABLE IF NOT EXISTS customer_renewals (
     id INT NOT NULL AUTO_INCREMENT,
 
     customer_id INT NOT NULL,
+    vehicle_id INT DEFAULT NULL,
 
     installation_date DATE NOT NULL,
 
@@ -891,8 +893,10 @@ CREATE TABLE IF NOT EXISTS customer_renewals (
 
     PRIMARY KEY (id),
 
-    UNIQUE KEY uq_customer_renewal_customer
-        (customer_id),
+    UNIQUE KEY uq_customer_renewal_vehicle
+        (vehicle_id),
+
+    INDEX idx_customer_renewal_customer (customer_id),
 
     INDEX idx_customer_next_renewal
         (next_renewal_date),
@@ -903,6 +907,12 @@ CREATE TABLE IF NOT EXISTS customer_renewals (
     CONSTRAINT fk_customer_renewal_customer
         FOREIGN KEY (customer_id)
         REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_customer_renewal_vehicle
+        FOREIGN KEY (vehicle_id)
+        REFERENCES customer_vehicle_details(id)
         ON UPDATE CASCADE
         ON DELETE CASCADE
 

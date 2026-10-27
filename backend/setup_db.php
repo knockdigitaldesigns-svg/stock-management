@@ -300,6 +300,7 @@ $tables = [
     "CREATE TABLE IF NOT EXISTS customer_renewals (
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         customer_id INT NOT NULL,
+        vehicle_id INT DEFAULT NULL,
         installation_date DATE NOT NULL,
         next_renewal_date DATE DEFAULT NULL,
         validity_months INT NOT NULL,
@@ -310,10 +311,12 @@ $tables = [
         safe_custody_date DATE DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_customer_renewal_customer (customer_id),
+        UNIQUE KEY uq_customer_renewal_vehicle (vehicle_id),
+        INDEX idx_customer_renewal_customer (customer_id),
         INDEX idx_customer_next_renewal (next_renewal_date),
         INDEX idx_customer_sim_status (sim_status),
-        CONSTRAINT fk_customer_renewal_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON UPDATE CASCADE ON DELETE CASCADE
+        CONSTRAINT fk_customer_renewal_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        CONSTRAINT fk_customer_renewal_vehicle FOREIGN KEY (vehicle_id) REFERENCES customer_vehicle_details(id) ON UPDATE CASCADE ON DELETE CASCADE
     )",
     "CREATE TABLE IF NOT EXISTS customer_cash_collections (
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -426,6 +429,11 @@ $tables = [
         source_history_id INT DEFAULT NULL,
         source_balance_updated TINYINT(1) NOT NULL DEFAULT 1,
         notes TEXT NULL,
+        previous_state_json LONGTEXT DEFAULT NULL,
+        result_state_json LONGTEXT DEFAULT NULL,
+        undone_at DATETIME DEFAULT NULL,
+        undone_by INT DEFAULT NULL,
+        undo_reason VARCHAR(500) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )"
 ];
@@ -487,12 +495,18 @@ $columnChecks = [
     ['stock_alert_settings', 'notes', "ALTER TABLE stock_alert_settings ADD COLUMN notes TEXT NULL AFTER minimum_sim_count"],
     ['customer_installations', 'vehicle_id', "ALTER TABLE customer_installations ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
+    ['customer_renewals', 'vehicle_id', "ALTER TABLE customer_renewals ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
     ['dealer_allocation_payment_requests', 'payload_hash', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN payload_hash CHAR(64) NOT NULL DEFAULT '' AFTER request_key"],
     ['dealer_allocation_payment_requests', 'transaction_id', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payload_hash"],
     ['renewal_history', 'bulk_payment_request_key', "ALTER TABLE renewal_history ADD COLUMN bulk_payment_request_key VARCHAR(64) DEFAULT NULL AFTER changed_by"],
     ['renewal_history', 'source_history_id', "ALTER TABLE renewal_history ADD COLUMN source_history_id INT DEFAULT NULL AFTER bulk_payment_request_key"],
     ['renewal_history', 'source_balance_updated', "ALTER TABLE renewal_history ADD COLUMN source_balance_updated TINYINT(1) NOT NULL DEFAULT 1 AFTER source_history_id"],
+    ['renewal_history', 'previous_state_json', "ALTER TABLE renewal_history ADD COLUMN previous_state_json LONGTEXT DEFAULT NULL AFTER notes"],
+    ['renewal_history', 'result_state_json', "ALTER TABLE renewal_history ADD COLUMN result_state_json LONGTEXT DEFAULT NULL AFTER previous_state_json"],
+    ['renewal_history', 'undone_at', "ALTER TABLE renewal_history ADD COLUMN undone_at DATETIME DEFAULT NULL AFTER result_state_json"],
+    ['renewal_history', 'undone_by', "ALTER TABLE renewal_history ADD COLUMN undone_by INT DEFAULT NULL AFTER undone_at"],
+    ['renewal_history', 'undo_reason', "ALTER TABLE renewal_history ADD COLUMN undo_reason VARCHAR(500) DEFAULT NULL AFTER undone_by"],
 ];
 
 foreach ($columnChecks as [$table, $column, $alterSql]) {

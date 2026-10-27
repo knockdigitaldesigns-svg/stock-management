@@ -144,7 +144,7 @@ const hasCompletedPaymentPart2 = (vehicle) => {
         && Math.abs(totalAmount - totalSaleAmount) <= 0.005;
 };
 
-const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, step }) => (
+const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, step, maxLength }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         <input
@@ -152,7 +152,7 @@ const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, 
             value={value ?? ''}
             onChange={(event) => onChange(digitsOnly ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value)}
             inputMode={digitsOnly ? 'numeric' : undefined}
-            maxLength={digitsOnly ? 6 : undefined}
+            maxLength={maxLength ?? (digitsOnly ? 6 : undefined)}
             pattern={digitsOnly ? '[0-9]{6}' : undefined}
             min={min}
             step={step}
@@ -193,6 +193,7 @@ const CustomerViewPage = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const [originalUsername, setOriginalUsername] = useState('');
     const [customerChanged, setCustomerChanged] = useState(false);
     const [changedVehicles, setChangedVehicles] = useState({});
     const [verificationDraftId, setVerificationDraftId] = useState(0);
@@ -252,6 +253,7 @@ const CustomerViewPage = () => {
             }
 
             const data = response.data?.data || {};
+            setOriginalUsername(String(data.customer?.username || '').trim());
             const vehicles = Array.isArray(data.vehicles)
                 ? data.vehicles
                 : data.vehicle
@@ -471,6 +473,21 @@ const CustomerViewPage = () => {
 
     const handleSave = async ({ advance = false, navigateToStep = null } = {}) => {
         const customer = customerData.customer || {};
+        if (customerChanged && String(customer.username || '').trim() !== originalUsername) {
+            const username = String(customer.username || '').trim();
+            if (!username) {
+                triggerError('Username is required.');
+                return false;
+            }
+            if (username.length > 100) {
+                triggerError('Username must not exceed 100 characters.');
+                return false;
+            }
+            if (!/^[a-zA-Z0-9.@_-]+$/.test(username)) {
+                triggerError('Username can contain only letters, numbers, @, dot, underscore and hyphen.');
+                return false;
+            }
+        }
         if (!advance && navigateToStep === null) {
             for (const vehicle of vehicles) {
                 if (!changedVehicles[vehicle.id]?.paymentPart2) {
@@ -1019,7 +1036,7 @@ const CustomerViewPage = () => {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                             {isEditMode ? (
                                 <>
-                                    <EditField label="Username" value={customer.username} onChange={(value) => updateCustomerField('username', value)} />
+                                    <EditField label="Username" value={customer.username} onChange={(value) => updateCustomerField('username', value)} maxLength={100} />
                                     <EditSelect
                                         label="Platform"
                                         value={customer.platform_id}

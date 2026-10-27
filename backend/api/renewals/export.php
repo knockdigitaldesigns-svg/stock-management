@@ -7,6 +7,7 @@ requirePermission('customer_renewals.view');
 
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
+ensureRenewalTables($conn);
 
 $page = max(1, (int)($_GET['page'] ?? 1));
 $pageSize = min(500, max(1, (int)($_GET['page_size'] ?? 500)));
@@ -15,20 +16,7 @@ $condition = $filterQuery['condition'];
 $params = $filterQuery['params'];
 $types = $filterQuery['types'];
 
-$count = $conn->prepare(
-    "SELECT COUNT(*) AS total
-     FROM customer_renewals cr
-     INNER JOIN customers c ON c.id = cr.customer_id
-     LEFT JOIN customer_vehicle_details cv ON cv.id = (
-         SELECT id FROM customer_vehicle_details
-         WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1
-     )
-     LEFT JOIN device_types dt ON dt.id = cv.device_model_id
-     LEFT JOIN customer_installations ci ON ci.id = (
-         SELECT id FROM customer_installations
-         WHERE customer_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1
-     )" . $condition
-);
+$count = $conn->prepare(renewalCountQuery() . $condition);
 if (!$count) {
     $error = $conn->error;
     $conn->close();
@@ -46,7 +34,7 @@ $count->close();
 
 $offset = ($page - 1) * $pageSize;
 $stmt = $conn->prepare(
-    renewalRowQuery() . $condition .
+    renewalRowQuery($conn) . $condition .
     ' ORDER BY ci.installation_date DESC, cr.id DESC LIMIT ? OFFSET ?'
 );
 if (!$stmt) {
