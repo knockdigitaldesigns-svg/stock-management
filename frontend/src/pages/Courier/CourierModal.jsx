@@ -7,7 +7,7 @@ import { softwareDropdownOptions } from '../../constants/software';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { showGlobalError } from '../../context/ErrorContext';
 import { getTodayDate } from '../../utils/date';
-import { UserPlus, Car, Wrench, CreditCard, DollarSign } from 'lucide-react';
+import { UserPlus, Car, Wrench, CreditCard, DollarSign, MapPin } from 'lucide-react';
 
 const getDealerAssignedSoftware = (dealer) => {
     if (!dealer) return [];
@@ -18,6 +18,44 @@ const getDealerAssignedSoftware = (dealer) => {
         return dealer.software.split(',').map(s => s.trim()).filter(Boolean);
     }
     return [];
+};
+
+const currencyToCents = (value) => {
+    const amount = String(value ?? '').trim();
+    if (amount === '') return 0;
+    if (!/^-?\d+(?:\.\d*)?$/.test(amount)) return null;
+
+    const negative = amount.startsWith('-');
+    const [wholeValue, fractionValue = ''] = (negative ? amount.slice(1) : amount).split('.');
+    const whole = wholeValue.replace(/^0+(?=\d)/, '');
+    if (whole.length > 10 || (whole.length === 10 && whole > '9999999999')) return null;
+    const fraction = fractionValue.padEnd(3, '0');
+    let cents = (Number(whole) * 100) + Number(fraction.slice(0, 2));
+    if (Number(fraction[2]) >= 5) cents += 1;
+    return negative ? -cents : cents;
+};
+
+const formatInrCents = (cents) => new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+}).format(cents / 100);
+
+const getPaymentMismatchError = (form) => {
+    const saleCents = currencyToCents(form.totalSaleAmount);
+    const chargeCents = [
+        form.deviceCharge,
+        form.softwareCharge,
+        form.technicianCharge,
+        form.simCharge,
+        form.courierCharge
+    ].map(currencyToCents);
+    if (saleCents === null || chargeCents.some((amount) => amount === null)) return '';
+
+    const totalChargesCents = chargeCents.reduce((total, amount) => total + amount, 0);
+    if (saleCents === totalChargesCents) return '';
+    return `Payment amount mismatch! Payment Part 1 Total Amount (${formatInrCents(saleCents)}) must match Payment Part 2 Total Charges (${formatInrCents(totalChargesCents)}). Please correct the amounts before saving.`;
 };
 
 const initialNewCustomerForm = {
@@ -40,7 +78,7 @@ const initialNewCustomerForm = {
     validity_id: '',
 
     // Step 3 - Installation Details
-    installation_person_type: 'Technician',
+    installation_person_type: 'Direct',
     installation_person_id: '',
     installation_date: getTodayDate(),
     lead_closure_id: '',
@@ -66,26 +104,69 @@ const initialNewCustomerForm = {
     payment_step5_transaction_id: ''
 };
 
+const calculatePaymentTotals = (form) => {
+    const totalSaleAmountCents = currencyToCents(form.totalSaleAmount) || 0;
+    const totalChargesCents = [
+        form.deviceCharge,
+        form.softwareCharge,
+        form.technicianCharge,
+        form.simCharge,
+        form.courierCharge
+    ].reduce((total, charge) => total + (currencyToCents(charge) || 0), 0);
+    const totalAmountCents = totalChargesCents > 0 ? totalChargesCents : totalSaleAmountCents;
+    const amountPaidCents = currencyToCents(form.amountPaid) || 0;
+    const amountPendingCents = Math.max(0, totalAmountCents - amountPaidCents);
+    const pendingOnly = totalChargesCents === 0 && totalSaleAmountCents > 0 && amountPaidCents <= 0 &&
+        !form.payment_step4_mode && !form.payment_step4_transaction_id;
+    const paymentStatus = pendingOnly
+        ? 'Pending'
+        : amountPaidCents <= 0
+            ? 'Not Paid'
+            : amountPaidCents < totalAmountCents
+                ? 'Partially Paid'
+                : 'Paid';
+
+    return {
+        totalAmount: totalAmountCents ? String(Number((totalAmountCents / 100).toFixed(2))) : '',
+        amountPending: totalAmountCents ? String(Number((amountPendingCents / 100).toFixed(2))) : '',
+        paymentStatus
+    };
+};
+
+const initialDeliveryAddress = {
+    delivery_recipient_name: '',
+    delivery_mobile_no: '',
+    delivery_address_line1: '',
+    delivery_address_line2: '',
+    delivery_city: '',
+    delivery_district: '',
+    delivery_state: '',
+    delivery_pincode: '',
+    delivery_notes: ''
+};
+
+const initialCourierPayment = {
+    payment_amount: '',
+    payment_status: 'Pending',
+    payment_method: '',
+    payment_transaction_id: '',
+    payment_date: '',
+    payment_notes: ''
+};
+
 const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     const isEdit = Boolean(editData);
 
     const personOptions = [
         { value: 'Dealer', label: 'Dealer' },
         { value: 'Technician', label: 'Technician' },
-        { value: 'Customer', label: 'Customer' }
+        { value: 'Customer', label: 'Existing Customer' }
     ];
 
     const assetTypeOptions = [
         { value: 'device', label: 'Device' },
         { value: 'sim', label: 'SIM' },
         { value: 'both', label: 'Both Devices & SIMs' }
-    ];
-
-    const installationTypeOptions = [
-        { value: 'Technician', label: 'Technician' },
-        { value: 'Onsite Dealer', label: 'Onsite Dealer' },
-        { value: 'Offsite Dealer', label: 'Offsite Dealer' },
-        { value: 'Direct', label: 'Direct' }
     ];
 
     // Form State
@@ -114,6 +195,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     const [software, setSoftware]               = useState('');
     const [courierDate, setCourierDate]         = useState(getTodayDate());
     const [notes, setNotes]                     = useState('');
+    const [deliveryAddress, setDeliveryAddress] = useState(initialDeliveryAddress);
+    const [sameAsCustomerDetailsAddress, setSameAsCustomerDetailsAddress] = useState(false);
+    const [paymentDetails, setPaymentDetails]   = useState(initialCourierPayment);
 
     // Available Stock & Dropdowns Data
     const [dealersList, setDealersList]         = useState([]);
@@ -136,10 +220,121 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     const [error, setError]                     = useState('');
 
     const isCreatingNewCustomer = (courierToPerson === 'Customer' && selectedCustomer === '__create_new__');
+    const isExistingCustomer = courierToPerson === 'Customer' && selectedCustomer && selectedCustomer !== '__create_new__';
+    const showCustomerWorkflowSections = isCreatingNewCustomer || isExistingCustomer;
+    const showPaymentWorkflowSections = showCustomerWorkflowSections ||
+        courierToPerson === 'Dealer' || courierToPerson === 'Technician';
+    const selectedCustomerDetails = customersList.find((customer) => String(customer.id) === String(selectedCustomer));
+    const paymentMismatchError = getPaymentMismatchError(newCustomerForm);
 
     const triggerError = (msg) => {
         setError(msg);
         showGlobalError(msg);
+    };
+
+    const getCustomerDetailsAddress = () => {
+        if (isCreatingNewCustomer) {
+            return {
+                delivery_city: newCustomerForm.location.trim(),
+                delivery_pincode: newCustomerForm.pincode.trim()
+            };
+        }
+
+        const customer = customersList.find((item) => String(item.id) === String(selectedCustomer));
+        return {
+            delivery_city: customer?.location || '',
+            delivery_pincode: customer?.pincode || ''
+        };
+    };
+
+    const getNewCustomerPlatformId = () => {
+        const matchingPlatform = platformsList.find(
+            (platform) => String(platform.name || '').trim().toLowerCase() === String(software || '').trim().toLowerCase()
+        );
+        return matchingPlatform?.id || newCustomerForm.platform_id || '';
+    };
+
+    const updateDeliveryAddress = (event) => {
+        const { name, value } = event.target;
+        setDeliveryAddress((previous) => ({ ...previous, [name]: value }));
+    };
+
+    const handleSameAsCustomerDetailsAddressChange = (event) => {
+        const checked = event.target.checked;
+        setSameAsCustomerDetailsAddress(checked);
+        if (checked) {
+            setDeliveryAddress((previous) => ({
+                ...previous,
+                ...getCustomerDetailsAddress()
+            }));
+        }
+    };
+
+    const populateDeliveryAddress = (type, id) => {
+        const person = type === 'Dealer'
+            ? dealersList.find((item) => String(item.id) === String(id))
+            : type === 'Technician'
+                ? techniciansList.find((item) => String(item.id) === String(id))
+                : customersList.find((item) => String(item.id) === String(id));
+        if (!person) {
+            setDeliveryAddress(initialDeliveryAddress);
+            setSameAsCustomerDetailsAddress(false);
+            return;
+        }
+        setDeliveryAddress({
+            ...initialDeliveryAddress,
+            delivery_recipient_name: person.dealer_name || person.technician_name || person.username || '',
+            delivery_mobile_no: person.mobile_no || '',
+            delivery_city: person.location || '',
+            delivery_pincode: person.pincode || ''
+        });
+        setSameAsCustomerDetailsAddress(
+            type === 'Customer' && Boolean(person.location || person.pincode)
+        );
+    };
+
+    const handleCustomerSelection = (value) => {
+        setSelectedCustomer(value);
+        if (value === '__create_new__') {
+            setNewCustomerForm(initialNewCustomerForm);
+            setDeliveryAddress({
+                ...initialDeliveryAddress,
+                delivery_city: '',
+                delivery_pincode: ''
+            });
+            setSameAsCustomerDetailsAddress(true);
+            return;
+        }
+
+        const customer = customersList.find((item) => String(item.id) === String(value));
+        if (!customer) {
+            setNewCustomerForm(initialNewCustomerForm);
+            setDeliveryAddress(initialDeliveryAddress);
+            setSameAsCustomerDetailsAddress(false);
+            return;
+        }
+
+        setNewCustomerForm({
+            ...initialNewCustomerForm,
+            platform_id: customer.platform_id ? String(customer.platform_id) : '',
+            username: customer.username || '',
+            primary_mobile_no: customer.mobile_no || '',
+            secondary_mobile_no: customer.secondary_mobile_no || '',
+            email: customer.email || '',
+            location: customer.location || '',
+            pincode: customer.pincode || '',
+            installation_person_type: 'Direct'
+        });
+        populateDeliveryAddress('Customer', value);
+    };
+
+    const handleRecipientTypeChange = (type) => {
+        setCourierToPerson(type);
+        setSelectedDealer('');
+        setSelectedTechnician('');
+        setSelectedCustomer('');
+        setDeliveryAddress(initialDeliveryAddress);
+        setSameAsCustomerDetailsAddress(false);
     };
 
     const handleNewCustomerChange = (e) => {
@@ -161,48 +356,25 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
 
         setNewCustomerForm((prev) => {
             const updated = { ...prev, [name]: val };
-
-            // Auto calculations for payment step 5
-            if (['deviceCharge', 'softwareCharge', 'technicianCharge', 'simCharge', 'courierCharge', 'totalSaleAmount'].includes(name)) {
-                const d = parseFloat(updated.deviceCharge) || 0;
-                const s = parseFloat(updated.softwareCharge) || 0;
-                const t = parseFloat(updated.technicianCharge) || 0;
-                const sim = parseFloat(updated.simCharge) || 0;
-                const c = parseFloat(updated.courierCharge) || 0;
-                const sumCharges = d + s + t + sim + c;
-                const calculatedTotal = sumCharges > 0 ? sumCharges : (parseFloat(updated.totalSaleAmount) || 0);
-                
-                updated.totalAmount = calculatedTotal > 0 ? String(calculatedTotal) : '';
-                
-                const paid = parseFloat(updated.amountPaid) || 0;
-                const pending = Math.max(0, calculatedTotal - paid);
-                updated.amountPending = calculatedTotal > 0 ? String(pending) : '';
-                
-                if (paid >= calculatedTotal && calculatedTotal > 0) {
-                    updated.paymentStatus = 'Paid';
-                } else if (paid > 0) {
-                    updated.paymentStatus = 'Partial';
-                } else {
-                    updated.paymentStatus = 'Not Paid';
-                }
+            if (name === 'payment_step4_mode') updated.payment_step5_mode = val;
+            if (name === 'payment_step5_mode') updated.payment_step4_mode = val;
+            if (name === 'payment_step4_transaction_id') updated.payment_step5_transaction_id = val;
+            if (name === 'payment_step5_transaction_id') updated.payment_step4_transaction_id = val;
+            const paymentFields = [
+                'totalSaleAmount', 'deviceCharge', 'softwareCharge', 'technicianCharge',
+                'simCharge', 'courierCharge', 'amountPaid'
+            ];
+            if (paymentFields.includes(name)) {
+                Object.assign(updated, calculatePaymentTotals(updated));
             }
-
-            if (name === 'amountPaid') {
-                const total = parseFloat(updated.totalAmount) || (parseFloat(updated.totalSaleAmount) || 0);
-                const paid = parseFloat(val) || 0;
-                const pending = Math.max(0, total - paid);
-                updated.amountPending = total > 0 ? String(pending) : '';
-                if (paid >= total && total > 0) {
-                    updated.paymentStatus = 'Paid';
-                } else if (paid > 0) {
-                    updated.paymentStatus = 'Partial';
-                } else {
-                    updated.paymentStatus = 'Not Paid';
-                }
-            }
-
             return updated;
         });
+        if (sameAsCustomerDetailsAddress && (name === 'location' || name === 'pincode')) {
+            setDeliveryAddress((previous) => ({
+                ...previous,
+                [name === 'location' ? 'delivery_city' : 'delivery_pincode']: val
+            }));
+        }
         setError('');
     };
 
@@ -314,10 +486,36 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     // Populate edit data
     useEffect(() => {
         if (editData && isOpen) {
+            setSameAsCustomerDetailsAddress(false);
             const toPerson = editData.courier_to_person || 'Dealer';
             setCourierToPerson(toPerson);
             setSelectedDealer(editData.dealer_id ? String(editData.dealer_id) : '');
             setSelectedTechnician(editData.technician_id ? String(editData.technician_id) : '');
+            let savedRequestData = {};
+            try {
+                savedRequestData = typeof editData.new_customer_data === 'string'
+                    ? JSON.parse(editData.new_customer_data)
+                    : (editData.new_customer_data || {});
+            } catch (e) {
+                console.error('Failed to parse saved courier workflow data', e);
+            }
+            const savedPayment = savedRequestData.payment_workflow || savedRequestData;
+            if (toPerson === 'Dealer' || toPerson === 'Technician') {
+                setNewCustomerForm({
+                    ...initialNewCustomerForm,
+                    totalSaleAmount: savedPayment.step4?.totalSaleAmount || '',
+                    payment_step4_transaction_id: savedPayment.step4?.transactionId || '',
+                    payment_step4_mode: savedPayment.step4?.paymentMode || '',
+                    deviceCharge: savedPayment.step5?.deviceCharge || '',
+                    softwareCharge: savedPayment.step5?.softwareCharge || '',
+                    technicianCharge: savedPayment.step5?.technicianCharge || '',
+                    simCharge: savedPayment.step5?.simCharge || '',
+                    courierCharge: savedPayment.step5?.courierCharge || '',
+                    amountPaid: savedPayment.step5?.amountPaid || '0',
+                    payment_step5_mode: savedPayment.step4?.paymentMode || savedPayment.step5?.paymentMode || '',
+                    payment_step5_transaction_id: savedPayment.step4?.transactionId || savedPayment.step5?.transactionId || ''
+                });
+            }
             
             if (editData.is_new_customer) {
                 setSelectedCustomer('__create_new__');
@@ -339,8 +537,8 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             validity_id: parsed.step2.validity_id || ''
                         } : {}),
                         ...(parsed.step3 ? {
-                            installation_person_type: parsed.step3.installation_person_type || 'Technician',
-                            installation_person_id: parsed.step3.installation_person_id || '',
+                            installation_person_type: 'Direct',
+                            installation_person_id: '',
                             installation_date: parsed.step3.installation_date || getTodayDate(),
                             lead_closure_id: parsed.step3.lead_closure_id || ''
                         } : {}),
@@ -361,15 +559,58 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             amountPaid: parsed.step5.amountPaid || '0',
                             amountPending: parsed.step5.amountPending || '',
                             paymentStatus: parsed.step5.paymentStatus || 'Not Paid',
-                            payment_step5_mode: parsed.step5.paymentMode || '',
-                            payment_step5_transaction_id: parsed.step5.transactionId || ''
+                            payment_step5_mode: parsed.step4?.paymentMode || parsed.step5.paymentMode || '',
+                            payment_step5_transaction_id: parsed.step4?.transactionId || parsed.step5.transactionId || ''
                         } : {})
                     });
                 } catch (e) {
                     console.error('Failed to parse new_customer_data', e);
                 }
-            } else {
+            } else if (toPerson === 'Customer') {
                 setSelectedCustomer(editData.customer_id ? String(editData.customer_id) : '');
+                try {
+                    const parsed = typeof editData.new_customer_data === 'string'
+                        ? JSON.parse(editData.new_customer_data)
+                        : (editData.new_customer_data || {});
+                    setNewCustomerForm({
+                        ...initialNewCustomerForm,
+                        ...(parsed.step2 ? {
+                            vehicle_no: parsed.step2.vehicle_no || '',
+                            vehicle_type_id: parsed.step2.vehicle_type_id || '',
+                            vehicle_device_model_id: parsed.step2.device_model_id || '',
+                            vehicle_imei_no: parsed.step2.imei_no || '',
+                            vehicle_sim_no_1: parsed.step2.sim_no_1 || '',
+                            vehicle_sim_no_2: parsed.step2.sim_no_2 || '',
+                            validity_id: parsed.step2.validity_id || ''
+                        } : {}),
+                        ...(parsed.step3 ? {
+                            installation_person_type: parsed.step3.installation_person_type || 'Direct',
+                            installation_person_id: parsed.step3.installation_person_id || '',
+                            installation_date: parsed.step3.installation_date || getTodayDate(),
+                            lead_closure_id: parsed.step3.lead_closure_id || ''
+                        } : {}),
+                        ...(parsed.step4 ? {
+                            totalSaleAmount: parsed.step4.totalSaleAmount || '',
+                            payment_step4_transaction_id: parsed.step4.transactionId || '',
+                            payment_step4_mode: parsed.step4.paymentMode || ''
+                        } : {}),
+                        ...(parsed.step5 ? {
+                            deviceCharge: parsed.step5.deviceCharge || '',
+                            softwareCharge: parsed.step5.softwareCharge || '',
+                            technicianCharge: parsed.step5.technicianCharge || '',
+                            simCharge: parsed.step5.simCharge || '',
+                            courierCharge: parsed.step5.courierCharge || '',
+                            totalAmount: parsed.step5.totalAmount || '',
+                            amountPaid: parsed.step5.amountPaid || '0',
+                            amountPending: parsed.step5.amountPending || '',
+                            paymentStatus: parsed.step5.paymentStatus || 'Not Paid',
+                            payment_step5_mode: parsed.step4?.paymentMode || parsed.step5.paymentMode || '',
+                            payment_step5_transaction_id: parsed.step4?.transactionId || parsed.step5.transactionId || ''
+                        } : {})
+                    });
+                } catch (e) {
+                    console.error('Failed to parse existing customer workflow data', e);
+                }
             }
 
             setAssetType(editData.asset_type || 'device');
@@ -386,6 +627,27 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             setSoftware(editData.software || '');
             setCourierDate(editData.courier_date || getTodayDate());
             setNotes(editData.notes || '');
+            setDeliveryAddress({
+                ...initialDeliveryAddress,
+                delivery_recipient_name: editData.delivery_recipient_name || '',
+                delivery_mobile_no: editData.delivery_mobile_no || '',
+                delivery_address_line1: editData.delivery_address_line1 || '',
+                delivery_address_line2: editData.delivery_address_line2 || '',
+                delivery_city: editData.delivery_city || '',
+                delivery_district: editData.delivery_district || '',
+                delivery_state: editData.delivery_state || '',
+                delivery_pincode: editData.delivery_pincode || '',
+                delivery_notes: editData.delivery_notes || ''
+            });
+            setPaymentDetails({
+                ...initialCourierPayment,
+                payment_amount: editData.payment_amount ?? '',
+                payment_status: editData.payment_status || 'Pending',
+                payment_method: editData.payment_method || '',
+                payment_transaction_id: editData.payment_transaction_id || '',
+                payment_date: editData.payment_date || '',
+                payment_notes: editData.payment_notes || ''
+            });
             setError('');
         } else if (!editData && isOpen) {
             setCourierToPerson('Dealer');
@@ -393,6 +655,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             setSelectedTechnician('');
             setSelectedCustomer('');
             setNewCustomerForm(initialNewCustomerForm);
+            setSameAsCustomerDetailsAddress(false);
             setAssetType('device');
             setDeviceCount(1);
             setSimCount(1);
@@ -405,6 +668,8 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             setSoftware('');
             setCourierDate(getTodayDate());
             setNotes('');
+            setDeliveryAddress(initialDeliveryAddress);
+            setPaymentDetails(initialCourierPayment);
             setError('');
         }
     }, [editData, isOpen]);
@@ -427,32 +692,6 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             label: `${c.username}${c.status ? ` - ${c.status}` : ''}`
         }))
     ];
-
-    // Filtered installation persons based on installation type in step 3
-    const getInstallationPersonOptions = () => {
-        const type = newCustomerForm.installation_person_type;
-        if (type === 'Technician') {
-            return techniciansList.map(t => ({
-                value: String(t.id),
-                label: `${t.technician_name}${t.location ? ` (${t.location})` : ''}`
-            }));
-        } else if (type === 'Onsite Dealer') {
-            return dealersList
-                .filter(d => String(d.installation_status || '').toLowerCase() === 'onsite')
-                .map(d => ({
-                    value: String(d.id),
-                    label: `${d.dealer_name} (Onsite)`
-                }));
-        } else if (type === 'Offsite Dealer') {
-            return dealersList
-                .filter(d => String(d.installation_status || '').toLowerCase() === 'offsite')
-                .map(d => ({
-                    value: String(d.id),
-                    label: `${d.dealer_name} (Offsite)`
-                }));
-        }
-        return [];
-    };
 
     // Auto-select software when dealer is chosen
     const currentDealer = dealersList.find(d => String(d.id) === String(selectedDealer));
@@ -491,8 +730,8 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
         }
 
         if (isCreatingNewCustomer) {
-            if (!newCustomerForm.platform_id) {
-                triggerError('Please select a Platform for the new customer.');
+            if (!getNewCustomerPlatformId()) {
+                triggerError('Select a Software that matches an active Platform for the new customer.');
                 return;
             }
             if (!newCustomerForm.username.trim()) {
@@ -523,6 +762,71 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                 triggerError("Pincode must contain exactly 6 digits.");
                 return;
             }
+        }
+        if (isExistingCustomer && newCustomerForm.installation_person_type !== 'Direct' && !newCustomerForm.installation_person_id) {
+            triggerError('Select an Installation Person for the chosen Installation Type.');
+            return;
+        }
+
+        const saleAmountCents = currencyToCents(newCustomerForm.totalSaleAmount);
+        const amountPaidCents = currencyToCents(newCustomerForm.amountPaid);
+        const chargeValuesCents = [
+            newCustomerForm.deviceCharge,
+            newCustomerForm.softwareCharge,
+            newCustomerForm.technicianCharge,
+            newCustomerForm.simCharge,
+            newCustomerForm.courierCharge
+        ].map(currencyToCents);
+        const saleAmount = Number(newCustomerForm.totalSaleAmount) || 0;
+        const paymentMode = newCustomerForm.payment_step4_mode;
+        const transactionId = newCustomerForm.payment_step4_transaction_id.trim();
+        const chargeValues = [
+            Number(newCustomerForm.deviceCharge) || 0,
+            Number(newCustomerForm.softwareCharge) || 0,
+            Number(newCustomerForm.technicianCharge) || 0,
+            Number(newCustomerForm.simCharge) || 0,
+            Number(newCustomerForm.courierCharge) || 0
+        ];
+        const totalChargesCents = chargeValuesCents.reduce((total, charge) => total + (charge || 0), 0);
+        const totalCharges = totalChargesCents / 100;
+        const amountPaid = Number(newCustomerForm.amountPaid) || 0;
+        const hasPaymentData = saleAmount > 0 || paymentMode || transactionId ||
+            totalCharges > 0 || amountPaid > 0;
+        if (saleAmountCents === null || amountPaidCents === null || chargeValuesCents.some((amount) => amount === null)) {
+            triggerError('Payment amounts and charges must be valid currency amounts.');
+            return;
+        }
+        if (saleAmount < 0 || chargeValues.some((charge) => charge < 0) || amountPaid < 0) {
+            triggerError('Payment amounts and charges cannot be negative.');
+            return;
+        }
+        if (paymentMismatchError) {
+            triggerError(paymentMismatchError);
+            return;
+        }
+        if (hasPaymentData && saleAmount <= 0) {
+            triggerError('Total Sale Amount is required when entering payment details.');
+            return;
+        }
+        if (chargeValuesCents.some((charge) => charge > saleAmountCents)) {
+            triggerError('An individual charge cannot exceed Total Sale Amount.');
+            return;
+        }
+        if (amountPaidCents > (totalChargesCents > 0 ? totalChargesCents : saleAmountCents)) {
+            triggerError('Amount Paid cannot exceed Total Amount.');
+            return;
+        }
+        if (transactionId && !/^\d{6}$/.test(transactionId)) {
+            triggerError('Transaction ID must contain exactly 6 digits.');
+            return;
+        }
+        if (transactionId && !paymentMode) {
+            triggerError('Payment Mode is required when Transaction ID is entered.');
+            return;
+        }
+        if (paymentMode && paymentMode !== 'Cash' && !transactionId) {
+            triggerError('Transaction ID is required for the selected Payment Mode.');
+            return;
         }
 
         const numDeviceCount = parseInt(deviceCount, 10);
@@ -555,6 +859,37 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             }
         }
 
+        const addressPayload = {
+            ...deliveryAddress,
+            delivery_recipient_name: deliveryAddress.delivery_recipient_name || (isCreatingNewCustomer ? newCustomerForm.username.trim() : ''),
+            delivery_mobile_no: deliveryAddress.delivery_mobile_no || (isCreatingNewCustomer ? newCustomerForm.primary_mobile_no.trim() : '')
+        };
+        if (!addressPayload.delivery_recipient_name.trim()) {
+            triggerError('Recipient Name is required for delivery.');
+            return;
+        }
+        const mobileDigits = addressPayload.delivery_mobile_no.replace(/\D/g, '');
+        if (!/^\+?[\d\s()-]+$/.test(addressPayload.delivery_mobile_no) || mobileDigits.length < 8 || mobileDigits.length > 15) {
+            triggerError('Mobile Number must contain 8 to 15 digits.');
+            return;
+        }
+        if (!addressPayload.delivery_address_line1.trim()) {
+            triggerError('Address Line 1 is required for delivery.');
+            return;
+        }
+        if (!addressPayload.delivery_city.trim()) {
+            triggerError('City is required for delivery.');
+            return;
+        }
+        if (!addressPayload.delivery_state.trim()) {
+            triggerError('State is required for delivery.');
+            return;
+        }
+        if (!/^\d{6}$/.test(addressPayload.delivery_pincode.trim())) {
+            triggerError('PIN Code must contain exactly 6 digits.');
+            return;
+        }
+
         if (!courierDate) {
             triggerError("Please select Courier Date.");
             return;
@@ -572,6 +907,62 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                 ? simRows.map(r => ({ sim_type: r.sim_type, sim_id: Number(r.sim_id) }))
                 : [];
 
+            const paymentWorkflowData = {
+                step4: {
+                    totalSaleAmount: newCustomerForm.totalSaleAmount,
+                    transactionId,
+                    paymentMode
+                },
+                step5: {
+                    deviceCharge: newCustomerForm.deviceCharge,
+                    softwareCharge: newCustomerForm.softwareCharge,
+                    technicianCharge: newCustomerForm.technicianCharge,
+                    simCharge: newCustomerForm.simCharge,
+                    courierCharge: newCustomerForm.courierCharge,
+                    totalAmount: calculatePaymentTotals(newCustomerForm).totalAmount,
+                    amountPaid: String(amountPaid),
+                    amountPending: calculatePaymentTotals(newCustomerForm).amountPending,
+                    paymentStatus: calculatePaymentTotals(newCustomerForm).paymentStatus,
+                    paymentMode,
+                    transactionId
+                }
+            };
+            const customerWorkflowData = showCustomerWorkflowSections ? {
+                step1: {
+                    platform_id: isCreatingNewCustomer
+                        ? (getNewCustomerPlatformId() ? Number(getNewCustomerPlatformId()) : null)
+                        : (selectedCustomerDetails?.platform_id ? Number(selectedCustomerDetails.platform_id) : null),
+                    username: isCreatingNewCustomer ? newCustomerForm.username.trim() : selectedCustomerDetails?.username || '',
+                    primary_mobile_no: isCreatingNewCustomer ? newCustomerForm.primary_mobile_no.trim() : selectedCustomerDetails?.mobile_no || '',
+                    secondary_mobile_no: isCreatingNewCustomer ? newCustomerForm.secondary_mobile_no.trim() : selectedCustomerDetails?.secondary_mobile_no || '',
+                    email: isCreatingNewCustomer ? newCustomerForm.email.trim() : selectedCustomerDetails?.email || '',
+                    location: isCreatingNewCustomer ? newCustomerForm.location.trim() : selectedCustomerDetails?.location || '',
+                    pincode: isCreatingNewCustomer ? newCustomerForm.pincode.trim() : selectedCustomerDetails?.pincode || ''
+                },
+                step2: {
+                    vehicle_no: newCustomerForm.vehicle_no.trim(),
+                    vehicle_type_id: newCustomerForm.vehicle_type_id ? Number(newCustomerForm.vehicle_type_id) : null,
+                    device_model_id: newCustomerForm.vehicle_device_model_id ? Number(newCustomerForm.vehicle_device_model_id) : null,
+                    imei_no: newCustomerForm.vehicle_imei_no.trim(),
+                    sim_no_1: newCustomerForm.vehicle_sim_no_1.trim(),
+                    sim_no_2: newCustomerForm.vehicle_sim_no_2.trim(),
+                    validity_id: newCustomerForm.validity_id ? Number(newCustomerForm.validity_id) : null
+                },
+                step3: {
+                    installation_person_type: isCreatingNewCustomer ? 'Direct' : newCustomerForm.installation_person_type,
+                    installation_person_id: isCreatingNewCustomer || !newCustomerForm.installation_person_id
+                        ? null
+                        : Number(newCustomerForm.installation_person_id),
+                    installation_date: newCustomerForm.installation_date,
+                    lead_closure_id: newCustomerForm.lead_closure_id ? Number(newCustomerForm.lead_closure_id) : null
+                },
+                ...paymentWorkflowData
+            } : null;
+            const requestWorkflowData = customerWorkflowData ||
+                ((courierToPerson === 'Dealer' || courierToPerson === 'Technician') && (hasPaymentData || isEdit)
+                    ? { payment_workflow: paymentWorkflowData }
+                    : null);
+
             const payload = {
                 courier_to_person: courierToPerson,
                 dealer_id: courierToPerson === 'Dealer' ? Number(selectedDealer) : null,
@@ -580,52 +971,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                 is_new_customer: isCreatingNewCustomer,
                 username: isCreatingNewCustomer ? newCustomerForm.username.trim() : null,
                 primary_mobile_no: isCreatingNewCustomer ? newCustomerForm.primary_mobile_no.trim() : null,
-                new_customer_data: isCreatingNewCustomer ? {
-                    step1: {
-                        platform_id: newCustomerForm.platform_id ? Number(newCustomerForm.platform_id) : null,
-                        username: newCustomerForm.username.trim(),
-                        primary_mobile_no: newCustomerForm.primary_mobile_no.trim(),
-                        secondary_mobile_no: newCustomerForm.secondary_mobile_no.trim(),
-                        email: newCustomerForm.email.trim(),
-                        location: newCustomerForm.location.trim(),
-                        pincode: newCustomerForm.pincode.trim()
-                    },
-                    step2: {
-                        vehicle_no: newCustomerForm.vehicle_no.trim(),
-                        vehicle_type_id: newCustomerForm.vehicle_type_id ? Number(newCustomerForm.vehicle_type_id) : null,
-                        device_model_id: newCustomerForm.vehicle_device_model_id ? Number(newCustomerForm.vehicle_device_model_id) : null,
-                        imei_no: newCustomerForm.vehicle_imei_no.trim(),
-                        sim_no_1: newCustomerForm.vehicle_sim_no_1.trim(),
-                        sim_no_2: newCustomerForm.vehicle_sim_no_2.trim(),
-                        validity_id: newCustomerForm.validity_id ? Number(newCustomerForm.validity_id) : null
-                    },
-                    step3: {
-                        installation_person_type: newCustomerForm.installation_person_type,
-                        installation_person_id: newCustomerForm.installation_person_id ? Number(newCustomerForm.installation_person_id) : null,
-                        installation_date: newCustomerForm.installation_date,
-                        lead_closure_id: newCustomerForm.lead_closure_id ? Number(newCustomerForm.lead_closure_id) : null
-                    },
-                    step4: {
-                        totalSaleAmount: newCustomerForm.totalSaleAmount,
-                        transactionId: newCustomerForm.payment_step4_transaction_id,
-                        paymentMode: newCustomerForm.payment_step4_mode
-                    },
-                    step5: {
-                        deviceCharge: newCustomerForm.deviceCharge,
-                        softwareCharge: newCustomerForm.softwareCharge,
-                        technicianCharge: newCustomerForm.technicianCharge,
-                        simCharge: newCustomerForm.simCharge,
-                        courierCharge: newCustomerForm.courierCharge,
-                        totalAmount: newCustomerForm.totalAmount,
-                        cashToTechnician: Boolean(newCustomerForm.cashToTechnician),
-                        cashToDealer: Boolean(newCustomerForm.cashToDealer),
-                        amountPaid: newCustomerForm.amountPaid,
-                        amountPending: newCustomerForm.amountPending,
-                        paymentStatus: newCustomerForm.paymentStatus,
-                        paymentMode: newCustomerForm.payment_step5_mode,
-                        transactionId: newCustomerForm.payment_step5_transaction_id
-                    }
-                } : null,
+                new_customer_data: requestWorkflowData,
                 asset_type: assetType,
                 device_count: (assetType === 'device' || assetType === 'both') ? numDeviceCount : 1,
                 devices: devicesPayload,
@@ -638,7 +984,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                 software: software,
                 request_date: courierDate || getTodayDate(),
                 courier_date: courierDate || getTodayDate(),
-                notes: notes
+                notes: notes,
+                ...addressPayload,
+                ...paymentDetails
             };
 
             let res;
@@ -669,29 +1017,23 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             isOpen={isOpen}
             onClose={onClose}
             title={isEdit ? `Edit Courier Request (${editData?.request_code || ''})` : "Courier Request"}
-            maxWidth={isCreatingNewCustomer ? "840px" : "640px"}
+            maxWidth={isCreatingNewCustomer ? "960px" : "920px"}
         >
             <div style={{ maxHeight: '78vh', overflowY: 'auto', paddingRight: '4px' }}>
                 <form onSubmit={handleSubmit} className="courier-modal-form">
                     
                     {error && <div className="alert alert-danger mb-3">{error}</div>}
 
-                    {/* ======================================================
-                        1. COURIER TO PERSON
-                    ====================================================== */}
+                    <section className="card p-3 mb-3 bg-light border">
+                    <h6 className="font-weight-bold text-primary mb-3">Recipient Details</h6>
                     <div className="form-group mb-3">
                         <label className="form-label font-weight-bold">
-                            Select Courier To Person <span className="text-danger">*</span>
+                            Recipient Type <span className="text-danger">*</span>
                         </label>
                         <select
                             className="form-control"
                             value={courierToPerson}
-                            onChange={(e) => {
-                                setCourierToPerson(e.target.value);
-                                setSelectedDealer('');
-                                setSelectedTechnician('');
-                                setSelectedCustomer('');
-                            }}
+                            onChange={(e) => handleRecipientTypeChange(e.target.value)}
                             disabled={isEdit || saving}
                         >
                             {personOptions.map((opt) => (
@@ -702,9 +1044,6 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                         </select>
                     </div>
 
-                    {/* ======================================================
-                        2A. SELECT DEALER (When Dealer is selected)
-                    ====================================================== */}
                     {courierToPerson === 'Dealer' && (
                         <div className="form-group mb-3">
                             <label className="form-label font-weight-bold">
@@ -713,16 +1052,16 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             <SearchableDropdown
                                 options={dealerOptions}
                                 value={selectedDealer}
-                                onChange={(val) => setSelectedDealer(val)}
+                                onChange={(val) => {
+                                    setSelectedDealer(val);
+                                    populateDeliveryAddress('Dealer', val);
+                                }}
                                 placeholder="Search & select dealer..."
                                 disabled={isEdit || saving}
                             />
                         </div>
                     )}
 
-                    {/* ======================================================
-                        2B. SELECT TECHNICIAN (When Technician is selected)
-                    ====================================================== */}
                     {courierToPerson === 'Technician' && (
                         <div className="form-group mb-3">
                             <label className="form-label font-weight-bold">
@@ -731,16 +1070,16 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             <SearchableDropdown
                                 options={technicianOptions}
                                 value={selectedTechnician}
-                                onChange={(val) => setSelectedTechnician(val)}
+                                onChange={(val) => {
+                                    setSelectedTechnician(val);
+                                    populateDeliveryAddress('Technician', val);
+                                }}
                                 placeholder="Search & select technician..."
                                 disabled={isEdit || saving}
                             />
                         </div>
                     )}
 
-                    {/* ======================================================
-                        2C. SELECT CUSTOMER (When Customer is selected)
-                    ====================================================== */}
                     {courierToPerson === 'Customer' && (
                         <div className="form-group mb-3">
                             <label className="form-label font-weight-bold">
@@ -749,18 +1088,20 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             <SearchableDropdown
                                 options={customerOptions}
                                 value={selectedCustomer}
-                                onChange={(val) => setSelectedCustomer(val)}
+                                onChange={handleCustomerSelection}
                                 placeholder="Search & select customer or create new..."
                                 disabled={isEdit || saving}
                             />
                         </div>
                     )}
+                    </section>
 
                     {/* ======================================================
                         NEW CUSTOMER CREATION FLOW SECTIONS
                     ====================================================== */}
-                    {isCreatingNewCustomer && (
+                    {showPaymentWorkflowSections && (
                         <div className="new-customer-courier-sections mb-4">
+                            {showCustomerWorkflowSections && <>
                             
                             {/* SECTION 1: BASIC CUSTOMER INFORMATION */}
                             <div className="card p-3 mb-3 border shadow-sm" style={{ backgroundColor: '#f8fafc', borderColor: '#cbd5e1' }}>
@@ -768,25 +1109,8 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                     <UserPlus size={18} />
                                     <span>STEP 1 – BASIC CUSTOMER INFORMATION</span>
                                 </div>
-                                <div className="row">
-                                    <div className="col-md-6 mb-3">
-                                        <label className="form-label small font-weight-bold">
-                                            Platform <span className="text-danger">*</span>
-                                        </label>
-                                        <select
-                                            className="form-control"
-                                            name="platform_id"
-                                            value={newCustomerForm.platform_id}
-                                            onChange={handleNewCustomerChange}
-                                            disabled={saving}
-                                            required
-                                        >
-                                            <option value="">Select Platform</option>
-                                            {platformsList.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                {isCreatingNewCustomer ? (
+                                    <div className="row">
                                     <div className="col-md-6 mb-3">
                                         <label className="form-label small font-weight-bold">
                                             Username <span className="text-danger">*</span>
@@ -868,7 +1192,35 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                             disabled={saving}
                                         />
                                     </div>
-                                </div>
+                                    </div>
+                                ) : (
+                                    <div className="row">
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Customer Username</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.username || ''} readOnly />
+                                        </div>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Primary Mobile No</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.mobile_no || ''} readOnly />
+                                        </div>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Secondary Mobile No</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.secondary_mobile_no || ''} readOnly />
+                                        </div>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Email</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.email || ''} readOnly />
+                                        </div>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Location</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.location || ''} readOnly />
+                                        </div>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Pincode</label>
+                                            <input className="form-control" value={selectedCustomerDetails?.pincode || ''} readOnly />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* SECTION 2: VEHICLE DETAILS */}
@@ -982,38 +1334,64 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                     <span>STEP 3 – INSTALLATION DETAILS</span>
                                 </div>
                                 <div className="row">
-                                    <div className="col-md-6 mb-3">
+                                    {isCreatingNewCustomer && <div className="col-md-6 mb-3">
                                         <label className="form-label small font-weight-bold">Installation Type</label>
                                         <select
                                             className="form-control"
                                             name="installation_person_type"
                                             value={newCustomerForm.installation_person_type}
-                                            onChange={(e) => {
-                                                handleNewCustomerChange(e);
-                                                setNewCustomerForm(prev => ({ ...prev, installation_person_id: '' }));
-                                            }}
                                             disabled={saving}
                                         >
-                                            {installationTypeOptions.map(opt => (
-                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                            ))}
+                                            <option value="Direct">Direct</option>
                                         </select>
-                                    </div>
-                                    <div className="col-md-6 mb-3">
-                                        <label className="form-label small font-weight-bold">Installation Person</label>
-                                        <select
-                                            className="form-control"
-                                            name="installation_person_id"
-                                            value={newCustomerForm.installation_person_id}
-                                            onChange={handleNewCustomerChange}
-                                            disabled={saving || newCustomerForm.installation_person_type === 'Direct'}
-                                        >
-                                            <option value="">Select Person</option>
-                                            {getInstallationPersonOptions().map(opt => (
-                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                    </div>}
+                                    {isExistingCustomer && <>
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">Installation Type</label>
+                                            <select
+                                                className="form-control"
+                                                name="installation_person_type"
+                                                value={newCustomerForm.installation_person_type}
+                                                onChange={(event) => setNewCustomerForm((prev) => ({
+                                                    ...prev,
+                                                    installation_person_type: event.target.value,
+                                                    installation_person_id: ''
+                                                }))}
+                                                disabled={saving}
+                                            >
+                                                <option value="Direct">Direct</option>
+                                                <option value="Technician">Technician</option>
+                                                <option value="Onsite Dealer">Onsite Dealer</option>
+                                                <option value="Offsite Dealer">Offsite Dealer</option>
+                                            </select>
+                                        </div>
+                                        {newCustomerForm.installation_person_type !== 'Direct' && (
+                                            <div className="col-md-6 mb-3">
+                                                <label className="form-label small font-weight-bold">Select Installation Person</label>
+                                                <select
+                                                    className="form-control"
+                                                    name="installation_person_id"
+                                                    value={newCustomerForm.installation_person_id}
+                                                    onChange={handleNewCustomerChange}
+                                                    disabled={saving}
+                                                >
+                                                    <option value="">Select Person</option>
+                                                    {(newCustomerForm.installation_person_type === 'Technician'
+                                                        ? techniciansList.map((technician) => ({
+                                                            id: technician.id,
+                                                            name: technician.technician_name
+                                                        }))
+                                                        : dealersList
+                                                            .filter((dealer) => String(dealer.installation_status || '').toLowerCase() ===
+                                                                (newCustomerForm.installation_person_type === 'Onsite Dealer' ? 'onsite' : 'offsite'))
+                                                            .map((dealer) => ({ id: dealer.id, name: dealer.dealer_name }))
+                                                    ).map((person) => (
+                                                        <option key={person.id} value={person.id}>{person.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </>}
                                     <div className="col-md-6 mb-3">
                                         <label className="form-label small font-weight-bold">Installation Date</label>
                                         <DateInput
@@ -1041,6 +1419,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                 </div>
                             </div>
 
+                            </>}
                             {/* SECTION 4: PAYMENT – PART 1 */}
                             <div className="card p-3 mb-3 border shadow-sm" style={{ backgroundColor: '#f8fafc', borderColor: '#cbd5e1' }}>
                                 <div className="d-flex align-items-center gap-2 mb-3 text-primary font-weight-bold" style={{ fontSize: '15px' }}>
@@ -1053,7 +1432,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="totalSaleAmount"
                                             placeholder="Enter amount"
                                             value={newCustomerForm.totalSaleAmount}
@@ -1092,6 +1471,11 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         />
                                     </div>
                                 </div>
+                                {paymentMismatchError && (
+                                    <div className="alert alert-danger py-2 mb-0" role="alert">
+                                        {paymentMismatchError}
+                                    </div>
+                                )}
                             </div>
 
                             {/* SECTION 5: PAYMENT DETAILS – PART 2 */}
@@ -1106,7 +1490,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="deviceCharge"
                                             placeholder="0.00"
                                             value={newCustomerForm.deviceCharge}
@@ -1119,7 +1503,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="softwareCharge"
                                             placeholder="0.00"
                                             value={newCustomerForm.softwareCharge}
@@ -1132,7 +1516,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="technicianCharge"
                                             placeholder="0.00"
                                             value={newCustomerForm.technicianCharge}
@@ -1145,7 +1529,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="simCharge"
                                             placeholder="0.00"
                                             value={newCustomerForm.simCharge}
@@ -1158,7 +1542,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <input
                                             type="number"
                                             step="0.01"
-                                            className="form-control"
+                                            className={`form-control${paymentMismatchError ? ' is-invalid' : ''}`}
                                             name="courierCharge"
                                             placeholder="0.00"
                                             value={newCustomerForm.courierCharge}
@@ -1173,37 +1557,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                             className="form-control"
                                             name="totalAmount"
                                             placeholder="0.00"
-                                            value={newCustomerForm.totalAmount}
-                                            onChange={handleNewCustomerChange}
-                                            disabled={saving}
+                                            value={calculatePaymentTotals(newCustomerForm).totalAmount}
+                                            readOnly
                                         />
-                                    </div>
-
-                                    {/* Cash Collection Recipient Checkboxes */}
-                                    <div className="col-md-12 mb-3">
-                                        <label className="form-label small font-weight-bold d-block">Cash Collection Recipient</label>
-                                        <div className="d-flex gap-4">
-                                            <label className="d-inline-flex align-items-center gap-2 small cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    name="cashToTechnician"
-                                                    checked={newCustomerForm.cashToTechnician}
-                                                    onChange={handleNewCustomerChange}
-                                                    disabled={saving}
-                                                />
-                                                <span>Cash to Technician</span>
-                                            </label>
-                                            <label className="d-inline-flex align-items-center gap-2 small cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    name="cashToDealer"
-                                                    checked={newCustomerForm.cashToDealer}
-                                                    onChange={handleNewCustomerChange}
-                                                    disabled={saving}
-                                                />
-                                                <span>Cash to Dealer</span>
-                                            </label>
-                                        </div>
                                     </div>
 
                                     <div className="col-md-4 mb-3">
@@ -1226,7 +1582,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                             className="form-control"
                                             name="amountPending"
                                             placeholder="0.00"
-                                            value={newCustomerForm.amountPending}
+                                            value={calculatePaymentTotals(newCustomerForm).amountPending}
                                             readOnly
                                             style={{ backgroundColor: '#f1f5f9' }}
                                         />
@@ -1236,12 +1592,11 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <select
                                             className="form-control"
                                             name="paymentStatus"
-                                            value={newCustomerForm.paymentStatus}
-                                            onChange={handleNewCustomerChange}
-                                            disabled={saving}
+                                            value={calculatePaymentTotals(newCustomerForm).paymentStatus}
+                                            disabled
                                         >
                                             <option value="Paid">Paid</option>
-                                            <option value="Partial">Partial</option>
+                                            <option value="Partially Paid">Partially Paid</option>
                                             <option value="Not Paid">Not Paid</option>
                                             <option value="Pending">Pending</option>
                                         </select>
@@ -1282,9 +1637,98 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                         </div>
                     )}
 
-                    {/* ======================================================
-                        3. ASSET TYPE
-                    ====================================================== */}
+                    <section className="card p-3 mb-3 bg-light border">
+                        <div className="d-flex align-items-center gap-2 mb-3">
+                            <MapPin size={18} className="text-primary" />
+                            <h6 className="font-weight-bold text-primary mb-0">Delivery Address</h6>
+                        </div>
+                        <div className="row">
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">Recipient Type</label>
+                                <select className="form-control" value={courierToPerson} disabled>
+                                    {personOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {courierToPerson === 'Customer' && selectedCustomer && (
+                                <div className="col-12 mb-3">
+                                    <label className="d-inline-flex align-items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={sameAsCustomerDetailsAddress}
+                                            onChange={handleSameAsCustomerDetailsAddressChange}
+                                            disabled={saving}
+                                        />
+                                        <span>Same as Customer Details Address</span>
+                                    </label>
+                                </div>
+                            )}
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    Recipient Name <span className="text-danger">*</span>
+                                </label>
+                                <input
+                                    className="form-control"
+                                    name="delivery_recipient_name"
+                                    value={deliveryAddress.delivery_recipient_name || (isCreatingNewCustomer ? newCustomerForm.username : '')}
+                                    onChange={updateDeliveryAddress}
+                                    disabled={saving}
+                                />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    Mobile Number <span className="text-danger">*</span>
+                                </label>
+                                <input
+                                    className="form-control"
+                                    name="delivery_mobile_no"
+                                    value={deliveryAddress.delivery_mobile_no || (isCreatingNewCustomer ? newCustomerForm.primary_mobile_no : '')}
+                                    onChange={updateDeliveryAddress}
+                                    maxLength={20}
+                                    disabled={saving}
+                                />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    Address Line 1 <span className="text-danger">*</span>
+                                </label>
+                                <input className="form-control" name="delivery_address_line1" value={deliveryAddress.delivery_address_line1} onChange={updateDeliveryAddress} disabled={saving} />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">Address Line 2</label>
+                                <input className="form-control" name="delivery_address_line2" value={deliveryAddress.delivery_address_line2} onChange={updateDeliveryAddress} disabled={saving} />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    City <span className="text-danger">*</span>
+                                </label>
+                                <input className="form-control" name="delivery_city" value={deliveryAddress.delivery_city} onChange={updateDeliveryAddress} disabled={saving || sameAsCustomerDetailsAddress} />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">District</label>
+                                <input className="form-control" name="delivery_district" value={deliveryAddress.delivery_district} onChange={updateDeliveryAddress} disabled={saving} />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    State <span className="text-danger">*</span>
+                                </label>
+                                <input className="form-control" name="delivery_state" value={deliveryAddress.delivery_state} onChange={updateDeliveryAddress} disabled={saving} />
+                            </div>
+                            <div className="col-md-6 mb-3">
+                                <label className="form-label font-weight-bold">
+                                    PIN Code <span className="text-danger">*</span>
+                                </label>
+                                <input className="form-control" name="delivery_pincode" value={deliveryAddress.delivery_pincode} onChange={updateDeliveryAddress} maxLength={6} inputMode="numeric" disabled={saving || sameAsCustomerDetailsAddress} />
+                            </div>
+                            <div className="col-12 mb-0">
+                                <label className="form-label font-weight-bold">Delivery Notes</label>
+                                <textarea className="form-control" name="delivery_notes" rows="2" value={deliveryAddress.delivery_notes} onChange={updateDeliveryAddress} disabled={saving} />
+                            </div>
+                        </div>
+                    </section>
+
+                    <h6 className="font-weight-bold text-primary mb-3">Device Allocation</h6>
                     {isSupportedPerson && (
                         <div className="form-group mb-3">
                             <label className="form-label font-weight-bold">
@@ -1495,9 +1939,8 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                         </div>
                     )}
 
-                    {/* ======================================================
-                        6. COMMON ASSET METADATA (Software, Courier Date, Notes)
-                    ====================================================== */}
+                    <section className="card p-3 mb-3 bg-light border">
+                        <h6 className="font-weight-bold text-primary mb-3">Courier Details</h6>
                     {isSupportedPerson && (
                         <div className="row mb-3">
                             <div className="col-md-6 mb-3">
@@ -1536,6 +1979,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             </div>
                         </div>
                     )}
+                    </section>
 
                     {/* Modal Actions */}
                     <div className="d-flex justify-content-end gap-2 mt-4">

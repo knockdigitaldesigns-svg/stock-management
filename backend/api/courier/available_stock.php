@@ -54,7 +54,7 @@ if ($techRes) {
 }
 
 // 2.5 Fetch Customers
-$custSql = "SELECT id, username, status FROM customers ORDER BY username ASC";
+$custSql = "SELECT id, platform_id, username, primary_mobile_no AS mobile_no, email, secondary_mobile_no, location, pincode, status FROM customers ORDER BY username ASC";
 $custRes = $conn->query($custSql);
 $customers = [];
 if ($custRes) {

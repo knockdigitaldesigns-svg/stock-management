@@ -561,7 +561,8 @@ const PaymentDetailsPart2Page = () => {
              */
             if (
                 !isEditMode && (
-                    !step3.installation_person_id ||
+                    !step3.installation_person_type ||
+                    (step3.installation_person_type !== 'Direct' && !step3.installation_person_id) ||
                     !step3.lead_closure_id ||
                     !step3.installation_date
                 )
@@ -623,14 +624,9 @@ const PaymentDetailsPart2Page = () => {
                         form.courierCharge
                     ),
 
-                cash_to_technician:
-                    form.cashToTechnician,
-
-                cash_to_dealer:
-                    form.cashToDealer,
-
-                cash_to_et:
-                    form.cashToEt,
+                cash_to_technician: form.cashToTechnician,
+                cash_to_dealer: form.cashToDealer,
+                cash_to_et: form.cashToEt,
 
                 total_amount:
                     summary.totalAmount,

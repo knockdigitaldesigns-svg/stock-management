@@ -393,7 +393,8 @@ const InstallationDetailsPage = () => {
             }
             setCurrentOwnerResolved(true);
             const currentOwner = deviceOwner || simOwner;
-            setSameAllocatedOwner(Boolean(currentOwner));
+            const isRecordedDirectInstallation = installation.installation_person_type === 'Direct';
+            setSameAllocatedOwner(Boolean(currentOwner) && !isRecordedDirectInstallation);
             setCurrentOwnerName(currentOwner?.name || '');
             const selectedOwnerType = currentOwner?.type || '';
             const selectedOwnerId = currentOwner?.id || '';
@@ -406,11 +407,13 @@ const InstallationDetailsPage = () => {
 
             const nextForm = {
                 installation_person_type:
+                    (isRecordedDirectInstallation ? 'Direct' : '') ||
                     ownerType ||
                     stored.step3?.installation_person_type ||
                     installation.installation_person_type ||
                     '',
                 installation_person_id:
+                    isRecordedDirectInstallation ? '' :
                     selectedOwnerId ? String(selectedOwnerId) :
                     stored.step3?.installation_person_id ||
                     installation.installation_person_id ||
@@ -534,7 +537,7 @@ const InstallationDetailsPage = () => {
             return 'Installation Type is required.';
         }
 
-        if (!form.installation_person_id) {
+        if (form.installation_person_type !== 'Direct' && !form.installation_person_id) {
             return `${getPersonLabel()} is required.`;
         }
 
@@ -577,7 +580,7 @@ const InstallationDetailsPage = () => {
                 ? 'Installation Type is required.'
                 : '',
         installation_person_id:
-            showValidation && !form.installation_person_id
+            showValidation && form.installation_person_type !== 'Direct' && !form.installation_person_id
                 ? `${getPersonLabel()} is required.`
                 : '',
         installation_date:
@@ -606,7 +609,7 @@ const InstallationDetailsPage = () => {
                 customer_id: Number(customerId),
                 step3: {
                     installation_person_type: form.installation_person_type,
-                    installation_person_id: Number(form.installation_person_id),
+                    installation_person_id: form.installation_person_id ? Number(form.installation_person_id) : null,
                     lead_closure_id: Number(form.lead_closure_id),
                     installation_date: form.installation_date
                 }
@@ -659,7 +662,7 @@ const InstallationDetailsPage = () => {
                 customer_id: Number(customerId),
                 vehicle_id: Number(stored.vehicle_record_id || 0),
                 installation_person_type: form.installation_person_type,
-                installation_person_id: Number(form.installation_person_id),
+                installation_person_id: form.installation_person_id ? Number(form.installation_person_id) : null,
                 lead_closure_id: Number(form.lead_closure_id),
                 installation_date: form.installation_date
             };
@@ -951,6 +954,7 @@ const InstallationDetailsPage = () => {
                                 <option value="Technician">Technician</option>
                                 <option value="Onsite Dealer">Onsite Dealer</option>
                                 <option value="Offsite Dealer">Offsite Dealer</option>
+                                <option value="Direct">Direct</option>
                             </select>
                             {installationErrors.installation_person_type && (
                                 <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>
@@ -960,7 +964,7 @@ const InstallationDetailsPage = () => {
                         </div>
 
                         {/* ROW 1 RIGHT: Installation Person */}
-                        <div className="form-group">
+                        {form.installation_person_type !== 'Direct' && <div className="form-group">
                             <label className="form-label">
                                 {getPersonLabel()}
                                 <span className="required">*</span>
@@ -997,7 +1001,7 @@ const InstallationDetailsPage = () => {
                                     ✕ {installationErrors.installation_person_id}
                                 </small>
                             )}
-                        </div>
+                        </div>}
 
                         {/* ROW 2 LEFT: Installation Date */}
                         <div className="form-group">

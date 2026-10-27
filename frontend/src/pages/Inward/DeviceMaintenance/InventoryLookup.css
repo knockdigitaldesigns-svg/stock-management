@@ -1,0 +1,322 @@
+.inventory-lookup {
+    overflow: hidden;
+    border-color: #dbe5f3;
+    background:
+        radial-gradient(circle at 100% 0, rgba(37, 99, 235, 0.06), transparent 28%),
+        #ffffff;
+}
+
+.inventory-lookup-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    margin-bottom: 1.25rem;
+}
+
+.inventory-lookup-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    border-radius: 12px;
+    color: #1d4ed8;
+    background: #eaf1ff;
+}
+
+.inventory-lookup-heading h3 {
+    margin: 0 0 0.2rem;
+    font-size: 1.05rem;
+}
+
+.inventory-lookup-heading p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.83rem;
+}
+
+.inventory-lookup-form {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.7fr) minmax(240px, 1.6fr) auto;
+    gap: 0.85rem;
+    align-items: end;
+}
+
+.inventory-lookup-control {
+    display: grid;
+    gap: 0.38rem;
+    min-width: 0;
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.inventory-lookup-control input,
+.inventory-lookup-control select {
+    width: 100%;
+    min-height: 42px;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    outline: none;
+    color: var(--text-primary);
+    background: #fff;
+    font-size: 0.86rem;
+}
+
+.inventory-lookup-control input:focus,
+.inventory-lookup-control select:focus {
+    border-color: #82a9f7;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.inventory-lookup-actions {
+    display: flex;
+    gap: 0.55rem;
+}
+
+.inventory-lookup-actions .btn {
+    min-height: 42px;
+    white-space: nowrap;
+}
+
+.inventory-lookup-actions .btn:disabled {
+    cursor: wait;
+    opacity: 0.75;
+}
+
+.inventory-lookup-spinner {
+    animation: inventory-lookup-spin 0.9s linear infinite;
+}
+
+@keyframes inventory-lookup-spin {
+    to { transform: rotate(360deg); }
+}
+
+.inventory-lookup-message,
+.inventory-lookup-loading {
+    margin-top: 1rem;
+    padding: 0.8rem 0.95rem;
+    border-radius: 9px;
+    font-size: 0.84rem;
+}
+
+.inventory-lookup-message.error {
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+}
+
+.inventory-lookup-message.empty,
+.inventory-lookup-loading {
+    color: #475569;
+    border: 1px solid #dbe5f3;
+    background: #f8fafc;
+}
+
+.inventory-lookup-results {
+    display: grid;
+    gap: 1.25rem;
+    margin-top: 1.3rem;
+}
+
+.inventory-lookup-warnings {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid #fbd38d;
+    border-radius: 10px;
+    color: #854d0e;
+    background: #fffbeb;
+    font-size: 0.82rem;
+}
+
+.inventory-lookup-warnings > svg {
+    flex: 0 0 auto;
+    margin-top: 0.08rem;
+}
+
+.inventory-lookup-warnings ul {
+    display: grid;
+    gap: 0.25rem;
+    padding-left: 1.1rem;
+    margin-top: 0.35rem;
+}
+
+.inventory-lookup-section {
+    min-width: 0;
+}
+
+.inventory-lookup-section h4 {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.7rem;
+    color: #27364d;
+    font-size: 0.88rem;
+}
+
+.inventory-asset-grid,
+.inventory-vehicle-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+    gap: 0.75rem;
+}
+
+.inventory-asset-card,
+.inventory-vehicle-card {
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.inventory-asset-card-heading,
+.inventory-vehicle-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+
+.inventory-asset-type {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #475569;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.035em;
+}
+
+.inventory-status-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 25px;
+    max-width: 60%;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.69rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.inventory-status-badge.available {
+    color: #166534;
+    background: #dcfce7;
+}
+
+.inventory-status-badge.allocated {
+    color: #1d4ed8;
+    background: #dbeafe;
+}
+
+.inventory-status-badge.used {
+    color: #6b21a8;
+    background: #f3e8ff;
+}
+
+.inventory-status-badge.warning {
+    color: #92400e;
+    background: #fef3c7;
+}
+
+.inventory-asset-id {
+    overflow-wrap: anywhere;
+    margin: 0.6rem 0 0.85rem;
+    color: #101a3a;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+}
+
+.inventory-lookup-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+}
+
+.inventory-lookup-field {
+    display: grid;
+    min-width: 0;
+    gap: 0.16rem;
+}
+
+.inventory-lookup-field span {
+    color: #64748b;
+    font-size: 0.69rem;
+}
+
+.inventory-lookup-field strong {
+    overflow-wrap: anywhere;
+    color: #1e293b;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.inventory-vehicle-title {
+    justify-content: flex-start;
+    margin-bottom: 0.85rem;
+}
+
+.inventory-vehicle-title strong {
+    color: #101a3a;
+    font-size: 0.86rem;
+}
+
+.inventory-vehicle-title span {
+    color: #64748b;
+    font-size: 0.72rem;
+}
+
+@media (max-width: 768px) {
+    .inventory-lookup-form {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .inventory-lookup-query {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .inventory-lookup-actions {
+        grid-column: 1 / -1;
+        grid-row: 3;
+    }
+
+    .inventory-lookup-actions .btn {
+        flex: 1;
+    }
+}
+
+@media (max-width: 480px) {
+    .inventory-lookup.card {
+        padding: 1rem;
+    }
+
+    .inventory-lookup-heading {
+        align-items: flex-start;
+    }
+
+    .inventory-lookup-heading h3 {
+        font-size: 0.95rem;
+    }
+
+    .inventory-lookup-heading p {
+        font-size: 0.76rem;
+    }
+
+    .inventory-lookup-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .inventory-vehicle-title {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+}

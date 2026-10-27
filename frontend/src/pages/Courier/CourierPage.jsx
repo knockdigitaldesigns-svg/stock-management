@@ -615,7 +615,7 @@ const CourierPage = () => {
                 <Modal
                     isOpen={Boolean(viewTarget)}
                     onClose={() => setViewTarget(null)}
-                    title={`New Customer Courier Request (${viewTarget.request_code})`}
+                    title={`${viewTarget.is_new_customer ? 'New Customer' : viewTarget.courier_to_person || 'Courier'} Request (${viewTarget.request_code})`}
                     maxWidth="760px"
                 >
                     {(() => {
@@ -627,23 +627,25 @@ const CourierPage = () => {
                         } catch (e) {
                             data = {};
                         }
+                        const paymentData = data.payment_workflow || data;
+                        const hasCustomerWorkflow = Boolean(viewTarget.is_new_customer || data.step1?.username);
                         const s1 = data.step1 || {};
                         const s2 = data.step2 || {};
                         const s3 = data.step3 || {};
-                        const s4 = data.step4 || {};
-                        const s5 = data.step5 || {};
+                        const s4 = paymentData.step4 || {};
+                        const s5 = paymentData.step5 || {};
 
                         return (
                             <div style={{ maxHeight: '75vh', overflowY: 'auto', paddingRight: '4px' }}>
                                 <div className="alert alert-info mb-3 d-flex align-items-center justify-content-between">
                                     <div>
-                                        <strong>NEW CUSTOMER REQUEST</strong> &mdash; Approval Status: <span className="badge badge-warning">{viewTarget.approval_status}</span>
+                                        <strong>{hasCustomerWorkflow ? 'NEW CUSTOMER REQUEST' : `${viewTarget.courier_to_person || 'Courier'} REQUEST`}</strong> &mdash; Approval Status: <span className="badge badge-warning">{viewTarget.approval_status}</span>
                                     </div>
                                     <div><strong>{viewTarget.request_code}</strong></div>
                                 </div>
 
                                 {/* Step 1: Customer Info */}
-                                <div className="card p-3 mb-3 border bg-light">
+                                {hasCustomerWorkflow && <div className="card p-3 mb-3 border bg-light">
                                     <h6 className="font-weight-bold text-primary mb-2">1. CUSTOMER INFORMATION</h6>
                                     <div className="row g-2 small">
                                         <div className="col-md-6"><strong>Username:</strong> {s1.username || viewTarget.recipient_name || '-'}</div>
@@ -653,10 +655,10 @@ const CourierPage = () => {
                                         <div className="col-md-6"><strong>Location:</strong> {s1.location || '-'}</div>
                                         <div className="col-md-6"><strong>Pincode:</strong> {s1.pincode || '-'}</div>
                                     </div>
-                                </div>
+                                </div>}
 
                                 {/* Step 2: Vehicle Details */}
-                                {(s2.vehicle_no || s2.imei_no || s2.sim_no_1) && (
+                                {hasCustomerWorkflow && (s2.vehicle_no || s2.imei_no || s2.sim_no_1) && (
                                     <div className="card p-3 mb-3 border bg-light">
                                         <h6 className="font-weight-bold text-primary mb-2">2. VEHICLE DETAILS</h6>
                                         <div className="row g-2 small">
@@ -669,7 +671,7 @@ const CourierPage = () => {
                                 )}
 
                                 {/* Step 3: Installation Details */}
-                                {(s3.installation_person_type || s3.installation_date) && (
+                                {hasCustomerWorkflow && (s3.installation_person_type || s3.installation_date) && (
                                     <div className="card p-3 mb-3 border bg-light">
                                         <h6 className="font-weight-bold text-primary mb-2">3. INSTALLATION DETAILS</h6>
                                         <div className="row g-2 small">
@@ -684,15 +686,48 @@ const CourierPage = () => {
                                     <div className="card p-3 mb-3 border bg-light">
                                         <h6 className="font-weight-bold text-primary mb-2">4. PAYMENT DETAILS</h6>
                                         <div className="row g-2 small">
+                                            <div className="col-md-4"><strong>Total Sale Amount:</strong> ₹{s4.totalSaleAmount || '0.00'}</div>
                                             <div className="col-md-4"><strong>Total Amount:</strong> ₹{s5.totalAmount || s4.totalSaleAmount || '0.00'}</div>
                                             <div className="col-md-4"><strong>Amount Paid:</strong> ₹{s5.amountPaid || '0.00'}</div>
                                             <div className="col-md-4"><strong>Amount Pending:</strong> ₹{s5.amountPending || '0.00'}</div>
                                             <div className="col-md-4"><strong>Payment Status:</strong> {s5.paymentStatus || '-'}</div>
-                                            <div className="col-md-4"><strong>Payment Mode:</strong> {s5.paymentMode || s4.paymentMode || '-'}</div>
-                                            <div className="col-md-4"><strong>Transaction ID:</strong> {s5.transactionId || s4.transactionId || '-'}</div>
+                                            <div className="col-md-4"><strong>Payment Mode:</strong> {s4.paymentMode || s5.paymentMode || '-'}</div>
+                                            <div className="col-md-4"><strong>Transaction ID:</strong> {s4.transactionId || s5.transactionId || '-'}</div>
+                                            <div className="col-md-4"><strong>Device Charge:</strong> ₹{s5.deviceCharge || '0.00'}</div>
+                                            <div className="col-md-4"><strong>Software Charge:</strong> ₹{s5.softwareCharge || '0.00'}</div>
+                                            <div className="col-md-4"><strong>Technician Charge:</strong> ₹{s5.technicianCharge || '0.00'}</div>
+                                            <div className="col-md-4"><strong>SIM Charge:</strong> ₹{s5.simCharge || '0.00'}</div>
+                                            <div className="col-md-4"><strong>Courier Charge:</strong> ₹{s5.courierCharge || '0.00'}</div>
                                         </div>
                                     </div>
                                 )}
+
+                                <div className="card p-3 mb-3 border bg-light">
+                                    <h6 className="font-weight-bold text-primary mb-2">DELIVERY ADDRESS</h6>
+                                    <div className="row g-2 small">
+                                        <div className="col-md-6"><strong>Recipient:</strong> {viewTarget.delivery_recipient_name || '-'}</div>
+                                        <div className="col-md-6"><strong>Mobile:</strong> {viewTarget.delivery_mobile_no || '-'}</div>
+                                        <div className="col-md-6"><strong>Address Line 1:</strong> {viewTarget.delivery_address_line1 || '-'}</div>
+                                        <div className="col-md-6"><strong>Address Line 2:</strong> {viewTarget.delivery_address_line2 || '-'}</div>
+                                        <div className="col-md-6"><strong>City:</strong> {viewTarget.delivery_city || '-'}</div>
+                                        <div className="col-md-6"><strong>District:</strong> {viewTarget.delivery_district || '-'}</div>
+                                        <div className="col-md-6"><strong>State:</strong> {viewTarget.delivery_state || '-'}</div>
+                                        <div className="col-md-6"><strong>PIN Code:</strong> {viewTarget.delivery_pincode || '-'}</div>
+                                        <div className="col-md-12"><strong>Delivery Notes:</strong> {viewTarget.delivery_notes || '-'}</div>
+                                    </div>
+                                </div>
+
+                                <div className="card p-3 mb-3 border bg-light">
+                                    <h6 className="font-weight-bold text-primary mb-2">PAYMENT DETAILS</h6>
+                                    <div className="row g-2 small">
+                                        <div className="col-md-4"><strong>Amount:</strong> {viewTarget.payment_amount === null ? '-' : `₹${viewTarget.payment_amount}`}</div>
+                                        <div className="col-md-4"><strong>Status:</strong> {viewTarget.payment_status || 'Pending'}</div>
+                                        <div className="col-md-4"><strong>Method:</strong> {viewTarget.payment_method || '-'}</div>
+                                        <div className="col-md-4"><strong>Reference:</strong> {viewTarget.payment_transaction_id || '-'}</div>
+                                        <div className="col-md-4"><strong>Payment Date:</strong> {viewTarget.payment_date ? formatDate(viewTarget.payment_date) : '-'}</div>
+                                        <div className="col-md-12"><strong>Payment Notes:</strong> {viewTarget.payment_notes || '-'}</div>
+                                    </div>
+                                </div>
 
                                 {/* Courier & Allocation Details */}
                                 <div className="card p-3 mb-3 border bg-light">
@@ -742,6 +777,21 @@ const CourierPage = () => {
                         { label: 'Software', key: 'software' },
                         { label: 'Request Date', key: 'request_date', format: formatDate },
                         { label: 'Courier Date', key: 'courier_date', format: formatDate },
+                        { label: 'Delivery Recipient', key: 'delivery_recipient_name' },
+                        { label: 'Delivery Mobile', key: 'delivery_mobile_no' },
+                        { label: 'Delivery Address Line 1', key: 'delivery_address_line1' },
+                        { label: 'Delivery Address Line 2', key: 'delivery_address_line2' },
+                        { label: 'Delivery City', key: 'delivery_city' },
+                        { label: 'Delivery District', key: 'delivery_district' },
+                        { label: 'Delivery State', key: 'delivery_state' },
+                        { label: 'Delivery PIN Code', key: 'delivery_pincode' },
+                        { label: 'Delivery Notes', key: 'delivery_notes' },
+                        { label: 'Payment Amount', key: 'payment_amount', format: (val) => val === null || val === undefined ? '-' : `₹${val}` },
+                        { label: 'Payment Status', key: 'payment_status' },
+                        { label: 'Payment Method', key: 'payment_method' },
+                        { label: 'Payment Reference', key: 'payment_transaction_id' },
+                        { label: 'Payment Date', key: 'payment_date', format: formatDate },
+                        { label: 'Payment Notes', key: 'payment_notes' },
                         { label: 'Tracking ID', key: 'tracking_id' },
                         { label: 'Courier Send Via', key: 'courier_send_via' },
                         { label: 'Courier Status', key: 'courier_status' },

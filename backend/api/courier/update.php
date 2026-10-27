@@ -4,6 +4,8 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/courier_request_details.php';
+require_once '../../utils/courier_payment_validation.php';
 
 handlePreflight();
 
@@ -15,6 +17,9 @@ $currentUser = authenticate();
 ensurePermissionDefinitions(['courier.edit', 'courier.view']);
 
 $data = json_decode(file_get_contents("php://input"));
+if (!$data || !is_object($data)) {
+    sendResponse(false, "Invalid request data", [], [], 400);
+}
 
 $id = (int)($data->id ?? 0);
 if ($id <= 0) {
@@ -42,6 +47,21 @@ if (!$existing) {
     $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request not found", [], [], 404);
+}
+
+try {
+    $courierDetails = courierRequestDetails($data, $existing);
+    $paymentWorkflowData = isset($data->new_customer_data) && is_object($data->new_customer_data)
+        ? json_decode(json_encode($data->new_customer_data), true)
+        : json_decode((string)($existing['new_customer_data'] ?? ''), true);
+    validateCourierPaymentWorkflow(
+        $paymentWorkflowData,
+        (string)($data->courier_to_person ?? $existing['courier_to_person'])
+    );
+} catch (InvalidArgumentException $e) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 400);
 }
 
 $currentApprovalStatus = $existing['approval_status'];
@@ -86,14 +106,25 @@ if ($currentApprovalStatus === 'Approved') {
 
     // Only update non-asset fields
     try {
+        $approvedRequestDataJson = $existing['new_customer_data'];
+        if (
+            in_array($existing['courier_to_person'], ['Dealer', 'Technician'], true)
+            && isset($data->new_customer_data)
+            && is_object($data->new_customer_data)
+        ) {
+            $approvedRequestDataJson = json_encode($data->new_customer_data);
+        }
         $updStmt = $conn->prepare("
             UPDATE courier_requests 
-            SET tracking_id = ?, courier_send_via = ?, courier_status = ?, courier_reason = ?, notes = ?, software = ?, courier_date = ?, request_date = ?
+            SET tracking_id = ?, courier_send_via = ?, courier_status = ?, courier_reason = ?, notes = ?, software = ?, courier_date = ?, request_date = ?, new_customer_data = ?
             WHERE id = ?
         ");
-        $updStmt->bind_param("ssssssssi", $newTrackingId, $newCourierSendVia, $newCourierStatus, $newCourierReason, $newNotes, $newSoftware, $newCourierDate, $newRequestDate, $id);
-        $updStmt->execute();
+        $updStmt->bind_param("sssssssssi", $newTrackingId, $newCourierSendVia, $newCourierStatus, $newCourierReason, $newNotes, $newSoftware, $newCourierDate, $newRequestDate, $approvedRequestDataJson, $id);
+        if (!$updStmt->execute()) {
+            throw new Exception('Failed to update courier request: ' . $updStmt->error);
+        }
         $updStmt->close();
+        saveCourierRequestDetails($conn, $id, $courierDetails);
 
         // Audit Log
         writeAudit($conn, $id, 'Courier', 'Courier Request Edited', 'courier_info', $existing, [
@@ -104,7 +135,8 @@ if ($currentApprovalStatus === 'Approved') {
             'notes' => $newNotes,
             'software' => $newSoftware,
             'courier_date' => $newCourierDate,
-            'request_date' => $newRequestDate
+            'request_date' => $newRequestDate,
+            ...$courierDetails
         ], $currentUser);
 
         $conn->commit();
@@ -128,20 +160,28 @@ $newDealerId = $newCourierTo === 'Dealer' ? (int)($data->dealer_id ?? $existing[
 $newTechnicianId = $newCourierTo === 'Technician' ? (int)($data->technician_id ?? $existing['technician_id']) : null;
 $newCustomerId = $newCourierTo === 'Customer' ? (int)($data->customer_id ?? $existing['customer_id']) : null;
 $newCustomerDataJson = $existing['new_customer_data'];
-if (!empty($existing['is_new_customer']) && isset($data->new_customer_data)) {
+if ($newCourierTo === 'Customer' && isset($data->new_customer_data)) {
     $newCustomerData = json_decode(json_encode($data->new_customer_data), true) ?: [];
-    $step1 = $newCustomerData['step1'] ?? [];
-    $platformId = (int)($step1['platform_id'] ?? 0);
-    $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
-    $platformStmt->bind_param('i', $platformId);
-    $platformStmt->execute();
-    $validPlatform = $platformStmt->get_result()->fetch_assoc();
-    $platformStmt->close();
-    if (!$validPlatform) {
-        $conn->close();
-        sendResponse(false, 'Select an active Platform for the new customer.', [], [], 400);
+    if (!empty($existing['is_new_customer'])) {
+        $step1 = $newCustomerData['step1'] ?? [];
+        $platformId = (int)($step1['platform_id'] ?? 0);
+        $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
+        $platformStmt->bind_param('i', $platformId);
+        $platformStmt->execute();
+        $validPlatform = $platformStmt->get_result()->fetch_assoc();
+        $platformStmt->close();
+        if (!$validPlatform) {
+            $conn->close();
+            sendResponse(false, 'Select an active Platform for the new customer.', [], [], 400);
+        }
     }
     $newCustomerDataJson = json_encode($newCustomerData);
+} elseif (
+    in_array($newCourierTo, ['Dealer', 'Technician'], true)
+    && isset($data->new_customer_data)
+    && is_object($data->new_customer_data)
+) {
+    $newCustomerDataJson = json_encode($data->new_customer_data);
 }
 
 $newAssetType = trim((string)($data->asset_type ?? $existing['asset_type']));
@@ -341,6 +381,7 @@ try {
         throw new Exception("Failed to update courier request: " . $updStmt->error);
     }
     $updStmt->close();
+    saveCourierRequestDetails($conn, $id, $courierDetails);
 
     // Audit Log
     $actionName = ($existing['courier_status'] !== $newCourierStatus) ? 'Courier Status Changed' : 'Courier Request Edited';
@@ -364,7 +405,8 @@ try {
         'courier_send_via' => $newCourierSendVia,
         'courier_status' => $newCourierStatus,
         'courier_reason' => $newCourierReason,
-        'approval_status' => $newApprovalStatus
+        'approval_status' => $newApprovalStatus,
+        ...$courierDetails
     ], $currentUser);
 
     $conn->commit();
