@@ -4,6 +4,8 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/courier_request_details.php';
+require_once '../../utils/courier_payment_validation.php';
 
 handlePreflight();
 
@@ -15,6 +17,9 @@ $currentUser = authenticate();
 ensurePermissionDefinitions(['courier.add', 'courier.view']);
 
 $data = json_decode(file_get_contents("php://input"));
+if (!$data || !is_object($data)) {
+    sendResponse(false, "Invalid request data", [], [], 400);
+}
 
 $courier_to_person = trim((string)($data->courier_to_person ?? 'Dealer'));
 if (!in_array($courier_to_person, ['Dealer', 'Technician', 'Customer'], true)) {
@@ -77,10 +82,14 @@ if ($courier_to_person === 'Dealer') {
     $personName = $techRow['technician_name'];
     $personStatus = 'Technician';
 } elseif ($courier_to_person === 'Customer') {
-    $is_new_customer = !empty($data->is_new_customer) || (string)($data->customer_id ?? '') === '__create_new__' || !empty($data->new_customer_data);
+    $customerIdInput = (string)($data->customer_id ?? '');
+    $is_new_customer = !empty($data->is_new_customer)
+        || $customerIdInput === '__create_new__'
+        || ($customerIdInput === '' && !empty($data->new_customer_data));
+    $newCustomerData = $data->new_customer_data ?? null;
     
     if ($is_new_customer) {
-        $newCustomerData = $data->new_customer_data ?? (object)[];
+        $newCustomerData = $newCustomerData ?? (object)[];
         $step1 = $newCustomerData->step1 ?? (object)[];
         $username = trim((string)($step1->username ?? $data->username ?? ''));
         $primaryMobile = trim((string)($step1->primary_mobile_no ?? $data->primary_mobile_no ?? ''));
@@ -143,6 +152,27 @@ if ($courier_to_person === 'Dealer') {
         $personName = $custRow['username'];
         $personStatus = $custRow['status'];
     }
+}
+
+if ($courier_to_person !== 'Customer' && isset($data->new_customer_data) && is_object($data->new_customer_data)) {
+    $newCustomerData = $data->new_customer_data;
+}
+
+try {
+    validateCourierPaymentWorkflow(
+        $newCustomerData ? json_decode(json_encode($newCustomerData), true) : null,
+        $courier_to_person
+    );
+} catch (InvalidArgumentException $e) {
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 400);
+}
+
+try {
+    $courierDetails = courierRequestDetails($data, null, true);
+} catch (InvalidArgumentException $e) {
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 400);
 }
 
 $asset_type = trim((string)($data->asset_type ?? ''));
@@ -350,7 +380,7 @@ try {
         $curSimId = $curSim ? $curSim['sim_id'] : null;
 
         $isNewCustInt = $is_new_customer ? 1 : 0;
-        $newCustDataStr = $is_new_customer ? json_encode($newCustomerData) : null;
+        $newCustDataStr = $newCustomerData !== null ? json_encode($newCustomerData) : null;
 
         $insertSql = "
             INSERT INTO courier_requests (
@@ -406,6 +436,7 @@ try {
 
         $rowId = $stmt->insert_id;
         $stmt->close();
+        saveCourierRequestDetails($conn, $rowId, $courierDetails);
 
         if ($i === 0) {
             $firstRequestId = $rowId;

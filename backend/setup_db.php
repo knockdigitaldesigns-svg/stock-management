@@ -276,6 +276,21 @@ $tables = [
         tracking_id VARCHAR(100) DEFAULT NULL,
         courier_status ENUM('Pending', 'Reached', 'Not Reached') NOT NULL DEFAULT 'Pending',
         courier_reason TEXT DEFAULT NULL,
+        delivery_recipient_name VARCHAR(150) DEFAULT NULL,
+        delivery_mobile_no VARCHAR(20) DEFAULT NULL,
+        delivery_address_line1 VARCHAR(255) DEFAULT NULL,
+        delivery_address_line2 VARCHAR(255) DEFAULT NULL,
+        delivery_city VARCHAR(100) DEFAULT NULL,
+        delivery_district VARCHAR(100) DEFAULT NULL,
+        delivery_state VARCHAR(100) DEFAULT NULL,
+        delivery_pincode VARCHAR(10) DEFAULT NULL,
+        delivery_notes TEXT DEFAULT NULL,
+        payment_amount DECIMAL(12,2) DEFAULT NULL,
+        payment_status ENUM('Pending', 'Paid') NOT NULL DEFAULT 'Pending',
+        payment_method VARCHAR(50) DEFAULT NULL,
+        payment_transaction_id VARCHAR(100) DEFAULT NULL,
+        payment_date DATE DEFAULT NULL,
+        payment_notes TEXT DEFAULT NULL,
         approval_status ENUM('Pending Approval', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending Approval',
         requested_by_user_id INT DEFAULT NULL,
         requested_by_name VARCHAR(150) DEFAULT NULL,
@@ -487,6 +502,21 @@ $columnChecks = [
     ['stock_alert_settings', 'notes', "ALTER TABLE stock_alert_settings ADD COLUMN notes TEXT NULL AFTER minimum_sim_count"],
     ['customer_installations', 'vehicle_id', "ALTER TABLE customer_installations ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
     ['customer_payments', 'vehicle_id', "ALTER TABLE customer_payments ADD COLUMN vehicle_id INT DEFAULT NULL AFTER customer_id"],
+    ['courier_requests', 'delivery_recipient_name', "ALTER TABLE courier_requests ADD COLUMN delivery_recipient_name VARCHAR(150) DEFAULT NULL"],
+    ['courier_requests', 'delivery_mobile_no', "ALTER TABLE courier_requests ADD COLUMN delivery_mobile_no VARCHAR(20) DEFAULT NULL"],
+    ['courier_requests', 'delivery_address_line1', "ALTER TABLE courier_requests ADD COLUMN delivery_address_line1 VARCHAR(255) DEFAULT NULL"],
+    ['courier_requests', 'delivery_address_line2', "ALTER TABLE courier_requests ADD COLUMN delivery_address_line2 VARCHAR(255) DEFAULT NULL"],
+    ['courier_requests', 'delivery_city', "ALTER TABLE courier_requests ADD COLUMN delivery_city VARCHAR(100) DEFAULT NULL"],
+    ['courier_requests', 'delivery_district', "ALTER TABLE courier_requests ADD COLUMN delivery_district VARCHAR(100) DEFAULT NULL"],
+    ['courier_requests', 'delivery_state', "ALTER TABLE courier_requests ADD COLUMN delivery_state VARCHAR(100) DEFAULT NULL"],
+    ['courier_requests', 'delivery_pincode', "ALTER TABLE courier_requests ADD COLUMN delivery_pincode VARCHAR(10) DEFAULT NULL"],
+    ['courier_requests', 'delivery_notes', "ALTER TABLE courier_requests ADD COLUMN delivery_notes TEXT DEFAULT NULL"],
+    ['courier_requests', 'payment_amount', "ALTER TABLE courier_requests ADD COLUMN payment_amount DECIMAL(12,2) DEFAULT NULL"],
+    ['courier_requests', 'payment_status', "ALTER TABLE courier_requests ADD COLUMN payment_status ENUM('Pending', 'Paid') NOT NULL DEFAULT 'Pending'"],
+    ['courier_requests', 'payment_method', "ALTER TABLE courier_requests ADD COLUMN payment_method VARCHAR(50) DEFAULT NULL"],
+    ['courier_requests', 'payment_transaction_id', "ALTER TABLE courier_requests ADD COLUMN payment_transaction_id VARCHAR(100) DEFAULT NULL"],
+    ['courier_requests', 'payment_date', "ALTER TABLE courier_requests ADD COLUMN payment_date DATE DEFAULT NULL"],
+    ['courier_requests', 'payment_notes', "ALTER TABLE courier_requests ADD COLUMN payment_notes TEXT DEFAULT NULL"],
     ['customer_renewals', 'safe_custody_date', "ALTER TABLE customer_renewals ADD COLUMN safe_custody_date DATE DEFAULT NULL AFTER last_renewed_date"],
     ['dealer_allocation_payment_requests', 'payload_hash', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN payload_hash CHAR(64) NOT NULL DEFAULT '' AFTER request_key"],
     ['dealer_allocation_payment_requests', 'transaction_id', "ALTER TABLE dealer_allocation_payment_requests ADD COLUMN transaction_id CHAR(6) DEFAULT NULL AFTER payload_hash"],
@@ -503,6 +533,15 @@ foreach ($columnChecks as [$table, $column, $alterSql]) {
         } else {
             echo "Error adding column: " . $conn->error . "\n";
         }
+    }
+}
+
+$installationTypeColumn = $conn->query("SHOW COLUMNS FROM customer_installations LIKE 'installation_person_type'");
+if ($installationTypeColumn && ($column = $installationTypeColumn->fetch_assoc()) && stripos($column['Type'], 'enum(') === 0) {
+    if ($conn->query("ALTER TABLE customer_installations MODIFY COLUMN installation_person_type VARCHAR(50) NOT NULL") === TRUE) {
+        echo "Column 'installation_person_type' on customer_installations now supports Direct installation\n";
+    } else {
+        echo "Error updating installation_person_type: " . $conn->error . "\n";
     }
 }
 

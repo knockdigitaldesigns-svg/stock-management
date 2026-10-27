@@ -61,9 +61,9 @@ $installationDate = trim(
         $data->installation_date ?? ''
     )
 );
-$persistedInstallationPersonType = $installationPersonType === 'Technician'
-    ? 'Technician'
-    : 'Dealer';
+$persistedInstallationPersonType = $installationPersonType === 'Direct'
+    ? 'Direct'
+    : ($installationPersonType === 'Technician' ? 'Technician' : 'Dealer');
 
 
 /*
@@ -85,7 +85,8 @@ if ($customerId <= 0) {
 $allowedPersonTypes = [
     'Technician',
     'Onsite Dealer',
-    'Offsite Dealer'
+    'Offsite Dealer',
+    'Direct'
 ];
 
 if (
@@ -104,7 +105,7 @@ if (
     );
 }
 
-if ($installationPersonId <= 0) {
+if ($installationPersonType !== 'Direct' && $installationPersonId <= 0) {
     sendResponse(
         false,
         'Installation Person is required.',
@@ -322,7 +323,7 @@ try {
             return strcasecmp(trim((string) $status), 'Offsite') === 0 ? 'Offsite Dealer' : 'Onsite Dealer';
         })()
         : 'Technician';
-    if ($currentOwner && ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))) {
+    if ($currentOwner && $installationPersonType !== 'Direct' && ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))) {
         throw new Exception('Installation person must match the current Device or SIM owner.');
     }
 
@@ -393,7 +394,9 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    if (
+    if ($installationPersonType === 'Direct') {
+        $installationPersonId = 0;
+    } elseif (
         $installationPersonType ===
         'Technician'
     ) {
@@ -649,7 +652,7 @@ try {
 
         writeChangedFields($conn, $installationId, 'Customer Installation', $existingInstallation, [
             'installation_person_type' => $persistedInstallationPersonType,
-            'installation_person_id' => $installationPersonId,
+            'installation_person_id' => $installationPersonId ?: null,
             'lead_closure_id' => $leadClosureId,
             'installation_date' => $installationDate
         ], $currentUser);
@@ -657,7 +660,7 @@ try {
         $updateStmt = $conn->prepare(
             'UPDATE customer_installations
              SET installation_person_type = ?,
-                 installation_person_id = ?,
+                 installation_person_id = NULLIF(?, 0),
                  lead_closure_id = ?,
                  installation_date = ?,
                  updated_at = CURRENT_TIMESTAMP
@@ -908,7 +911,7 @@ try {
             installation_person_id,
             lead_closure_id,
             installation_date
-         ) VALUES (?, ?, ?, ?, ?, ?)'
+         ) VALUES (?, ?, ?, NULLIF(?, 0), ?, ?)'
     );
 
     if (!$insertStmt) {
@@ -944,7 +947,7 @@ try {
         'customer_id' => $customerId,
         'vehicle_id' => $vehicleId ?: null,
         'installation_person_type' => $persistedInstallationPersonType,
-        'installation_person_id' => $installationPersonId,
+        'installation_person_id' => $installationPersonId ?: null,
         'lead_closure_id' => $leadClosureId,
         'installation_date' => $installationDate
     ], $currentUser);
@@ -1069,7 +1072,7 @@ try {
             'installation_person_type' =>
                 $installationPersonType,
             'installation_person_id' =>
-                $installationPersonId,
+                $installationPersonId ?: null,
             'action' =>
                 'insert'
         ]

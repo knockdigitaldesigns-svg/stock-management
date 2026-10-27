@@ -5,6 +5,7 @@ require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/transaction_ids.php';
+require_once '../../utils/courier_payment_validation.php';
 
 handlePreflight();
 
@@ -82,8 +83,23 @@ $sim_id = !empty($request['sim_id']) ? (int)$request['sim_id'] : null;
 $allocation_date = !empty($request['courier_date']) ? $request['courier_date'] : $request['request_date'];
 $software = $request['software'] ?? '';
 $notes = $request['notes'] ?? '';
+$allocationPayment = [
+    'enabled' => false,
+    'sale_amount' => 0.0,
+    'device_charge' => 0.0,
+    'sim_charge' => 0.0,
+    'shared_charges' => 0.0,
+    'amount_paid' => 0.0,
+    'payment_mode' => null,
+    'transaction_id' => null
+];
 
 try {
+    validateCourierPaymentWorkflow(
+        !empty($request['new_customer_data']) ? json_decode($request['new_customer_data'], true) : null,
+        (string)$request['courier_to_person']
+    );
+
     // 2. Verify selected Device is available or reserved by this request.
     if ($device_id) {
         $devStmt = $conn->prepare("SELECT id, status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
@@ -154,10 +170,12 @@ try {
         }
     }
 
-    // Handle New Customer Creation if this is a New Customer request
-    if ($isNewCustomer) {
+    // Apply submitted workflow details for both new and existing customers.
+    $hasCustomerWorkflow = $owner_type === 'customer' && !empty($request['new_customer_data']);
+    if ($isNewCustomer || $hasCustomerWorkflow) {
         $newCustomerData = !empty($request['new_customer_data']) ? json_decode($request['new_customer_data'], true) : [];
         $step1 = $newCustomerData['step1'] ?? [];
+        if ($isNewCustomer) {
         $username = trim((string)($step1['username'] ?? ''));
         $primaryMobile = trim((string)($step1['primary_mobile_no'] ?? ''));
 
@@ -218,6 +236,7 @@ try {
                 'status' => 'Active'
             ], $currentUser);
         }
+        }
 
         // Insert Vehicle Details if present
         $step2 = $newCustomerData['step2'] ?? [];
@@ -227,8 +246,10 @@ try {
         $vImeiNo = trim((string)($step2['imei_no'] ?? ''));
         $vSim1 = trim((string)($step2['sim_no_1'] ?? ''));
         $vSim2 = trim((string)($step2['sim_no_2'] ?? ''));
+        $vSim2 = $vSim2 !== '' ? $vSim2 : null;
         $vValidityId = !empty($step2['validity_id']) ? (int)$step2['validity_id'] : null;
         $vValidityMonths = 0;
+        $customerVehicleId = null;
         if ($vValidityId) {
             $validityStmt = $conn->prepare('SELECT months FROM sim_validities WHERE id = ? LIMIT 1');
             $validityStmt->bind_param('i', $vValidityId);
@@ -239,16 +260,49 @@ try {
         }
 
         if ($vehicleNo !== '' || $vImeiNo !== '') {
+            if ($vSim1 === '') {
+                throw new Exception('SIM No 1 is required for customer vehicle details.');
+            }
+            if (!preg_match('/^(?:\d{10}|\d{13})$/', $vSim1)) {
+                throw new Exception('SIM No 1 must contain exactly 10 or 13 digits.');
+            }
+            if ($vSim2 !== null && !preg_match('/^(?:\d{10}|\d{13})$/', $vSim2)) {
+                throw new Exception('SIM No 2 must contain exactly 10 or 13 digits.');
+            }
+            if ($vSim2 !== null && $vSim1 === $vSim2) {
+                throw new Exception('SIM No 1 and SIM No 2 cannot be the same.');
+            }
             $chkVehTable = $conn->query("SHOW TABLES LIKE 'customer_vehicle_details'");
             if ($chkVehTable && $chkVehTable->num_rows > 0) {
-                $insVeh = $conn->prepare("
-                    INSERT INTO customer_vehicle_details (
-                        customer_id, vehicle_no, vehicle_type_id, device_model_id, imei_no, sim_no_1, sim_no_2, validity_months
-                    ) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), ?, ?, ?, NULLIF(?, 0))
+                $existingVehicleStmt = $conn->prepare("
+                    SELECT id
+                    FROM customer_vehicle_details
+                    WHERE customer_id = ?
+                      AND ((? <> '' AND vehicle_no = ?) OR (? <> '' AND imei_no = ?))
+                    FOR UPDATE
                 ");
-                $insVeh->bind_param("isiisssi", $owner_id, $vehicleNo, $vTypeId, $vDevModelId, $vImeiNo, $vSim1, $vSim2, $vValidityMonths);
-                $insVeh->execute();
-                $insVeh->close();
+                $existingVehicleStmt->bind_param("issss", $owner_id, $vehicleNo, $vehicleNo, $vImeiNo, $vImeiNo);
+                $existingVehicleStmt->execute();
+                $existingVehicles = $existingVehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $existingVehicleStmt->close();
+                if (count($existingVehicles) > 1) {
+                    throw new Exception('The submitted vehicle or IMEI matches multiple customer vehicle records. Verify the customer data before approval.');
+                }
+                if ($existingVehicles) {
+                    $customerVehicleId = (int)$existingVehicles[0]['id'];
+                } else {
+                    $insVeh = $conn->prepare("
+                        INSERT INTO customer_vehicle_details (
+                            customer_id, vehicle_no, vehicle_type_id, device_model_id, imei_no, sim_no_1, sim_no_2, validity_months
+                        ) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), ?, ?, ?, NULLIF(?, 0))
+                    ");
+                    $insVeh->bind_param("isiisssi", $owner_id, $vehicleNo, $vTypeId, $vDevModelId, $vImeiNo, $vSim1, $vSim2, $vValidityMonths);
+                    if (!$insVeh->execute()) {
+                        throw new Exception('Failed to create customer vehicle details: ' . $insVeh->error);
+                    }
+                    $customerVehicleId = (int) $insVeh->insert_id;
+                    $insVeh->close();
+                }
             }
         }
 
@@ -280,6 +334,8 @@ try {
             if (!$validInstPerson) {
                 throw new Exception('Selected installation person does not exist or does not match the selected type.');
             }
+        } elseif ($requestedInstPersonType === 'Direct') {
+            $instPersonType = 'Direct';
         } elseif ($requestedInstPersonType === 'Technician') {
             $instPersonType = 'Technician';
         } elseif (in_array($requestedInstPersonType, ['Onsite Dealer', 'Offsite Dealer'], true)) {
@@ -301,43 +357,279 @@ try {
         if ($instPersonType !== null && ($instPersonId || $instDate || $leadClosureId)) {
             $chkInstTable = $conn->query("SHOW TABLES LIKE 'customer_installations'");
             if ($chkInstTable && $chkInstTable->num_rows > 0) {
-                $insInst = $conn->prepare("
-                    INSERT INTO customer_installations (
-                        customer_id, installation_person_type, installation_person_id, installation_date, lead_closure_id
-                    ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0))
+                $existingInstallationStmt = $conn->prepare("
+                    SELECT id
+                    FROM customer_installations
+                    WHERE customer_id = ?
+                      AND installation_person_type = ?
+                      AND installation_person_id <=> NULLIF(?, 0)
+                      AND installation_date <=> ?
+                      AND lead_closure_id <=> NULLIF(?, 0)
+                    LIMIT 1
+                    FOR UPDATE
                 ");
-                $insInst->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
-                $insInst->execute();
-                $insInst->close();
+                $existingInstallationStmt->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
+                $existingInstallationStmt->execute();
+                $existingInstallation = $existingInstallationStmt->get_result()->fetch_assoc();
+                $existingInstallationStmt->close();
+                if (!$existingInstallation) {
+                    $insInst = $conn->prepare("
+                        INSERT INTO customer_installations (
+                            customer_id, installation_person_type, installation_person_id, installation_date, lead_closure_id
+                        ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0))
+                    ");
+                    $insInst->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
+                    if (!$insInst->execute()) {
+                        throw new Exception('Failed to create customer installation details: ' . $insInst->error);
+                    }
+                    $insInst->close();
+                }
             }
         }
 
         // Insert Payment Details if present
         $step4 = $newCustomerData['step4'] ?? [];
         $step5 = $newCustomerData['step5'] ?? [];
-        $totalSaleAmount = !empty($step4['totalSaleAmount']) ? (float)$step4['totalSaleAmount'] : (!empty($step5['totalAmount']) ? (float)$step5['totalAmount'] : 0.0);
-        $pMode = !empty($step5['paymentMode']) ? trim($step5['paymentMode']) : (!empty($step4['paymentMode']) ? trim($step4['paymentMode']) : null);
-        $txId = normalizeTransactionId(!empty($step5['transactionId']) ? $step5['transactionId'] : ($step4['transactionId'] ?? ''));
+        $totalSaleAmount = isset($step4['totalSaleAmount'])
+            ? (float)$step4['totalSaleAmount']
+            : (float)($step5['totalAmount'] ?? 0);
+        $pMode = !empty($step4['paymentMode'])
+            ? trim($step4['paymentMode'])
+            : (!empty($step5['paymentMode']) ? trim($step5['paymentMode']) : null);
+        $txId = normalizeTransactionId(
+            !empty($step4['transactionId'])
+                ? $step4['transactionId']
+                : ($step5['transactionId'] ?? '')
+        );
         if ($pMode && !in_array($pMode, getPaymentModes(), true)) throw new Exception('Invalid payment mode.');
         if ($txId !== '' && !$pMode) throw new Exception('Payment Mode is required when Transaction ID is entered.');
         if ($pMode && $pMode !== 'Cash' && $txId === '') throw new Exception('Transaction ID is required for the selected Payment Mode.');
-        $amountPaid = !empty($step5['amountPaid']) ? (float)$step5['amountPaid'] : 0.0;
-        $amountPending = !empty($step5['amountPending']) ? (float)$step5['amountPending'] : max(0.0, $totalSaleAmount - $amountPaid);
-        $pStatus = !empty($step5['paymentStatus']) ? trim($step5['paymentStatus']) : ($amountPaid >= $totalSaleAmount && $totalSaleAmount > 0 ? 'Paid' : ($amountPaid > 0 ? 'Partial' : 'Not Paid'));
+        $amountPaid = isset($step5['amountPaid']) && $step5['amountPaid'] !== ''
+            ? (float)$step5['amountPaid']
+            : 0.0;
+        $deviceCharge = (float)($step5['deviceCharge'] ?? 0);
+        $softwareCharge = (float)($step5['softwareCharge'] ?? 0);
+        $technicianCharge = (float)($step5['technicianCharge'] ?? 0);
+        $simCharge = (float)($step5['simCharge'] ?? 0);
+        $courierCharge = (float)($step5['courierCharge'] ?? 0);
+        if ($totalSaleAmount < 0 || $amountPaid < 0 ||
+            $deviceCharge < 0 || $softwareCharge < 0 || $technicianCharge < 0 ||
+            $simCharge < 0 || $courierCharge < 0) {
+            throw new Exception('Payment amounts and charges cannot be negative.');
+        }
+        $totalCharges = round(
+            $deviceCharge + $softwareCharge + $technicianCharge + $simCharge + $courierCharge,
+            2
+        );
+        if ($totalCharges > 0 && ($totalSaleAmount <= 0 || abs($totalCharges - $totalSaleAmount) > 0.005)) {
+            throw new Exception('Total charges must equal Total Sale Amount.');
+        }
+        foreach ([
+            'Device Charge' => $deviceCharge,
+            'Software Charge' => $softwareCharge,
+            'Technician Charge' => $technicianCharge,
+            'SIM Charge' => $simCharge,
+            'Courier Charge' => $courierCharge
+        ] as $chargeName => $chargeValue) {
+            if ($chargeValue > $totalSaleAmount) {
+                throw new Exception($chargeName . ' cannot exceed Total Sale Amount.');
+            }
+        }
+        $totalAmount = $totalCharges > 0
+            ? $totalCharges
+            : ($totalSaleAmount > 0 ? $totalSaleAmount : 0.0);
+        if ($amountPaid > $totalAmount) {
+            throw new Exception('Amount Paid cannot exceed Total Amount.');
+        }
+        $amountPending = $totalAmount > 0 ? round(max(0.0, $totalAmount - $amountPaid), 2) : 0.0;
+        $requestedPaymentStatus = trim((string)($step5['paymentStatus'] ?? ''));
+        $pendingOnly = $totalCharges <= 0 && $totalSaleAmount > 0 &&
+            $amountPaid <= 0 && !$pMode && $txId === '';
+        $pStatus = $pendingOnly
+            ? 'Pending'
+            : ($totalAmount <= 0
+                ? 'Pending'
+                : ($amountPaid <= 0
+                ? ($requestedPaymentStatus === 'Pending' ? 'Pending' : 'Not Paid')
+                : ($amountPaid < $totalAmount ? 'Partially Paid' : 'Paid')));
 
-        if ($totalSaleAmount > 0 || $amountPaid > 0 || $pMode) {
+        if ($totalSaleAmount > 0 || $totalAmount > 0 || $amountPaid > 0) {
             $chkPayTable = $conn->query("SHOW TABLES LIKE 'customer_payments'");
             if ($chkPayTable && $chkPayTable->num_rows > 0) {
-                $insPay = $conn->prepare("
-                    INSERT INTO customer_payments (
-                        customer_id, total_sale_amount, amount_paid, pending_amount, payment_status, payment_mode, transaction_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                $paymentVehicleId = (int)($customerVehicleId ?? 0);
+                $paymentTransactionId = $txId !== '' ? $txId : null;
+                $paymentMode = $pMode ?? '';
+                $paymentWhere = $paymentVehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
+                $paymentTargetId = $paymentVehicleId > 0 ? $paymentVehicleId : $owner_id;
+                $existingPaymentStmt = $conn->prepare("
+                    SELECT *
+                    FROM customer_payments
+                    WHERE {$paymentWhere}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    FOR UPDATE
                 ");
-                $insPay->bind_param("idddsss", $owner_id, $totalSaleAmount, $amountPaid, $amountPending, $pStatus, $pMode, $txId);
-                if (!$insPay->execute()) throw new Exception('Failed to create customer payment details: ' . $insPay->error);
-                reserveTransactionId($conn, $txId, 'customer_payments', (string) $insPay->insert_id);
-                $insPay->close();
+                $existingPaymentStmt->bind_param('i', $paymentTargetId);
+                $existingPaymentStmt->execute();
+                $existingPayment = $existingPaymentStmt->get_result()->fetch_assoc();
+                $existingPaymentStmt->close();
+
+                if ($existingPayment) {
+                    $paymentId = (int) $existingPayment['id'];
+                    $paymentChanges = [
+                        'total_sale_amount' => $totalSaleAmount,
+                        'transaction_id' => $paymentTransactionId,
+                        'payment_mode' => $pMode
+                    ];
+                    if ($totalAmount > 0) {
+                        $paymentChanges += [
+                            'device_charge' => $deviceCharge,
+                            'software_charge' => $softwareCharge,
+                            'technician_charge' => $technicianCharge,
+                            'sim_charge' => $simCharge,
+                            'courier_charge' => $courierCharge,
+                            'total_amount' => $totalAmount,
+                            'amount_paid' => $amountPaid,
+                            'amount_pending' => $amountPending,
+                            'payment_status' => $pStatus
+                        ];
+                    }
+                    writeChangedFields($conn, $paymentId, 'Customer Payment', $existingPayment, $paymentChanges, $currentUser);
+                    if ($totalAmount > 0) {
+                        $updatePaymentStmt = $conn->prepare("
+                            UPDATE customer_payments
+                            SET total_sale_amount = ?, transaction_id = NULLIF(?, ''),
+                                payment_mode = NULLIF(?, ''), device_charge = ?,
+                                software_charge = ?, technician_charge = ?, sim_charge = ?,
+                                courier_charge = ?, total_amount = ?, amount_paid = ?,
+                                amount_pending = ?, payment_status = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ");
+                        $updatePaymentStmt->bind_param(
+                            'dssddddddddsi',
+                            $totalSaleAmount,
+                            $paymentTransactionId,
+                            $paymentMode,
+                            $deviceCharge,
+                            $softwareCharge,
+                            $technicianCharge,
+                            $simCharge,
+                            $courierCharge,
+                            $totalAmount,
+                            $amountPaid,
+                            $amountPending,
+                            $pStatus,
+                            $paymentId
+                        );
+                    } else {
+                        $updatePaymentStmt = $conn->prepare("
+                            UPDATE customer_payments
+                            SET total_sale_amount = ?, transaction_id = NULLIF(?, ''),
+                                payment_mode = NULLIF(?, ''), updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ");
+                        $updatePaymentStmt->bind_param(
+                            'dssi',
+                            $totalSaleAmount,
+                            $paymentTransactionId,
+                            $paymentMode,
+                            $paymentId
+                        );
+                    }
+                    if (!$updatePaymentStmt->execute()) {
+                        throw new Exception('Failed to update customer payment details: ' . $updatePaymentStmt->error);
+                    }
+                    $updatePaymentStmt->close();
+                } else {
+                    $insPay = $conn->prepare("
+                        INSERT INTO customer_payments (
+                            customer_id, vehicle_id, total_sale_amount, transaction_id, payment_mode,
+                            device_charge, software_charge, technician_charge, sim_charge, courier_charge,
+                            total_amount, amount_paid, amount_pending, payment_status
+                        ) VALUES (?, NULLIF(?, 0), ?, ?, NULLIF(?, ''),
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $insPay->bind_param(
+                        "iidssdddddddds",
+                        $owner_id,
+                        $paymentVehicleId,
+                        $totalSaleAmount,
+                        $paymentTransactionId,
+                        $paymentMode,
+                        $deviceCharge,
+                        $softwareCharge,
+                        $technicianCharge,
+                        $simCharge,
+                        $courierCharge,
+                        $totalAmount,
+                        $amountPaid,
+                        $amountPending,
+                        $pStatus
+                    );
+                    if (!$insPay->execute()) {
+                        throw new Exception('Failed to create customer payment details: ' . $insPay->error);
+                    }
+                    $paymentId = (int) $insPay->insert_id;
+                    $insPay->close();
+                }
+                reserveTransactionId($conn, (string) ($paymentTransactionId ?? ''), 'customer_payments', (string) $paymentId);
             }
+        }
+    }
+
+    if (in_array($owner_type, ['dealer', 'technician'], true) && !empty($request['new_customer_data'])) {
+        $requestWorkflowData = json_decode($request['new_customer_data'], true) ?: [];
+        $paymentWorkflow = $requestWorkflowData['payment_workflow'] ?? [];
+        $paymentStep1 = $paymentWorkflow['step4'] ?? [];
+        $paymentStep2 = $paymentWorkflow['step5'] ?? [];
+        $saleAmount = (float)($paymentStep1['totalSaleAmount'] ?? 0);
+        $deviceCharge = (float)($paymentStep2['deviceCharge'] ?? 0);
+        $softwareCharge = (float)($paymentStep2['softwareCharge'] ?? 0);
+        $technicianCharge = (float)($paymentStep2['technicianCharge'] ?? 0);
+        $simCharge = (float)($paymentStep2['simCharge'] ?? 0);
+        $courierCharge = (float)($paymentStep2['courierCharge'] ?? 0);
+        $amountPaid = (float)($paymentStep2['amountPaid'] ?? 0);
+        $paymentMode = trim((string)($paymentStep1['paymentMode'] ?? ''));
+        $transactionId = normalizeTransactionId((string)($paymentStep1['transactionId'] ?? ''));
+        $chargesTotal = round(
+            $deviceCharge + $softwareCharge + $technicianCharge + $simCharge + $courierCharge,
+            2
+        );
+        $hasPaymentData = $saleAmount > 0 || $chargesTotal > 0 || $amountPaid > 0 || $paymentMode !== '' || $transactionId !== '';
+
+        if ($hasPaymentData) {
+            if ($saleAmount <= 0 || min($deviceCharge, $softwareCharge, $technicianCharge, $simCharge, $courierCharge, $amountPaid) < 0) {
+                throw new Exception('Courier payment amounts are invalid.');
+            }
+            if ($chargesTotal > 0 && abs($chargesTotal - $saleAmount) > 0.005) {
+                throw new Exception('Total charges must equal Total Sale Amount.');
+            }
+            if ($amountPaid > ($chargesTotal > 0 ? $chargesTotal : $saleAmount)) {
+                throw new Exception('Amount Paid cannot exceed Total Amount.');
+            }
+            if ($paymentMode !== '' && !in_array($paymentMode, getPaymentModes(), true)) {
+                throw new Exception('Invalid payment mode.');
+            }
+            if ($transactionId !== '' && $paymentMode === '') {
+                throw new Exception('Payment Mode is required when Transaction ID is entered.');
+            }
+            if ($paymentMode !== '' && $paymentMode !== 'Cash' && $transactionId === '') {
+                throw new Exception('Transaction ID is required for the selected Payment Mode.');
+            }
+
+            $allocationPayment = [
+                'enabled' => true,
+                'sale_amount' => $saleAmount,
+                'device_charge' => $deviceCharge,
+                'sim_charge' => $simCharge,
+                'shared_charges' => $softwareCharge + $technicianCharge + $courierCharge,
+                'charges_total' => $chargesTotal,
+                'total_amount' => $chargesTotal > 0 ? $chargesTotal : $saleAmount,
+                'amount_paid' => $amountPaid,
+                'payment_mode' => $paymentMode !== '' ? $paymentMode : null,
+                'transaction_id' => $transactionId !== '' ? $transactionId : null
+            ];
         }
     }
 
@@ -350,20 +642,100 @@ try {
     }
     $updReq->close();
 
+    $groupDeviceCount = $device_id ? 1 : 0;
+    $groupSimCount = $sim_id ? 1 : 0;
+    if (!empty($request['request_code'])) {
+        $groupCountStmt = $conn->prepare("
+            SELECT COUNT(device_id) AS device_count, COUNT(sim_id) AS sim_count
+            FROM courier_requests
+            WHERE request_code = ?
+        ");
+        $groupCountStmt->bind_param('s', $request['request_code']);
+        $groupCountStmt->execute();
+        $groupCounts = $groupCountStmt->get_result()->fetch_assoc();
+        $groupCountStmt->close();
+        $groupDeviceCount = max(0, (int)($groupCounts['device_count'] ?? 0));
+        $groupSimCount = max(0, (int)($groupCounts['sim_count'] ?? 0));
+    }
+    $groupAssetCount = max(1, $groupDeviceCount + $groupSimCount);
+    $getAllocationPayment = static function (string $assetType) use (
+        $allocationPayment,
+        $groupDeviceCount,
+        $groupSimCount,
+        $groupAssetCount
+    ): array {
+        if (!$allocationPayment['enabled']) {
+            return ['asset_amount' => 0.0, 'total_amount' => 0.0, 'amount_paid' => 0.0, 'pending_amount' => 0.0, 'payment_status' => 'Not Paid'];
+        }
+
+        $hasChargeBreakdown = $allocationPayment['charges_total'] > 0;
+        if ($assetType === 'device') {
+            $assetAmount = $groupDeviceCount > 0
+                ? $allocationPayment['device_charge'] / $groupDeviceCount
+                    + ($groupSimCount === 0 ? $allocationPayment['sim_charge'] / $groupDeviceCount : 0.0)
+                : 0.0;
+        } else {
+            $assetAmount = $groupSimCount > 0
+                ? $allocationPayment['sim_charge'] / $groupSimCount
+                    + ($groupDeviceCount === 0 ? $allocationPayment['device_charge'] / $groupSimCount : 0.0)
+                : 0.0;
+        }
+        $sharedAmount = $allocationPayment['shared_charges'] / $groupAssetCount;
+        $lineTotal = $hasChargeBreakdown
+            ? $assetAmount + $sharedAmount
+            : $allocationPayment['total_amount'] / $groupAssetCount;
+        $lineTotal = round($lineTotal, 2);
+        $paidAmount = $allocationPayment['total_amount'] > 0
+            ? round(min($lineTotal, $allocationPayment['amount_paid'] * $lineTotal / $allocationPayment['total_amount']), 2)
+            : 0.0;
+        $pendingAmount = max(0.0, $lineTotal - $paidAmount);
+        $status = $lineTotal <= 0
+            ? 'Not Paid'
+            : ($paidAmount <= 0 ? 'Not Paid' : ($paidAmount < $lineTotal ? 'Partially Paid' : 'Paid'));
+
+        return [
+            'asset_amount' => round($assetAmount, 2),
+            'total_amount' => $lineTotal,
+            'amount_paid' => $paidAmount,
+            'pending_amount' => round($pendingAmount, 2),
+            'payment_status' => $status
+        ];
+    };
+
     // 5. Allocate Device to Owner (Dealer, Technician, or Customer)
     if ($device_id) {
+        $devicePayment = $getAllocationPayment('device');
+        $deviceAmount = $devicePayment['asset_amount'];
+        $totalAllocationAmount = $devicePayment['total_amount'];
+        $paidAmount = $devicePayment['amount_paid'];
+        $pendingAmount = $devicePayment['pending_amount'];
+        $allocationStatus = $devicePayment['payment_status'];
+        $paymentMode = $allocationPayment['payment_mode'];
+        $transactionId = $allocationPayment['transaction_id'];
         $allocDevStmt = $conn->prepare("
             INSERT INTO stock_allocations (
-                owner_type, owner_id, device_id, allocation_type, allocation_date, 
-                device_amount, total_amount, amount_paid, pending_amount, 
-                payment_status, software, notes
-            ) VALUES (
-                ?, ?, ?, ?, ?, 
-                0.00, 0.00, 0.00, 0.00, 
-                'Not Paid', ?, ?
-            )
+                owner_type, owner_id, device_id, allocation_type, allocation_date,
+                device_amount, total_amount, amount_paid, pending_amount,
+                payment_status, payment_mode, transaction_id, software, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $allocDevStmt->bind_param("siissss", $owner_type, $owner_id, $device_id, $owner_type, $allocation_date, $software, $notes);
+        $allocDevStmt->bind_param(
+            "siissddddsssss",
+            $owner_type,
+            $owner_id,
+            $device_id,
+            $owner_type,
+            $allocation_date,
+            $deviceAmount,
+            $totalAllocationAmount,
+            $paidAmount,
+            $pendingAmount,
+            $allocationStatus,
+            $paymentMode,
+            $transactionId,
+            $software,
+            $notes
+        );
         if (!$allocDevStmt->execute()) {
             throw new Exception("Failed to create device stock allocation: " . $allocDevStmt->error);
         }
@@ -381,20 +753,41 @@ try {
     // 6. Allocate SIM to Owner (Dealer, Technician, or Customer)
     if ($sim_id) {
         $sim_validity_id = (int)($simRow['sim_validity_id'] ?? 0);
+        $simPayment = $getAllocationPayment('sim');
+        $simAmount = $simPayment['asset_amount'];
+        $totalAllocationAmount = $simPayment['total_amount'];
+        $paidAmount = $simPayment['amount_paid'];
+        $pendingAmount = $simPayment['pending_amount'];
+        $allocationStatus = $simPayment['payment_status'];
+        $paymentMode = $allocationPayment['payment_mode'];
+        $transactionId = $allocationPayment['transaction_id'];
         $allocSimStmt = $conn->prepare("
             INSERT INTO stock_allocations (
                 owner_type, owner_id, sim_id, allocation_type, allocation_date, 
-                sim_given_date, sim_validity_id, sim_status, sim_amount, 
-                total_amount, amount_paid, pending_amount, payment_status, 
-                software, notes
-            ) VALUES (
-                ?, ?, ?, ?, ?, 
-                ?, NULLIF(?, 0), 'Available', 0.00, 
-                0.00, 0.00, 0.00, 'Not Paid', 
-                ?, ?
-            )
+                sim_given_date, sim_validity_id, sim_status, sim_amount,
+                total_amount, amount_paid, pending_amount, payment_status,
+                payment_mode, transaction_id, software, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, 0), 'Available', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $allocSimStmt->bind_param("siisssiss", $owner_type, $owner_id, $sim_id, $owner_type, $allocation_date, $allocation_date, $sim_validity_id, $software, $notes);
+        $allocSimStmt->bind_param(
+            "siisssiddddsssss",
+            $owner_type,
+            $owner_id,
+            $sim_id,
+            $owner_type,
+            $allocation_date,
+            $allocation_date,
+            $sim_validity_id,
+            $simAmount,
+            $totalAllocationAmount,
+            $paidAmount,
+            $pendingAmount,
+            $allocationStatus,
+            $paymentMode,
+            $transactionId,
+            $software,
+            $notes
+        );
         if (!$allocSimStmt->execute()) {
             throw new Exception("Failed to create SIM stock allocation: " . $allocSimStmt->error);
         }

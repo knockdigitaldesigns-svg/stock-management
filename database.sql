@@ -653,9 +653,7 @@ CREATE TABLE IF NOT EXISTS customer_installations (
 
     customer_id INT NOT NULL,
 
-    installation_person_type
-        ENUM('Technician', 'Dealer')
-        NOT NULL,
+    installation_person_type VARCHAR(50) NOT NULL,
 
     installation_person_id INT DEFAULT NULL,
 

@@ -13,6 +13,7 @@ import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../com
 import useDeviceModels from '../../../hooks/useDeviceModels';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../../context/AuthContext';
+import InventoryLookup from './InventoryLookup';
 
 const DeviceMaintenance = () => {
     const { hasPermission, user } = useAuth();
@@ -110,6 +111,8 @@ const DeviceMaintenance = () => {
                     )}
                 </div>
             </div>
+
+            <InventoryLookup />
 
             <div className="card">
                 <TableFilterBar

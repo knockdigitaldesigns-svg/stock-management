@@ -94,6 +94,32 @@ function setupCourierTables() {
         $conn->query("ALTER TABLE courier_requests ADD COLUMN new_customer_data LONGTEXT DEFAULT NULL AFTER is_new_customer");
     }
 
+    $courierRequestColumns = [
+        'delivery_recipient_name' => 'VARCHAR(150) DEFAULT NULL',
+        'delivery_mobile_no' => 'VARCHAR(20) DEFAULT NULL',
+        'delivery_address_line1' => 'VARCHAR(255) DEFAULT NULL',
+        'delivery_address_line2' => 'VARCHAR(255) DEFAULT NULL',
+        'delivery_city' => 'VARCHAR(100) DEFAULT NULL',
+        'delivery_district' => 'VARCHAR(100) DEFAULT NULL',
+        'delivery_state' => 'VARCHAR(100) DEFAULT NULL',
+        'delivery_pincode' => 'VARCHAR(10) DEFAULT NULL',
+        'delivery_notes' => 'TEXT DEFAULT NULL',
+        'payment_amount' => 'DECIMAL(12,2) DEFAULT NULL',
+        'payment_status' => "ENUM('Pending', 'Paid') NOT NULL DEFAULT 'Pending'",
+        'payment_method' => 'VARCHAR(50) DEFAULT NULL',
+        'payment_transaction_id' => 'VARCHAR(100) DEFAULT NULL',
+        'payment_date' => 'DATE DEFAULT NULL',
+        'payment_notes' => 'TEXT DEFAULT NULL'
+    ];
+    foreach ($courierRequestColumns as $column => $definition) {
+        $check = $conn->query("SHOW COLUMNS FROM courier_requests LIKE '" . $conn->real_escape_string($column) . "'");
+        if ($check && $check->num_rows === 0) {
+            if (!$conn->query("ALTER TABLE courier_requests ADD COLUMN `$column` $definition")) {
+                error_log('Courier request migration failed for ' . $column . ': ' . $conn->error);
+            }
+        }
+    }
+
     $conn->close();
     return true;
 }

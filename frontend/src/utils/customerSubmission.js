@@ -147,7 +147,9 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
                 customer_id: customerId,
                 vehicle_id: currentVehicleId,
                 installation_person_type: installation.installation_person_type,
-                installation_person_id: Number(installation.installation_person_id),
+                installation_person_id: installation.installation_person_id
+                    ? Number(installation.installation_person_id)
+                    : null,
                 lead_closure_id: Number(installation.lead_closure_id),
                 installation_date: installation.installation_date
             }), 'Failed to save installation details.');
@@ -182,9 +184,11 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
                 technician_charge: Number(paymentPart2.technician_charge || 0),
                 sim_charge: Number(paymentPart2.sim_charge || 0),
                 courier_charge: Number(paymentPart2.courier_charge || 0),
-                cash_to_technician: Boolean(paymentPart2.cash_to_technician),
-                cash_to_dealer: Boolean(paymentPart2.cash_to_dealer),
-                cash_to_et: Boolean(paymentPart2.cash_to_et),
+                ...(Object.prototype.hasOwnProperty.call(paymentPart2, 'cash_to_technician') ? {
+                    cash_to_technician: Boolean(paymentPart2.cash_to_technician),
+                    cash_to_dealer: Boolean(paymentPart2.cash_to_dealer),
+                    cash_to_et: Boolean(paymentPart2.cash_to_et)
+                } : {}),
                 total_amount: Number(paymentPart2.total_amount),
                 amount_paid: Number(paymentPart2.amount_paid),
                 amount_pending: Number(paymentPart2.amount_pending),
