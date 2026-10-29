@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import Modal from '../../components/Modal/Modal';
 import { saveCustomerDraft } from '../../utils/customerSubmission';
+import { getCustomerFieldErrors, sanitizeCustomerField, validateCustomerForm } from '../../utils/customerValidation';
 
 const initialForm = {
     platform_id: '',
@@ -57,33 +58,7 @@ const CustomerCreatePage = () => {
     const canAddCustomer = hasPermission('customers.add');
     const canEditCustomer = hasPermission('customers.edit');
 
-    const fieldErrors = {
-        platform_id: showValidation && !form.platform_id ? 'Platform is required.' : '',
-        username: !form.username.trim()
-            ? (showValidation ? 'Username is required.' : '')
-            : !/^[a-zA-Z0-9.@_-]+$/.test(form.username.trim())
-            ? 'Username can contain only letters, numbers, @, dot, underscore and hyphen.'
-            : '',
-        primary_mobile_no: !form.primary_mobile_no
-            ? (showValidation ? 'Primary mobile number is required.' : '')
-            : !/^\d{10}$/.test(form.primary_mobile_no)
-                ? 'Primary mobile number must contain exactly 10 digits.'
-                : '',
-        secondary_mobile_no: form.secondary_mobile_no && !/^\d{10}$/.test(form.secondary_mobile_no)
-            ? 'Secondary mobile number must contain exactly 10 digits.'
-            : form.secondary_mobile_no === form.primary_mobile_no
-                ? 'Secondary mobile number cannot be the same as primary mobile number.'
-                : '',
-        email: form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)
-            ? 'Please enter a valid email address.'
-            : '',
-        location: showValidation && !form.location.trim() ? 'Location is required.' : '',
-        pincode: !form.pincode
-            ? (showValidation ? 'Pincode is required.' : '')
-            : !/^\d{6}$/.test(form.pincode)
-                ? 'Pincode must contain exactly 6 digits.'
-                : ''
-    };
+    const fieldErrors = getCustomerFieldErrors(form, showValidation);
 
     const storageKey = customerId
         ? `customer_creation_${customerId}`
@@ -278,28 +253,7 @@ const loadCustomer = async () => {
             value
         } = event.target;
 
-        let updatedValue = value;
-
-        if (
-            name === 'primary_mobile_no' ||
-            name === 'secondary_mobile_no'
-        ) {
-            updatedValue = value
-                .replace(/\D/g, '')
-                .slice(0, 10);
-        }
-
-        if (name === 'pincode') {
-            updatedValue = value
-                .replace(/\D/g, '')
-                .slice(0, 6);
-        }
-
-        if (name === 'username') {
-            updatedValue = value
-                .replace(/\s/g, '')
-                .slice(0, 100);
-        }
+        const updatedValue = sanitizeCustomerField(name, value);
 
         setForm((previous) => ({
             ...previous,
@@ -316,49 +270,7 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const validateForm = () => {
-        if (!form.platform_id) return 'Please select a platform.';
-        if (!form.username.trim()) return 'Username is required.';
-        if (!form.primary_mobile_no) return 'Primary mobile number is required.';
-        if (!form.location.trim()) return 'Location is required.';
-        if (!form.pincode) return 'Pincode is required.';
-        if (fieldErrors.platform_id) return fieldErrors.platform_id;
-
-        if (fieldErrors.username) return fieldErrors.username;
-
-        if (
-            !/^[a-zA-Z0-9.@_-]+$/.test(
-                form.username.trim()
-            )
-        ) {
-            return (
-                'Username can contain only letters, ' +
-                'numbers, @, dot, underscore and hyphen.'
-            );
-        }
-
-        if (fieldErrors.primary_mobile_no) return fieldErrors.primary_mobile_no;
-
-        if (
-            !/^\d{10}$/.test(
-                form.primary_mobile_no
-            )
-        ) {
-            return (
-                'Primary mobile number must contain exactly 10 digits.'
-            );
-        }
-
-        if (fieldErrors.secondary_mobile_no) return fieldErrors.secondary_mobile_no;
-
-        if (fieldErrors.email) return fieldErrors.email;
-
-        if (fieldErrors.location) return fieldErrors.location;
-
-        if (fieldErrors.pincode) return fieldErrors.pincode;
-
-        return '';
-    };
+    const validateForm = () => validateCustomerForm(form);
 
     /*
     |--------------------------------------------------------------------------

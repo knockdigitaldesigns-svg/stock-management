@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, Download, CheckCircle } from 'lucide-react';
+import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
 import useDeviceModels from '../../../hooks/useDeviceModels';
-import { isFutureDate, parseDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
-import { showGlobalError } from '../../../context/ErrorContext';
+import BulkUploadValidationErrors from '../../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../../utils/bulkUploadErrors';
 
 const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -48,62 +48,56 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
+                const sheetRows = XLSX.utils.sheet_to_json(worksheet, {
+                    header: 1,
+                    defval: '',
+                    raw: true,
+                    blankrows: true
+                });
 
-                if (jsonData.length === 0) {
+                if (sheetRows.length <= 1) {
                     const msg = "Excel file is empty.";
                     setErrors([msg]);
-                    showGlobalError(msg);
                     setLoading(false);
                     return;
                 }
 
-                const validationErrors = [];
-                const validDevices = [];
-                const seenImeis = new Set();
-                const imeiRegex = /^[0-9]{15}$/;
+                const headers = sheetRows[0].map((header) => String(header ?? '').trim().toLowerCase());
+                const requiredColumns = ['Purchase Date', 'Device Model', 'IMEI No'];
+                const missingColumns = requiredColumns.filter((name) => !headers.includes(name.toLowerCase()));
+                if (missingColumns.length) {
+                    setErrors(missingColumns.map((name) => `Required column '${name}' is missing.`));
+                    setLoading(false);
+                    return;
+                }
+                const columns = ['purchase date', 'device model', 'imei no', 'notes'].map((name) => headers.indexOf(name));
 
                 const modelMap = {};
                 models.forEach(m => {
                     modelMap[m.label.toLowerCase()] = m.value;
                 });
 
-                jsonData.forEach((row, index) => {
-                    const rowNum = index + 2;
-                    const purchaseDate = row["Purchase Date"];
-                    const deviceModelName = row["Device Model"]?.toString().trim();
-                    const imeiNo = row["IMEI No"]?.toString().replace(/\D/g, '');
-                    const notes = row["Notes"]?.toString().trim() || '';
-                    const parsedDate = parseDate(purchaseDate);
-
-                    if (purchaseDate === null || purchaseDate === undefined || purchaseDate === '') validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
-                    else if (!parsedDate) validationErrors.push(`Row ${rowNum}: Purchase Date is invalid.`);
-                    else if (isFutureDate(parsedDate)) validationErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
-                    if (!deviceModelName) validationErrors.push(`Row ${rowNum}: Device Model is required.`);
-                    else if (!modelMap[deviceModelName.toLowerCase()]) validationErrors.push(`Row ${rowNum}: Device model '${deviceModelName}' does not exist in Device Types.`);
-                    if (!imeiNo) validationErrors.push(`Row ${rowNum}: IMEI No is required.`);
-                    else if (seenImeis.has(imeiNo)) validationErrors.push(`Row ${rowNum}: Duplicate IMEI No inside Excel (${imeiNo}).`);
-                    
-                    if (imeiNo) seenImeis.add(imeiNo);
-
-                    if (parsedDate && deviceModelName && modelMap[deviceModelName.toLowerCase()] && imeiNo && imeiRegex.test(imeiNo)) {
-                        validDevices.push({
-                            purchase_date: parsedDate,
-                            device_model_id: modelMap[deviceModelName.toLowerCase()],
-                            imei_no: imeiNo,
-                            notes
-                        });
-                    }
-                });
-
-                if (validationErrors.length > 0) {
-                    setErrors(validationErrors);
-                    showGlobalError(validationErrors, 'Import Validation Errors');
+                const rows = sheetRows.slice(1)
+                    .map((cells, index) => ({ cells, rowNum: index + 2 }))
+                    .filter(({ cells }) => cells.some((cell) => String(cell ?? '').trim() !== ''));
+                if (!rows.length) {
+                    setErrors(['Excel file contains no data rows.']);
                     setLoading(false);
                     return;
                 }
+                const devices = rows.map(({ cells, rowNum }) => {
+                    const deviceModelName = String(cells[columns[1]] ?? '').trim();
+                    return {
+                        row_number: rowNum,
+                        purchase_date: cells[columns[0]],
+                        device_model_id: modelMap[deviceModelName.toLowerCase()] || 0,
+                        device_model_name: deviceModelName,
+                        imei_no: String(cells[columns[2]] ?? '').trim(),
+                        notes: columns[3] < 0 ? '' : String(cells[columns[3]] ?? '').trim()
+                    };
+                });
 
-                const response = await api.post('/devices/create.php', { devices: validDevices });
+                const response = await api.post('/devices/create.php', { devices });
                 if (response.data.success) {
                     setSuccessMsg("Devices uploaded successfully!");
                     setTimeout(() => {
@@ -111,15 +105,13 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                     }, 1500);
                 } else {
                     const errMsg = response.data.message || 'Failed to upload devices';
-                    setErrors([errMsg]);
-                    showGlobalError(errMsg);
+                    setErrors(normalizeBulkUploadErrors(response.data, errMsg));
                 }
 
             } catch (error) {
                 console.error(error);
                 const errMsg = error.response?.data?.message || 'Error parsing Excel file or network error';
-                setErrors([errMsg]);
-                showGlobalError(errMsg);
+                setErrors(normalizeBulkUploadErrors(error.response?.data, errMsg));
             } finally {
                 setLoading(false);
             }
@@ -162,6 +154,8 @@ const DeviceExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading || modelsLoading}
                         />
                     </div>
+
+                    <BulkUploadValidationErrors errors={errors} />
 
                     {successMsg && (
                         <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

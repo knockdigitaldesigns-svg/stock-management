@@ -510,7 +510,7 @@ function App() {
                     <Route
                         path="/customer-management/my-verifications"
                         element={
-                            <ProtectedRoute permission={['customers.add', 'customers.edit']}>
+                            <ProtectedRoute permission={['customers.add', 'customers.edit', 'courier.add']}>
                                 <MyCustomerVerificationsPage />
                             </ProtectedRoute>
                         }

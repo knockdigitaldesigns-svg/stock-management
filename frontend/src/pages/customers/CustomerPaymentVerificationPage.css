@@ -294,6 +294,66 @@
     color: #1e293b;
 }
 
+.verification-nested-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.5rem 1rem;
+    min-width: 0;
+}
+
+.verification-detail-field {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.verification-detail-label {
+    margin-bottom: 0.2rem;
+    color: var(--verification-muted);
+    font-size: 0.72rem;
+    text-transform: capitalize;
+}
+
+.verification-detail-value {
+    overflow-wrap: anywhere;
+    color: #1e293b;
+}
+
+.verification-nested-group,
+.verification-repeat-list {
+    min-width: 0;
+}
+
+.verification-nested-group {
+    grid-column: 1 / -1;
+}
+
+.verification-nested-group h4,
+.verification-repeat-item h4 {
+    margin: 0.55rem 0 0.35rem;
+    color: #334155;
+    font-size: 0.82rem;
+}
+
+.verification-repeat-list {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.verification-repeat-item {
+    min-width: 0;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #f1f5f9;
+    border-radius: 0.55rem;
+    background: #fbfdff;
+}
+
+.verification-repeat-item > .verification-nested-fields {
+    padding-left: 0.15rem;
+}
+
 .my-verification-actions {
     display: flex;
     flex-wrap: wrap;
@@ -319,5 +379,9 @@
     .verification-tab {
         padding-inline: 0.7rem;
         font-size: 0.78rem;
+    }
+
+    .verification-nested-fields {
+        grid-template-columns: minmax(0, 1fr);
     }
 }

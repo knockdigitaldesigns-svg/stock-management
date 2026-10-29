@@ -5,8 +5,7 @@ import { exportToExcel, exportToPDF } from '../../../utils/export';
 import './InwardReports.css';
 import { formatDate } from '../../../utils/date';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 
 const InwardReports = () => {
     const [activeTab, setActiveTab] = useState('sim'); // 'sim' or 'device'
@@ -16,20 +15,13 @@ const InwardReports = () => {
     const [simList, setSimList] = useState([]);
     const [deviceList, setDeviceList] = useState([]);
     const [deviceModels, setDeviceModels] = useState([]);
+    const [simTypes, setSimTypes] = useState([]);
     const [filters, setFilters] = useState(emptyTableFilters);
-    
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [loading, setLoading] = useState(false);
-
-    const filterReportRows = (items, rowFilters, options) => {
-        const rows = filterTableRows(items, { ...rowFilters, status: '' }, options);
-        if (!rowFilters.status) return rows;
-        const selectedStatus = rowFilters.status.trim().toLowerCase();
-        return rows.filter((row) => (
-            [row.status, row.lifecycle_status]
-                .filter(Boolean)
-                .some((status) => String(status).trim().toLowerCase() === selectedStatus)
-        ));
-    };
+    const [loadError, setLoadError] = useState('');
 
     const formatReportStatus = (row) => {
         const inventoryStatus = String(row.status || 'available');
@@ -49,56 +41,124 @@ const InwardReports = () => {
         return counts;
     }, { total: 0, available: 0, allocated: 0, used: 0, reserved: 0 });
 
-    const getFilteredModelCounts = () => filteredDevices.reduce((counts, device) => {
+    const getFilteredModelCounts = (devices) => devices.reduce((counts, device) => {
         const model = device.model_name || 'Unknown';
         counts[model] = (counts[model] || 0) + 1;
         return counts;
     }, {});
 
     useEffect(() => {
-        api.get('/device_types/list.php')
-            .then((response) => {
+        Promise.all([api.get('/device_types/list.php'), api.get('/sim_types/list.php')])
+            .then(([response, simTypesResponse]) => {
                 const deviceTypes = response.data.data?.device_types || [];
                 setDeviceModels(deviceTypes
                     .filter((type) => String(type.status || 'Active').trim().toLowerCase() === 'active')
                     .map((type) => type.device_type));
+                setSimTypes((simTypesResponse.data.data?.sim_types || []).map((simType) => simType.sim_type));
             })
-            .catch(() => setDeviceModels([]));
+            .catch((error) => {
+                console.error('Failed to load report filter options', error);
+                setLoadError(error.response?.data?.message || 'Failed to load report filter options.');
+            });
     }, []);
 
     useEffect(() => {
         const fetchReports = async () => {
             setLoading(true);
+            setLoadError('');
             try {
+                const params = {
+                    page,
+                    page_size: pageSize,
+                    status: filters.status || '',
+                    search: filters.search || '',
+                    date_from: filters.date_from || '',
+                    date_to: filters.date_to || ''
+                };
                 if (activeTab === 'sim') {
-                    const sumRes = await api.get('/reports/sim_summary.php').catch(()=>null);
-                    const listRes = await api.get('/reports/sim_available.php', filters.status ? { params: { status: filters.status } } : undefined).catch(()=>null);
-                    if (sumRes?.data?.success) setSimSummary(sumRes.data.data.summary);
-                    if (listRes?.data?.success) setSimList(listRes.data.data.sims || []);
+                    params.sim_type = filters.simType || '';
+                    const listRes = await api.get('/reports/sim_available.php', { params });
+                    if (listRes.data?.success) {
+                        setSimList(listRes.data.data.sims || []);
+                        const nextPagination = listRes.data.data.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+                        setPagination(nextPagination);
+                        if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
+                    }
                 } else {
-                    const sumRes = await api.get('/reports/device_summary.php').catch(()=>null);
-                    const listRes = await api.get('/reports/device_available.php', filters.status ? { params: { status: filters.status } } : undefined).catch(()=>null);
-                    if (sumRes?.data?.success) setDeviceSummary(sumRes.data.data);
-                    if (listRes?.data?.success) setDeviceList(listRes.data.data.devices || []);
+                    params.device_model = filters.deviceModel || '';
+                    const listRes = await api.get('/reports/device_available.php', { params });
+                    if (listRes.data?.success) {
+                        setDeviceList(listRes.data.data.devices || []);
+                        const nextPagination = listRes.data.data.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+                        setPagination(nextPagination);
+                        if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
+                    }
                 }
             } catch (error) {
                 console.error("Failed to fetch reports", error);
+                setLoadError(error.response?.data?.message || 'Failed to fetch reports.');
             } finally {
                 setLoading(false);
             }
         };
         fetchReports();
-    }, [activeTab, filters.status]);
+    }, [activeTab, filters, page, pageSize]);
 
-    const filteredSims = filterReportRows(simList, filters, { dateKeys: ['purchase_date'], simKey: 'sim_type', searchKeys: ['sim_no', 'sim_type', 'notes'] });
-    const filteredDevices = filterReportRows(deviceList, filters, { dateKeys: ['purchase_date'], deviceKey: 'model_name', searchKeys: ['imei_no', 'model_name', 'notes'] });
+    useEffect(() => {
+        const fetchSummary = async () => {
+            try {
+                if (activeTab === 'sim') {
+                    const response = await api.get('/reports/sim_summary.php');
+                    if (response.data?.success) setSimSummary(response.data.data.summary);
+                } else {
+                    const response = await api.get('/reports/device_summary.php');
+                    if (response.data?.success) setDeviceSummary(response.data.data);
+                }
+            } catch (error) {
+                console.error('Failed to fetch inventory report summary', error);
+                setLoadError(error.response?.data?.message || 'Failed to load report summary.');
+            }
+        };
+        fetchSummary();
+    }, [activeTab]);
 
-    const simPagination = usePagination(filteredSims, 10, [filters, activeTab]);
-    const devicePagination = usePagination(filteredDevices, 10, [filters, activeTab]);
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
 
-    const handleExportExcel = () => {
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
+
+    const fetchAllReportRows = async () => {
+        const params = {
+            status: filters.status || '',
+            search: filters.search || '',
+            date_from: filters.date_from || '',
+            date_to: filters.date_to || ''
+        };
         if (activeTab === 'sim') {
-            const summary = getStatusCounts(filteredSims);
+            params.sim_type = filters.simType || '';
+            const response = await api.get('/reports/sim_available.php', { params });
+            return response.data.data?.sims || [];
+        }
+        params.device_model = filters.deviceModel || '';
+        const response = await api.get('/reports/device_available.php', { params });
+        return response.data.data?.devices || [];
+    };
+
+    const handleExportExcel = async () => {
+        let exportRows;
+        try {
+            exportRows = await fetchAllReportRows();
+        } catch (error) {
+            setLoadError(error.response?.data?.message || 'Failed to load report export data.');
+            return;
+        }
+        if (activeTab === 'sim') {
+            const summary = getStatusCounts(exportRows);
             const summaryData = [
                 { label: 'Total SIMs', value: summary.total },
                 { label: 'Available', value: summary.available },
@@ -107,7 +167,7 @@ const InwardReports = () => {
                 { label: 'Reserved', value: summary.reserved }
             ];
 
-            const simData = filteredSims.map(s => ({
+            const simData = exportRows.map(s => ({
                 "Purchase Date": formatDate(s.purchase_date),
                 "SIM No": s.sim_no,
                 "SIM Type": s.sim_type || '-',
@@ -131,7 +191,7 @@ const InwardReports = () => {
                 combinedSheet: { title: 'SIM REPORT' }
             });
         } else {
-            const summary = getStatusCounts(filteredDevices);
+            const summary = getStatusCounts(exportRows);
             const deviceSummaryData = [
                 { label: 'Total Devices', value: summary.total },
                 { label: 'Available', value: summary.available },
@@ -140,12 +200,12 @@ const InwardReports = () => {
                 { label: 'Reserved', value: summary.reserved }
             ];
 
-            const modelBreakdown = Object.entries(getFilteredModelCounts()).map(([model, count]) => ({
+            const modelBreakdown = Object.entries(getFilteredModelCounts(exportRows)).map(([model, count]) => ({
                 "Model": model,
                 "Count": count
             }));
 
-            const deviceData = filteredDevices.map(d => ({
+            const deviceData = exportRows.map(d => ({
                 "Purchase Date": formatDate(d.purchase_date),
                 "Model": d.model_name,
                 "IMEI No": d.imei_no,
@@ -177,7 +237,14 @@ const InwardReports = () => {
         }
     };
 
-    const handleExportPDF = () => {
+    const handleExportPDF = async () => {
+        let exportRows;
+        try {
+            exportRows = await fetchAllReportRows();
+        } catch (error) {
+            setLoadError(error.response?.data?.message || 'Failed to load report export data.');
+            return;
+        }
         if (activeTab === 'sim') {
             const cols = [
                 { header: "Purchase Date", key: "purchase_date" },
@@ -187,7 +254,7 @@ const InwardReports = () => {
                 { header: "Status", key: "status" }
             ];
 
-            const simData = filteredSims.map(s => ({
+            const simData = exportRows.map(s => ({
                 purchase_date: formatDate(s.purchase_date),
                 sim_no: s.sim_no,
                 sim_type: s.sim_type || '-',
@@ -195,7 +262,7 @@ const InwardReports = () => {
                 status: formatReportStatus(s)
             }));
 
-            const summary = getStatusCounts(filteredSims);
+            const summary = getStatusCounts(exportRows);
             const summaryData = [
                 { label: 'Total SIMs', value: summary.total },
                 { label: 'Available', value: summary.available },
@@ -217,7 +284,7 @@ const InwardReports = () => {
                 { header: "Status", key: "status" }
             ];
 
-            const deviceData = filteredDevices.map(d => ({
+            const deviceData = exportRows.map(d => ({
                 purchase_date: formatDate(d.purchase_date),
                 model_name: d.model_name,
                 imei_no: d.imei_no,
@@ -225,7 +292,7 @@ const InwardReports = () => {
                 status: formatReportStatus(d)
             }));
 
-            const summary = getStatusCounts(filteredDevices);
+            const summary = getStatusCounts(exportRows);
             const deviceSummaryData = [
                 { label: 'Total Devices', value: summary.total },
                 { label: 'Available', value: summary.available },
@@ -234,7 +301,7 @@ const InwardReports = () => {
                 { label: 'Reserved', value: summary.reserved }
             ];
 
-            const modelBreakdown = Object.entries(getFilteredModelCounts()).map(([model_name, count]) => ({
+            const modelBreakdown = Object.entries(getFilteredModelCounts(exportRows)).map(([model_name, count]) => ({
                 model_name,
                 count
             }));
@@ -259,10 +326,10 @@ const InwardReports = () => {
                     <p className="page-subtitle">Review incoming device and SIM stock with exportable reports.</p>
                 </div>
                 <div className="header-actions">
-                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? filteredSims.length === 0 : filteredDevices.length === 0)} onClick={handleExportExcel}>
+                    <button className="btn btn-outline" disabled={loading || pagination.total === 0} onClick={handleExportExcel}>
                         <Download size={16} /> Export Excel
                     </button>
-                    <button className="btn btn-outline" disabled={loading || (activeTab === 'sim' ? filteredSims.length === 0 : filteredDevices.length === 0)} onClick={handleExportPDF}>
+                    <button className="btn btn-outline" disabled={loading || pagination.total === 0} onClick={handleExportPDF}>
                         <Download size={16} /> Export PDF
                     </button>
                 </div>
@@ -273,6 +340,7 @@ const InwardReports = () => {
                     className={`tab-btn ${activeTab === 'sim' ? 'active' : ''}`}
                     onClick={() => {
                         setFilters(emptyTableFilters());
+                        setPage(1);
                         setActiveTab('sim');
                     }}
                 >
@@ -282,6 +350,7 @@ const InwardReports = () => {
                     className={`tab-btn ${activeTab === 'device' ? 'active' : ''}`}
                     onClick={() => {
                         setFilters(emptyTableFilters());
+                        setPage(1);
                         setActiveTab('device');
                     }}
                 >
@@ -293,6 +362,7 @@ const InwardReports = () => {
                 <div className="card text-center" style={{ padding: '3rem' }}>Loading reports...</div>
             ) : (
                 <>
+            {loadError && <div className="alert alert-danger">{loadError}</div>}
                     {/* Summary Cards */}
                     <div className="summary-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
                         {activeTab === 'sim' && simSummary && (
@@ -356,11 +426,12 @@ const InwardReports = () => {
                         </div>
                         <TableFilterBar
                             filters={filters}
-                            onChange={setFilters}
-                            onReset={() => setFilters(emptyTableFilters())}
+                            onChange={updateFilters}
+                            onReset={() => updateFilters(emptyTableFilters())}
                             items={activeTab === 'sim' ? simList : deviceList}
                             dateKeys={['purchase_date']}
                             deviceModelOptions={activeTab === 'device' ? deviceModels : undefined}
+                            simTypeOptions={activeTab === 'sim' ? simTypes : undefined}
                             showSimType={activeTab === 'sim'}
                             showDeviceModel={activeTab === 'device'}
                             showStatus
@@ -392,10 +463,10 @@ const InwardReports = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {activeTab === 'sim' && simPagination.paginatedItems.length === 0 && (
+                                    {activeTab === 'sim' && simList.length === 0 && (
                                         <tr><td colSpan="5" className="text-center empty-state">No records found for the selected filters.</td></tr>
                                     )}
-                                    {activeTab === 'sim' && simPagination.paginatedItems.map(sim => (
+                                    {activeTab === 'sim' && simList.map(sim => (
                                         <tr key={sim.id}>
                                             <td>{formatDate(sim.purchase_date)}</td>
                                             <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
@@ -405,10 +476,10 @@ const InwardReports = () => {
                                         </tr>
                                     ))}
 
-                                    {activeTab === 'device' && devicePagination.paginatedItems.length === 0 && (
+                                    {activeTab === 'device' && deviceList.length === 0 && (
                                         <tr><td colSpan="5" className="text-center empty-state">No records found for the selected filters.</td></tr>
                                     )}
-                                    {activeTab === 'device' && devicePagination.paginatedItems.map(dev => (
+                                    {activeTab === 'device' && deviceList.map(dev => (
                                         <tr key={dev.id}>
                                             <td>{formatDate(dev.purchase_date)}</td>
                                             <td className="truncate-cell" title={dev.model_name}>{dev.model_name}</td>
@@ -423,20 +494,20 @@ const InwardReports = () => {
 
                         {activeTab === 'sim' ? (
                             <Pagination
-                                currentPage={simPagination.page}
-                                totalItems={simPagination.totalItems}
-                                pageSize={simPagination.pageSize}
-                                onPageChange={simPagination.setPage}
-                                onPageSizeChange={simPagination.setPageSize}
+                                currentPage={page}
+                                totalItems={pagination.total}
+                                pageSize={pageSize}
+                                onPageChange={setPage}
+                                onPageSizeChange={updatePageSize}
                                 itemName="SIMs"
                             />
                         ) : (
                             <Pagination
-                                currentPage={devicePagination.page}
-                                totalItems={devicePagination.totalItems}
-                                pageSize={devicePagination.pageSize}
-                                onPageChange={devicePagination.setPage}
-                                onPageSizeChange={devicePagination.setPageSize}
+                                currentPage={page}
+                                totalItems={pagination.total}
+                                pageSize={pageSize}
+                                onPageChange={setPage}
+                                onPageSizeChange={updatePageSize}
                                 itemName="devices"
                             />
                         )}

@@ -6,6 +6,7 @@ require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/courier_request_details.php';
 require_once '../../utils/courier_payment_validation.php';
+require_once '../../utils/courier_customer_validation.php';
 
 handlePreflight();
 
@@ -82,6 +83,21 @@ if ($newSimCount < 1) $newSimCount = 1;
 $newCourierStatus = trim((string)($data->courier_status ?? $existing['courier_status']));
 if (!in_array($newCourierStatus, ['Pending', 'Reached', 'Not Reached'], true)) {
     $newCourierStatus = $existing['courier_status'] ?: 'Pending';
+}
+if ($newCourierStatus === 'Reached' && $currentApprovalStatus !== 'Approved') {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, 'Courier approval is required before marking the request Reached.', [], [], 400);
+}
+if (
+    $currentApprovalStatus === 'Approved'
+    && $existing['courier_to_person'] === 'Customer'
+    && $newCourierStatus === 'Reached'
+    && $existing['courier_status'] !== 'Reached'
+) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, 'Use Courier tracking update to mark an approved customer request Reached so verification can be created.', [], [], 400);
 }
 $newCourierReason = trim((string)($data->courier_reason ?? $existing['courier_reason']));
 $newNotes = trim((string)($data->notes ?? $existing['notes']));
@@ -160,11 +176,24 @@ $newDealerId = $newCourierTo === 'Dealer' ? (int)($data->dealer_id ?? $existing[
 $newTechnicianId = $newCourierTo === 'Technician' ? (int)($data->technician_id ?? $existing['technician_id']) : null;
 $newCustomerId = $newCourierTo === 'Customer' ? (int)($data->customer_id ?? $existing['customer_id']) : null;
 $newCustomerDataJson = $existing['new_customer_data'];
+$newCustomerData = null;
 if ($newCourierTo === 'Customer' && isset($data->new_customer_data)) {
     $newCustomerData = json_decode(json_encode($data->new_customer_data), true) ?: [];
+    try {
+        $newCustomerData = mapCourierSoftwareToCustomerPlatform($conn, $newCustomerData, $newSoftware);
+        if (!empty($existing['is_new_customer'])) {
+            $step1 = $newCustomerData['step1'];
+            $step1 = validateCourierNewCustomerProfile($step1);
+            $newCustomerData['step1'] = array_merge($newCustomerData['step1'], $step1);
+        }
+    } catch (InvalidArgumentException $e) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, $e->getMessage(), [], [], 400);
+    }
     if (!empty($existing['is_new_customer'])) {
-        $step1 = $newCustomerData['step1'] ?? [];
-        $platformId = (int)($step1['platform_id'] ?? 0);
+        $step1 = $newCustomerData['step1'];
+        $platformId = $step1['platform_id'];
         $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
         $platformStmt->bind_param('i', $platformId);
         $platformStmt->execute();
@@ -184,11 +213,153 @@ if ($newCourierTo === 'Customer' && isset($data->new_customer_data)) {
     $newCustomerDataJson = json_encode($data->new_customer_data);
 }
 
+$storedWorkflowData = json_decode((string) ($existing['new_customer_data'] ?? ''), true);
+$verificationLink = is_array($storedWorkflowData)
+    ? ($storedWorkflowData['_verification'] ?? [])
+    : [];
+$verificationSubmissionId = (int) ($verificationLink['submission_id'] ?? 0);
+if ($verificationSubmissionId > 0) {
+    if ($newCourierTo !== 'Customer') {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'A customer verification request cannot change recipient type.', [], [], 400);
+    }
+    $verificationStmt = $conn->prepare(
+        'SELECT status, submission_data FROM customer_payment_verification_submissions
+         WHERE id = ? FOR UPDATE'
+    );
+    if (!$verificationStmt) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Unable to prepare the linked verification lookup.', [], [], 500);
+    }
+    $verificationStmt->bind_param('i', $verificationSubmissionId);
+    if (!$verificationStmt->execute()) {
+        $verificationStmt->close();
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Unable to load the linked verification request.', [], [], 500);
+    }
+    $verificationRow = $verificationStmt->get_result()->fetch_assoc();
+    $verificationStmt->close();
+    if (!$verificationRow || $verificationRow['status'] !== 'Pending Verification') {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Only a pending customer verification request can be edited.', [], [], 400);
+    }
+
+    if ($newCustomerData !== null) {
+        $newCustomerData['_verification'] = $verificationLink;
+        $newCustomerDataJson = json_encode($newCustomerData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($newCustomerDataJson === false) {
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Updated courier workflow data could not be encoded.', [], [], 400);
+        }
+        $submissionData = json_decode((string) $verificationRow['submission_data'], true);
+        if (!is_array($submissionData)) {
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'The linked customer verification data is invalid.', [], [], 500);
+        }
+        $submissionData['step1'] = $newCustomerData['step1'] ?? [];
+        $submissionData['customer'] = $submissionData['step1'];
+        unset($submissionData['payment_part1'], $submissionData['payment_part2']);
+        foreach (['step2', 'step3', 'step4', 'step5'] as $workflowStep) {
+            if (array_key_exists($workflowStep, $newCustomerData)) {
+                $submissionData[$workflowStep] = $newCustomerData[$workflowStep];
+            }
+        }
+        $step2 = is_array($newCustomerData['step2'] ?? null) ? $newCustomerData['step2'] : [];
+        $step3 = is_array($newCustomerData['step3'] ?? null) ? $newCustomerData['step3'] : [];
+        $step4 = is_array($newCustomerData['step4'] ?? null) ? $newCustomerData['step4'] : [];
+        $step5 = is_array($newCustomerData['step5'] ?? null) ? $newCustomerData['step5'] : [];
+        $hasPaymentData = hasCourierPaymentData($step4, $step5);
+        if ($hasPaymentData && courierPaymentTotalSaleAmount($step4, $step5) <= 0) {
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Total Sale Amount is required when entering payment details.', [], [], 400);
+        }
+        if ($hasPaymentData) {
+            $submissionData['payment_part1'] = $step4;
+            $submissionData['payment_part2'] = buildCourierPaymentPart2($step4, $step5);
+        }
+        if (hasCourierWorkflowStepData($step2)) {
+            $vehicle = is_array($submissionData['vehicles'][0] ?? null)
+                ? $submissionData['vehicles'][0]
+                : [];
+            $vehicle = array_replace($vehicle, [
+                'vehicle_no' => (string) ($step2['vehicle_no'] ?? ''),
+                'vehicle_type_id' => (int) ($step2['vehicle_type_id'] ?? 0),
+                'device_model_id' => (int) ($step2['device_model_id'] ?? 0),
+                'imei_no' => (string) ($step2['imei_no'] ?? ''),
+                'sim_no_1' => (string) ($step2['sim_no_1'] ?? ''),
+                'sim_no_2' => (string) ($step2['sim_no_2'] ?? ''),
+                'validity_id' => (int) ($step2['validity_id'] ?? 0)
+            ]);
+            $vehicle['changed'] = array_replace(
+                is_array($vehicle['changed'] ?? null) ? $vehicle['changed'] : [],
+                [
+                    'vehicle' => true,
+                    'installation' => hasCourierWorkflowStepData($step3),
+                    'paymentPart1' => $hasPaymentData,
+                    'paymentPart2' => $hasPaymentData
+                ]
+            );
+            if (hasCourierWorkflowStepData($step3)) {
+                $vehicle['installation'] = $step3;
+            }
+            if ($hasPaymentData) {
+                $vehicle['payment_part1'] = $step4;
+                $vehicle['payment_part2'] = buildCourierPaymentPart2($step4, $step5);
+            }
+            $submissionData['vehicles'] = [$vehicle];
+        } else {
+            unset($submissionData['vehicles']);
+        }
+        unset($submissionData['courier'], $submissionData['courier_request_code']);
+        $submissionJson = json_encode($submissionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($submissionJson === false || strlen($submissionJson) > 2000000) {
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Updated courier verification details are too large or could not be encoded.', [], [], 400);
+        }
+        $updateVerification = $conn->prepare(
+            'UPDATE customer_payment_verification_submissions
+             SET submission_data = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = \'Pending Verification\''
+        );
+        if (!$updateVerification) {
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Unable to prepare the linked verification update.', [], [], 500);
+        }
+        $updateVerification->bind_param('si', $submissionJson, $verificationSubmissionId);
+        if (!$updateVerification->execute()) {
+            $updateVerification->close();
+            $conn->rollback();
+            $conn->close();
+            sendResponse(false, 'Unable to update the linked customer verification request.', [], [], 500);
+        }
+        $updateVerification->close();
+    }
+}
+
 $newAssetType = trim((string)($data->asset_type ?? $existing['asset_type']));
 $newDeviceModelId = (int)($data->device_model_id ?? 0);
 $newDeviceId = (int)($data->device_id ?? 0);
 $newSimType = trim((string)($data->sim_type ?? ''));
 $newSimId = (int)($data->sim_id ?? 0);
+
+if ($verificationSubmissionId > 0 && (
+    $newAssetType !== $existing['asset_type']
+    || $newDeviceId !== (int) ($existing['device_id'] ?? 0)
+    || $newSimId !== (int) ($existing['sim_id'] ?? 0)
+)) {
+    $conn->rollback();
+    $conn->close();
+    sendResponse(false, 'Assets on a customer courier request cannot change after verification submission. Create a new request for different assets.', [], [], 400);
+}
 
 if ($newAssetType === 'device' || $newAssetType === 'both') {
     if ($newDeviceModelId <= 0 || $newDeviceId <= 0) {
@@ -381,6 +552,27 @@ try {
         throw new Exception("Failed to update courier request: " . $updStmt->error);
     }
     $updStmt->close();
+    if ($verificationSubmissionId > 0 && $newCustomerDataJson !== null) {
+        $linkedRequestIds = array_values(array_unique(array_filter(
+            array_map('intval', is_array($verificationLink['request_ids'] ?? null) ? $verificationLink['request_ids'] : []),
+            static function (int $requestId): bool {
+                return $requestId > 0;
+            }
+        )));
+        if ($linkedRequestIds) {
+            $linkedIdsSql = implode(',', $linkedRequestIds);
+            $syncWorkflow = $conn->prepare(
+                "UPDATE courier_requests SET new_customer_data = ?
+                 WHERE id IN ({$linkedIdsSql}) AND approval_status = 'Pending Approval'"
+            );
+            $syncWorkflow->bind_param('s', $newCustomerDataJson);
+            if (!$syncWorkflow->execute()) {
+                $syncWorkflow->close();
+                throw new Exception('Unable to synchronize linked courier workflow data.');
+            }
+            $syncWorkflow->close();
+        }
+    }
     saveCourierRequestDetails($conn, $id, $courierDetails);
 
     // Audit Log

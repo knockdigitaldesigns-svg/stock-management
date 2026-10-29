@@ -8,8 +8,7 @@ import TechnicianExcelUploadModal from './TechnicianExcelUploadModal';
 import AddStockAllocationModal from '../../../components/AddStockAllocationModal/AddStockAllocationModal';
 import Modal from '../../../components/Modal/Modal';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 import { useAuth } from '../../../context/AuthContext';
@@ -19,7 +18,11 @@ const Technicians = () => {
     const { hasPermission, refreshPermissions } = useAuth();
     const [technicians, setTechnicians] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isTechnicianUploadModalOpen, setIsTechnicianUploadModalOpen] = useState(false);
     const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
@@ -32,18 +35,40 @@ const Technicians = () => {
         platforms: [],
         deviceModels: [],
         simTypes: [],
-        simValidities: []
+        simValidities: [],
+        technicians: []
     });
 
-    const fetchTechnicians = async () => {
+    const fetchTechnicians = async (targetPage = page, targetPageSize = pageSize, targetFilters = filters) => {
         setLoading(true);
+        setLoadError('');
         try {
-            const response = await api.get('/technicians/list.php').catch(() => ({ data: { success: true, data: { technicians: [] } } }));
+            const response = await api.get('/technicians/list.php', {
+                params: {
+                    page: targetPage,
+                    page_size: targetPageSize,
+                    search: targetFilters.search || '',
+                    date_from: targetFilters.date_from || '',
+                    date_to: targetFilters.date_to || '',
+                    technician_id: targetFilters.technician_id || '',
+                    platform: targetFilters.platform || '',
+                    device_model: targetFilters.deviceModel || '',
+                    sim_type: targetFilters.simType || '',
+                    sim_validity: targetFilters.simValidity || '',
+                    payment_status: targetFilters.paymentStatus || ''
+                }
+            });
             if (response.data.success) {
                 setTechnicians(response.data.data.technicians || []);
+                const nextPagination = response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (targetPage > nextPagination.total_pages) setPage(nextPagination.total_pages);
+            } else {
+                setLoadError(response.data.message || 'Failed to load technicians.');
             }
         } catch (error) {
             console.error('Failed to fetch technicians', error);
+            setLoadError(error.response?.data?.message || 'Failed to load technicians.');
         } finally {
             setLoading(false);
         }
@@ -51,11 +76,12 @@ const Technicians = () => {
 
     const fetchFilterMasters = async () => {
         try {
-            const [platformsRes, deviceTypesRes, validitiesRes, simsRes] = await Promise.all([
-                api.get('/platforms/list.php').catch(() => ({ data: { success: true, data: { platforms: [] } } })),
-                api.get('/device_types/list.php').catch(() => ({ data: { success: true, data: { device_types: [] } } })),
-                api.get('/sim_validities/list.php').catch(() => ({ data: { success: true, data: { validities: [] } } })),
-                api.get('/sims/list.php').catch(() => ({ data: { success: true, data: { sims: [] } } }))
+            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes, techniciansRes] = await Promise.all([
+                api.get('/platforms/list.php'),
+                api.get('/device_types/list.php'),
+                api.get('/sim_validities/list.php'),
+                api.get('/sim_types/list.php'),
+                api.get('/technicians/list.php?for_lookup=1')
             ]);
 
             const rawPlatforms = platformsRes.data?.data?.platforms || [];
@@ -71,14 +97,15 @@ const Technicians = () => {
                 .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
                 .map((v) => `${v.months} Months`);
 
-            const rawSims = simsRes.data?.data?.sims || [];
-            const simTypes = [...new Set(rawSims.map((s) => s.sim_type).filter(Boolean))];
+            const rawSimTypes = simTypesRes.data?.data?.sim_types || [];
+            const simTypes = [...new Set(rawSimTypes.map((simType) => simType.sim_type).filter(Boolean))];
 
             setMasterData({
                 platforms: activePlatforms,
                 deviceModels,
                 simValidities,
-                simTypes
+                simTypes,
+                technicians: techniciansRes.data?.data?.technicians || []
             });
         } catch (err) {
             console.error('Failed to load filter masters', err);
@@ -102,9 +129,12 @@ const Technicians = () => {
     };
 
     useEffect(() => {
-        fetchTechnicians();
         fetchFilterMasters();
     }, []);
+
+    useEffect(() => {
+        fetchTechnicians(page, pageSize, filters);
+    }, [page, pageSize, filters]);
 
     useEffect(() => {
         refreshPermissions().catch((error) => {
@@ -112,21 +142,15 @@ const Technicians = () => {
         });
     }, [refreshPermissions]);
 
-    const filteredTechnicians = filterTableRows(technicians, filters, {
-        dateKeys: ['enrolled_date'],
-        searchKeys: ['technician_name', 'mobile_no', 'location', 'notes']
-    }).filter((technician) =>
-        !filters.technician_id || String(technician.id) === String(filters.technician_id)
-    );
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
 
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredTechnicians, 10, [filters]);
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     return (
         <div className="page-container">
@@ -151,9 +175,9 @@ const Technicians = () => {
             <div className="card">
                 <TableFilterBar
                     filters={filters}
-                    onChange={setFilters}
+                    onChange={updateFilters}
                     onReset={() => {
-                        setFilters(emptyTableFilters());
+                        updateFilters(emptyTableFilters());
                         setTechnicianDropdownResetKey((key) => key + 1);
                     }}
                     items={technicians}
@@ -163,7 +187,7 @@ const Technicians = () => {
                     deviceModelOptions={masterData.deviceModels}
                     simTypeOptions={masterData.simTypes}
                     simValidityOptions={masterData.simValidities}
-                    technicianOptions={technicians.map((technician) => ({
+                    technicianOptions={masterData.technicians.map((technician) => ({
                         value: String(technician.id),
                         label: technician.technician_name
                     }))}
@@ -196,14 +220,18 @@ const Technicians = () => {
                                 <tr>
                                     <td colSpan="8" className="text-center">Loading technicians...</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : loadError ? (
+                                <tr>
+                                    <td colSpan="8" className="text-center empty-state">{loadError}</td>
+                                </tr>
+                            ) : technicians.length === 0 ? (
                                 <tr>
                                     <td colSpan="8" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map(tech => (
+                                technicians.map(tech => (
                                     <tr key={tech.id}>
                                         <td className="truncate-cell" title={tech.technician_name}>{tech.technician_name}</td>
                                         <td>{tech.mobile_no}</td>
@@ -233,10 +261,10 @@ const Technicians = () => {
 
                 <Pagination
                     currentPage={page}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="technicians"
                 />
             </div>

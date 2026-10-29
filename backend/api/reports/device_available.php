@@ -28,7 +28,9 @@ $sql = "
             dm.device_type AS model_name,
             CASE
                 WHEN EXISTS (
-                    SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = d.id
+                    SELECT 1 FROM customer_vehicle_details cvd
+                    WHERE cvd.device_id = d.id
+                       OR BINARY cvd.imei_no = BINARY d.imei_no
                 ) OR EXISTS (
                     SELECT 1
                     FROM stock_transactions st
@@ -64,19 +66,80 @@ $sql = "
     ) report_rows
 ";
 
+$where = [];
+$params = [];
+$types = '';
 if ($statusFilter !== '') {
-    $sql .= ' WHERE report_rows.status = ?';
+    $where[] = 'report_rows.status = ?';
+    $params[] = $statusFilter;
+    $types .= 's';
 }
-$sql .= ' ORDER BY report_rows.purchase_date DESC, report_rows.id DESC';
+if (($search = trim((string) ($_GET['search'] ?? ''))) !== '') {
+    $where[] = '(report_rows.imei_no LIKE ? OR report_rows.model_name LIKE ? OR report_rows.notes LIKE ?)';
+    $like = '%' . $search . '%';
+    array_push($params, $like, $like, $like);
+    $types .= 'sss';
+}
+$deviceModel = trim((string) ($_GET['device_model'] ?? ''));
+if ($deviceModel !== '') {
+    $where[] = 'LOWER(report_rows.model_name) = ?';
+    $params[] = strtolower($deviceModel);
+    $types .= 's';
+}
+$dateFrom = trim((string) ($_GET['date_from'] ?? ''));
+if ($dateFrom !== '') {
+    $where[] = 'report_rows.purchase_date >= ?';
+    $params[] = $dateFrom;
+    $types .= 's';
+}
+$dateTo = trim((string) ($_GET['date_to'] ?? ''));
+if ($dateTo !== '') {
+    $where[] = 'report_rows.purchase_date <= ?';
+    $params[] = $dateTo;
+    $types .= 's';
+}
+$whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pagination = null;
+if ($paginated) {
+    $countStmt = $conn->prepare('SELECT COUNT(*) AS total FROM (' . $sql . ') report_rows' . $whereSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare device report count query.', [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to count device report rows.', [], [], 500);
+    }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $pagination = [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ];
+    $countStmt->close();
+}
+$sql = 'SELECT report_rows.* FROM (' . $sql . ') report_rows' . $whereSql . ' ORDER BY report_rows.purchase_date DESC, report_rows.id DESC';
+$paramsForList = $params;
+$typesForList = $types;
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $paramsForList[] = $pageSize;
+    $paramsForList[] = ($page - 1) * $pageSize;
+    $typesForList .= 'ii';
+}
 
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     $conn->close();
     sendResponse(false, 'Failed to prepare device report query.', [], [], 500);
 }
-if ($statusFilter !== '') {
-    $stmt->bind_param('s', $statusFilter);
-}
+if ($paramsForList) $stmt->bind_param($typesForList, ...$paramsForList);
 if (!$stmt->execute()) {
     $stmt->close();
     $conn->close();
@@ -84,7 +147,9 @@ if (!$stmt->execute()) {
 }
 
 $devices = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-sendResponse(true, "Devices fetched", ["devices" => $devices]);
 $stmt->close();
 $conn->close();
+$responseData = ["devices" => $devices];
+if ($paginated) $responseData['pagination'] = $pagination;
+sendResponse(true, "Devices fetched", $responseData);
 ?>

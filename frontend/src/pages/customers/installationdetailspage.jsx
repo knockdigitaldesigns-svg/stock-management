@@ -11,6 +11,11 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { saveCustomerDraft } from '../../utils/customerSubmission';
+import {
+    installationTypes,
+    isInstallationPersonRequired,
+    resolveInstallationFormValues
+} from '../../utils/installationValidation';
 
 const initialForm = {
     installation_person_type: '',
@@ -386,8 +391,21 @@ const InstallationDetailsPage = () => {
             if (deviceOwner && simOwner && (deviceOwner.type !== simOwner.type || deviceOwner.id !== simOwner.id)) {
                 setCurrentOwnerResolved(true);
                 setAssetOwnerMismatch(true);
-                setForm({ ...initialForm, ...(stored.step3 || {}), installation_person_type: '', installation_person_id: '' });
+                const nextForm = resolveInstallationFormValues({
+                    stored: stored.step3,
+                    installation
+                });
+                setForm(nextForm);
+                setCurrentOwnerName(installation.installation_person || '');
                 setCurrentOwnerLoading(false);
+                sessionStorage.setItem(
+                    storageKey,
+                    JSON.stringify({
+                        ...stored,
+                        customer_id: Number(customerId),
+                        step3: nextForm
+                    })
+                );
                 triggerError(ownerMismatchMessage);
                 return;
             }
@@ -404,29 +422,12 @@ const InstallationDetailsPage = () => {
                 : selectedOwnerType === 'dealer'
                     ? ownerInstallationStatus === 'Offsite' ? 'Offsite Dealer' : 'Onsite Dealer'
                     : '';
-
-            const nextForm = {
-                installation_person_type:
-                    (isRecordedDirectInstallation ? 'Direct' : '') ||
-                    ownerType ||
-                    stored.step3?.installation_person_type ||
-                    installation.installation_person_type ||
-                    '',
-                installation_person_id:
-                    isRecordedDirectInstallation ? '' :
-                    selectedOwnerId ? String(selectedOwnerId) :
-                    stored.step3?.installation_person_id ||
-                    installation.installation_person_id ||
-                    '',
-                lead_closure_id:
-                    stored.step3?.lead_closure_id ||
-                    installation.lead_closure_id ||
-                    '',
-                installation_date:
-                    stored.step3?.installation_date ||
-                    installation.installation_date ||
-                    ''
-            };
+            const nextForm = resolveInstallationFormValues({
+                stored: stored.step3,
+                installation,
+                ownerType,
+                ownerId: selectedOwnerId
+            });
 
             setForm(nextForm);
             setCurrentOwnerLoading(false);
@@ -537,7 +538,7 @@ const InstallationDetailsPage = () => {
             return 'Installation Type is required.';
         }
 
-        if (form.installation_person_type !== 'Direct' && !form.installation_person_id) {
+        if (isInstallationPersonRequired(form.installation_person_type) && !form.installation_person_id) {
             return `${getPersonLabel()} is required.`;
         }
 
@@ -580,7 +581,7 @@ const InstallationDetailsPage = () => {
                 ? 'Installation Type is required.'
                 : '',
         installation_person_id:
-            showValidation && form.installation_person_type !== 'Direct' && !form.installation_person_id
+            showValidation && isInstallationPersonRequired(form.installation_person_type) && !form.installation_person_id
                 ? `${getPersonLabel()} is required.`
                 : '',
         installation_date:
@@ -951,10 +952,9 @@ const InstallationDetailsPage = () => {
                                 disabled={loading || saving || currentOwnerLoading || sameAllocatedOwner}
                             >
                                 <option value="">Select Installation Type</option>
-                                <option value="Technician">Technician</option>
-                                <option value="Onsite Dealer">Onsite Dealer</option>
-                                <option value="Offsite Dealer">Offsite Dealer</option>
-                                <option value="Direct">Direct</option>
+                                {installationTypes.map((type) => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
                             </select>
                             {installationErrors.installation_person_type && (
                                 <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>

@@ -6,6 +6,8 @@ require_once '../../middleware/auth.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/transaction_ids.php';
 require_once '../../utils/courier_payment_validation.php';
+require_once '../../utils/customer_payment_verification.php';
+require_once '../../utils/courier_customer_validation.php';
 
 handlePreflight();
 
@@ -26,6 +28,8 @@ if (!isSuperAdminUser((int)($currentUser['user_id'] ?? 0))) {
 
 $data = json_decode(file_get_contents("php://input"));
 $id = (int)($data->id ?? 0);
+$requestedVerificationId = (int)($data->verification_submission_id ?? 0);
+$reviewerUserId = (int) ($currentUser['user_id'] ?? 0);
 if ($id <= 0) {
     sendResponse(false, "Courier Request ID is required", [], [], 400);
 }
@@ -53,22 +57,167 @@ if (!$request) {
     sendResponse(false, "Courier request not found", [], [], 404);
 }
 
-if ($request['approval_status'] !== 'Pending Approval') {
+$requestWorkflowData = json_decode((string) ($request['new_customer_data'] ?? ''), true);
+$requestWorkflowData = is_array($requestWorkflowData) ? $requestWorkflowData : [];
+$verificationLink = $requestWorkflowData['_verification'] ?? [];
+$verificationSubmissionId = (int) ($verificationLink['submission_id'] ?? 0);
+$linkedRequestIds = array_values(array_unique(array_filter(
+    array_map('intval', is_array($verificationLink['request_ids'] ?? null) ? $verificationLink['request_ids'] : []),
+    static function (int $requestId): bool {
+        return $requestId > 0;
+    }
+)));
+
+if ($verificationSubmissionId > 0) {
+    if ($requestedVerificationId !== $verificationSubmissionId || !in_array($id, $linkedRequestIds, true)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'This customer courier request must be approved from its linked verification request.', [], [], 403);
+    }
+    $verificationStmt = $conn->prepare(
+        'SELECT status, reviewer_user_id, linked_customer_id, linked_vehicle_id,
+                linked_payment_id, submission_data
+         FROM customer_payment_verification_submissions
+         WHERE id = ? FOR UPDATE'
+    );
+    if (!$verificationStmt) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Unable to prepare the linked verification lookup.', [], [], 500);
+    }
+    $verificationStmt->bind_param('i', $verificationSubmissionId);
+    if (!$verificationStmt->execute()) {
+        $verificationStmt->close();
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Unable to load the linked verification request.', [], [], 500);
+    }
+    $verificationRow = $verificationStmt->get_result()->fetch_assoc();
+    $verificationStmt->close();
+    if (!$verificationRow) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Linked customer verification request was not found.', [], [], 404);
+    }
+    $verifiedSubmissionData = json_decode((string) $verificationRow['submission_data'], true);
+    if (!is_array($verifiedSubmissionData)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Linked customer verification data is invalid.', [], [], 500);
+    }
+    $verifiedRequestIds = is_array($verifiedSubmissionData['courier_request_ids'] ?? null)
+        ? array_map('intval', $verifiedSubmissionData['courier_request_ids'])
+        : [];
+    if (($verifiedSubmissionData['source'] ?? '') !== 'courier'
+        || !in_array($id, $verifiedRequestIds, true)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Courier request does not match the linked verification submission.', [], [], 403);
+    }
+    $verificationStateAllowsCommit = $request['approval_status'] === 'Approved'
+        ? in_array($verificationRow['status'], ['Applying', 'Approved'], true)
+        : $verificationRow['status'] === 'Applying';
+    if (!$verificationStateAllowsCommit
+        || (int) ($verificationRow['reviewer_user_id'] ?? 0) !== (int) ($currentUser['user_id'] ?? 0)) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'A Super Admin must start this verification approval before courier assets can be committed.', [], [], 403);
+    }
+    $finalizedRequestIds = array_values(array_unique(array_filter(
+        array_map('intval', is_array($verifiedSubmissionData['courier_finalized_request_ids'] ?? null)
+            ? $verifiedSubmissionData['courier_finalized_request_ids']
+            : []),
+        static function (int $requestId): bool {
+            return $requestId > 0;
+        }
+    )));
+    if (in_array($id, $finalizedRequestIds, true)) {
+        $conn->commit();
+        $conn->close();
+        sendResponse(true, 'Courier assets for this request are already committed.');
+    }
+}
+
+if ($request['approval_status'] === 'Approved' && $verificationSubmissionId <= 0) {
+    $conn->commit();
+    $conn->close();
+    sendResponse(true, 'Courier request is already approved.');
+}
+if ($request['approval_status'] !== 'Pending Approval'
+    && !($request['approval_status'] === 'Approved' && $verificationSubmissionId > 0)) {
     $conn->rollback();
     $conn->close();
     sendResponse(false, "Courier request is already {$request['approval_status']}.", [], [], 400);
+}
+
+if ($request['courier_to_person'] === 'Customer' && $verificationSubmissionId <= 0) {
+    try {
+        $requestCode = trim((string) ($request['request_code'] ?? ''));
+            if ($requestCode !== '') {
+            $groupStmt = $conn->prepare('SELECT id FROM courier_requests WHERE request_code = ? ORDER BY id FOR UPDATE');
+                if (!$groupStmt) {
+                    throw new Exception('Unable to prepare courier group lookup.');
+                }
+                $groupStmt->bind_param('s', $requestCode);
+            } else {
+                $groupStmt = $conn->prepare('SELECT id FROM courier_requests WHERE id = ? FOR UPDATE');
+                if (!$groupStmt) {
+                    throw new Exception('Unable to prepare courier request group lookup.');
+                }
+                $groupStmt->bind_param('i', $id);
+            }
+            if (!$groupStmt->execute()) {
+            throw new Exception('Unable to load the courier request group.');
+        }
+        $groupIds = array_map('intval', array_column($groupStmt->get_result()->fetch_all(MYSQLI_ASSOC), 'id'));
+        $groupStmt->close();
+        if (!$groupIds) {
+            throw new Exception('Courier request group not found.');
+        }
+        $approvalUpdate = $conn->prepare(
+            "UPDATE courier_requests SET approval_status = 'Approved', updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND approval_status = 'Pending Approval'"
+        );
+        if (!$approvalUpdate) {
+            throw new Exception('Unable to prepare courier approval update.');
+        }
+        foreach ($groupIds as $groupId) {
+            $approvalUpdate->bind_param('i', $groupId);
+            if (!$approvalUpdate->execute()) {
+                throw new Exception('Unable to approve the courier request group.');
+            }
+            writeAudit($conn, $groupId, 'Courier', 'Admin Approved — Awaiting Delivery', 'approval_status', 'Pending Approval', 'Approved', $currentUser);
+        }
+        $approvalUpdate->close();
+        $conn->commit();
+        $conn->close();
+        sendResponse(true, 'Courier request approved. Customer records and inventory allocation will remain pending until verification approval.');
+    } catch (Throwable $error) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, $error->getMessage(), [], [], 500);
+    }
 }
 
 $courierTo = $request['courier_to_person'];
 $owner_type = strtolower($courierTo);
 $isNewCustomer = !empty($request['is_new_customer']);
 $owner_id = 0;
+if ($verificationSubmissionId > 0 && $request['courier_to_person'] === 'Customer') {
+    $owner_id = (int) ($verificationRow['linked_customer_id'] ?? 0);
+    if ($owner_id <= 0) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Customer approval must be committed before courier assets can be allocated.', [], [], 409);
+    }
+    $isNewCustomer = false;
+}
 
 if ($owner_type === 'technician') {
     $owner_id = (int)$request['technician_id'];
 } elseif ($owner_type === 'dealer') {
     $owner_id = (int)$request['dealer_id'];
-} elseif ($owner_type === 'customer' && !$isNewCustomer) {
+} elseif ($owner_type === 'customer' && !$isNewCustomer && $verificationSubmissionId <= 0) {
     $owner_id = (int)$request['customer_id'];
 }
 
@@ -93,6 +242,12 @@ $allocationPayment = [
     'payment_mode' => null,
     'transaction_id' => null
 ];
+$customerVehicleId = $verificationSubmissionId > 0
+    ? (int) ($verificationRow['linked_vehicle_id'] ?? 0)
+    : null;
+$paymentId = $verificationSubmissionId > 0
+    ? (int) ($verificationRow['linked_payment_id'] ?? 0)
+    : 0;
 
 try {
     validateCourierPaymentWorkflow(
@@ -112,7 +267,7 @@ try {
             throw new Exception("Device associated with this request was not found.");
         }
 
-        $devOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND device_id = ? AND approval_status = 'Pending Approval' LIMIT 1");
+        $devOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND device_id = ? LIMIT 1");
         $devOwnerStmt->bind_param("ii", $id, $device_id);
         $devOwnerStmt->execute();
         $deviceReservationOwner = $devOwnerStmt->get_result()->fetch_assoc();
@@ -147,7 +302,7 @@ try {
             throw new Exception("SIM associated with this request was not found.");
         }
 
-        $simOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND sim_id = ? AND approval_status = 'Pending Approval' LIMIT 1");
+        $simOwnerStmt = $conn->prepare("SELECT id FROM courier_requests WHERE id = ? AND sim_id = ? LIMIT 1");
         $simOwnerStmt->bind_param("ii", $id, $sim_id);
         $simOwnerStmt->execute();
         $simReservationOwner = $simOwnerStmt->get_result()->fetch_assoc();
@@ -171,21 +326,21 @@ try {
     }
 
     // Apply submitted workflow details for both new and existing customers.
-    $hasCustomerWorkflow = $owner_type === 'customer' && !empty($request['new_customer_data']);
+    $hasCustomerWorkflow = $verificationSubmissionId <= 0
+        && $owner_type === 'customer'
+        && !empty($request['new_customer_data']);
     if ($isNewCustomer || $hasCustomerWorkflow) {
-        $newCustomerData = !empty($request['new_customer_data']) ? json_decode($request['new_customer_data'], true) : [];
+        $newCustomerData = $requestWorkflowData;
         $step1 = $newCustomerData['step1'] ?? [];
         if ($isNewCustomer) {
-        $username = trim((string)($step1['username'] ?? ''));
-        $primaryMobile = trim((string)($step1['primary_mobile_no'] ?? ''));
-
-        if ($username === '' || $primaryMobile === '') {
-            throw new Exception("New customer username and primary mobile number are required for approval.");
-        }
+        $validatedCustomer = validateCourierNewCustomerProfile($step1);
+        $username = $validatedCustomer['username'];
+        $primaryMobile = $validatedCustomer['primary_mobile_no'];
+        $platformId = $validatedCustomer['platform_id'];
 
         // Check if customer already exists (same username + same mobile)
-        $chkCust = $conn->prepare("SELECT id FROM customers WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) = ? ORDER BY id ASC LIMIT 1");
-        $chkCust->bind_param("ss", $username, $primaryMobile);
+        $chkCust = $conn->prepare("SELECT id FROM customers WHERE platform_id = ? AND LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) = ? ORDER BY id ASC LIMIT 1");
+        $chkCust->bind_param("iss", $platformId, $username, $primaryMobile);
         $chkCust->execute();
         $existingCust = $chkCust->get_result()->fetch_assoc();
         $chkCust->close();
@@ -194,8 +349,8 @@ try {
             $owner_id = (int)$existingCust['id'];
         } else {
             // Check username conflict with different mobile
-            $chkDiff = $conn->prepare("SELECT id FROM customers WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) != ? LIMIT 1");
-            $chkDiff->bind_param("ss", $username, $primaryMobile);
+            $chkDiff = $conn->prepare("SELECT id FROM customers WHERE platform_id = ? AND LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) != ? LIMIT 1");
+            $chkDiff->bind_param("iss", $platformId, $username, $primaryMobile);
             $chkDiff->execute();
             if ($chkDiff->get_result()->num_rows > 0) {
                 $chkDiff->close();
@@ -204,7 +359,6 @@ try {
             $chkDiff->close();
 
             // Insert Customer
-            $platformId = (int)($step1['platform_id'] ?? 0);
             $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
             $platformStmt->bind_param('i', $platformId);
             $platformStmt->execute();
@@ -213,10 +367,10 @@ try {
             if (!$validPlatform) {
                 throw new Exception('Select an active Platform by editing this courier request before approving the new customer.');
             }
-            $secMobile = !empty($step1['secondary_mobile_no']) ? trim($step1['secondary_mobile_no']) : null;
-            $email = !empty($step1['email']) ? trim($step1['email']) : null;
-            $location = !empty($step1['location']) ? trim($step1['location']) : '';
-            $pincode = !empty($step1['pincode']) ? trim($step1['pincode']) : '';
+            $secMobile = $validatedCustomer['secondary_mobile_no'] !== '' ? $validatedCustomer['secondary_mobile_no'] : null;
+            $email = $validatedCustomer['email'] !== '' ? $validatedCustomer['email'] : null;
+            $location = $validatedCustomer['location'];
+            $pincode = $validatedCustomer['pincode'];
 
             $insCust = $conn->prepare("
                 INSERT INTO customers (platform_id, username, primary_mobile_no, secondary_mobile_no, email, location, pincode, status)
@@ -249,7 +403,6 @@ try {
         $vSim2 = $vSim2 !== '' ? $vSim2 : null;
         $vValidityId = !empty($step2['validity_id']) ? (int)$step2['validity_id'] : null;
         $vValidityMonths = 0;
-        $customerVehicleId = null;
         if ($vValidityId) {
             $validityStmt = $conn->prepare('SELECT months FROM sim_validities WHERE id = ? LIMIT 1');
             $validityStmt->bind_param('i', $vValidityId);
@@ -354,7 +507,7 @@ try {
             }
         }
 
-        if ($instPersonType !== null && ($instPersonId || $instDate || $leadClosureId)) {
+        if ($customerVehicleId !== null && $instPersonType !== null && ($instPersonId || $instDate || $leadClosureId)) {
             $chkInstTable = $conn->query("SHOW TABLES LIKE 'customer_installations'");
             if ($chkInstTable && $chkInstTable->num_rows > 0) {
                 $existingInstallationStmt = $conn->prepare("
@@ -803,8 +956,95 @@ try {
     }
 
     // 7. Generic History Audit
-    $auditMsg = $isNewCustomer ? 'Admin Approved (New Customer Created)' : 'Admin Approved';
-    writeAudit($conn, $id, 'Courier', $auditMsg, 'approval_status', 'Pending Approval', 'Approved', $currentUser);
+    $auditMsg = $verificationSubmissionId > 0
+        ? 'Verification Approved — Courier Assets Allocated'
+        : ($isNewCustomer ? 'Admin Approved (New Customer Created)' : 'Admin Approved');
+    writeAudit(
+        $conn,
+        $id,
+        'Courier',
+        $auditMsg,
+        'approval_status',
+        $verificationSubmissionId > 0 ? 'Approved' : 'Pending Approval',
+        'Approved',
+        $currentUser
+    );
+
+    if ($verificationSubmissionId > 0) {
+        $finalizedRequestIds[] = $id;
+        $finalizedRequestIds = array_values(array_unique(array_filter(
+            array_map('intval', $finalizedRequestIds),
+            static function (int $requestId): bool {
+                return $requestId > 0;
+            }
+        )));
+        $allCourierRequestsFinalized = count(array_diff($linkedRequestIds, $finalizedRequestIds)) === 0;
+        $verifiedSubmissionData['courier_finalized_request_ids'] = $finalizedRequestIds;
+        $updatedSubmissionJson = json_encode($verifiedSubmissionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($updatedSubmissionJson === false) {
+            throw new Exception('Unable to save courier asset approval progress.');
+        }
+        if ($allCourierRequestsFinalized) {
+            $verificationUpdate = $conn->prepare(
+                "UPDATE customer_payment_verification_submissions
+                 SET status = 'Approved', linked_customer_id = ?, linked_vehicle_id = NULLIF(?, 0),
+                     linked_payment_id = NULLIF(?, 0), submission_data = ?, decided_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND status = 'Applying' AND reviewer_user_id = ?"
+            );
+            if (!$verificationUpdate) {
+                throw new Exception('Unable to prepare customer verification completion.');
+            }
+            $linkedVehicleId = (int) ($customerVehicleId ?? 0);
+            $verificationUpdate->bind_param(
+                'iiisii',
+                $owner_id,
+                $linkedVehicleId,
+                $paymentId,
+                $updatedSubmissionJson,
+                $verificationSubmissionId,
+                $reviewerUserId
+            );
+            if (!$verificationUpdate->execute() || $verificationUpdate->affected_rows !== 1) {
+                $verificationUpdate->close();
+                throw new Exception('Unable to finalize customer verification approval.');
+            }
+            $verificationUpdate->close();
+            insertCustomerPaymentVerificationHistory(
+                $conn,
+                $verificationSubmissionId,
+                'Applying',
+                'Approved',
+                null,
+                $reviewerUserId
+            );
+        } else {
+            $verificationProgress = $conn->prepare(
+                'UPDATE customer_payment_verification_submissions
+                 SET linked_customer_id = ?, linked_vehicle_id = NULLIF(?, 0),
+                     linked_payment_id = NULLIF(?, 0), submission_data = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND status = \'Applying\' AND reviewer_user_id = ?'
+            );
+            if (!$verificationProgress) {
+                throw new Exception('Unable to prepare courier verification progress.');
+            }
+            $linkedVehicleId = (int) ($customerVehicleId ?? 0);
+            $verificationProgress->bind_param(
+                'iiisii',
+                $owner_id,
+                $linkedVehicleId,
+                $paymentId,
+                $updatedSubmissionJson,
+                $verificationSubmissionId,
+                $reviewerUserId
+            );
+            if (!$verificationProgress->execute()) {
+                $verificationProgress->close();
+                throw new Exception('Unable to save courier verification approval progress.');
+            }
+            $verificationProgress->close();
+        }
+    }
 
     $conn->commit();
     $conn->close();

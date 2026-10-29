@@ -62,6 +62,38 @@ if ($dateTo !== '') {
 }
 
 $whereSQL = implode(' AND ', $where);
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+
+$pagination = null;
+if ($paginated) {
+    $countSql = "
+        SELECT COUNT(*) AS total
+        FROM stock_transfers st
+        LEFT JOIN devices dev ON dev.id = st.device_id
+        LEFT JOIN sims s ON s.id = st.sim_id
+        WHERE $whereSQL
+    ";
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare stock transfer count query.', [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to count stock transfers.', [], [], 500);
+    }
+    $pagination = [
+        'total' => (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0),
+        'page' => $page,
+        'page_size' => $pageSize
+    ];
+    $pagination['total_pages'] = max(1, (int) ceil($pagination['total'] / $pageSize));
+    $countStmt->close();
+}
 
 $sql = "
     SELECT
@@ -94,15 +126,26 @@ $sql = "
     ORDER BY st.created_at DESC, st.id DESC
 ";
 
-if (!empty($params)) {
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $stmt->close();
-} else {
-    $result = $conn->query($sql);
+$dataParams = $params;
+$dataTypes = $types;
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $dataParams[] = $pageSize;
+    $dataParams[] = ($page - 1) * $pageSize;
+    $dataTypes .= 'ii';
 }
+$stmt = $conn->prepare($sql);
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare stock transfer query.', [], [], 500);
+}
+if ($dataParams) $stmt->bind_param($dataTypes, ...$dataParams);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch stock transfers.', [], [], 500);
+}
+$result = $stmt->get_result();
 
 $transfers = [];
 while ($result && ($row = $result->fetch_assoc())) {
@@ -112,6 +155,9 @@ while ($result && ($row = $result->fetch_assoc())) {
     $transfers[] = $row;
 }
 
+$stmt->close();
 $conn->close();
-sendResponse(true, 'Stock transfers fetched', ['transfers' => $transfers]);
+$responseData = ['transfers' => $transfers];
+if ($paginated) $responseData['pagination'] = $pagination;
+sendResponse(true, 'Stock transfers fetched', $responseData);
 ?>

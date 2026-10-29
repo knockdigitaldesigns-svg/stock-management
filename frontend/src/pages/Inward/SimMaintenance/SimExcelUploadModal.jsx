@@ -2,9 +2,9 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
-import { isFutureDate, parseDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
-import { showGlobalError } from '../../../context/ErrorContext';
+import BulkUploadValidationErrors from '../../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../../utils/bulkUploadErrors';
 
 const SimExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
@@ -58,62 +58,46 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { raw: true });
-
-                if (jsonData.length === 0) {
-                    const msg = "Excel file is empty.";
-                    setErrors([msg]);
-                    showGlobalError(msg);
-                    setLoading(false);
-                    return;
-                }
-
-                const validationErrors = [];
-                const validSims = [];
-                const simRegex = /^(?:[0-9]{10}|[0-9]{13})$/;
-                const seenSims = new Set();
-
-                jsonData.forEach((row, index) => {
-                    const rowNum = index + 2; 
-                    const purchaseDate = row["Purchase Date"];
-                    const simNo = row["SIM No"]?.toString().replace(/\D/g, '');
-                    const simType = row["SIM Type"]?.toString().trim();
-                    // const validityMonths = row["SIM Validity"]?.toString().trim();
-                    // const validity = validities.find((item) => String(item.months) === validityMonths);
-                    const notes = row["Notes"]?.toString().trim() || '';
-                    const parsedDate = parseDate(purchaseDate);
-
-                    if (purchaseDate === null || purchaseDate === undefined || purchaseDate === '') validationErrors.push(`Row ${rowNum}: Purchase Date is required.`);
-                    else if (!parsedDate) validationErrors.push(`Row ${rowNum}: Purchase Date is invalid.`);
-                    else if (isFutureDate(parsedDate)) validationErrors.push(`Row ${rowNum}: Future dates are not allowed.`);
-                    
-                    if (!simNo) validationErrors.push(`Row ${rowNum}: SIM No is required.`);
-                    else if (!simRegex.test(simNo)) validationErrors.push(`Row ${rowNum}: SIM No must contain exactly 10 or 13 digits.`);
-                    else if (seenSims.has(simNo)) validationErrors.push(`Row ${rowNum}: Duplicate SIM No inside Excel (${simNo}).`);
-                    if (!['Voice', 'Non Voice'].includes(simType)) validationErrors.push(`Row ${rowNum}: SIM Type must be Voice or Non Voice.`);
-                    // if (!validity) validationErrors.push(`Row ${rowNum}: SIM validity ${validityMonths || ''} months does not exist.`);
-                    
-                    if (simNo) seenSims.add(simNo);
-
-                    if (parsedDate && simNo && simRegex.test(simNo) && ['Voice', 'Non Voice'].includes(simType)) {
-                        validSims.push({
-                            purchase_date: parsedDate,
-                            sim_no: simNo,
-                            sim_type: simType,
-                            // sim_validity_id: validity.id,
-                            notes
-                        });
-                    }
+                const sheetRows = XLSX.utils.sheet_to_json(worksheet, {
+                    header: 1,
+                    defval: '',
+                    raw: true,
+                    blankrows: true
                 });
 
-                if (validationErrors.length > 0) {
-                    setErrors(validationErrors);
-                    showGlobalError(validationErrors, 'Import Validation Errors');
+                if (sheetRows.length <= 1) {
+                    const msg = "Excel file is empty.";
+                    setErrors([msg]);
                     setLoading(false);
                     return;
                 }
 
-                const response = await api.post('/sims/create.php', { sims: validSims });
+                const headers = sheetRows[0].map((header) => String(header ?? '').trim().toLowerCase());
+                const requiredColumns = ['Purchase Date', 'SIM No', 'SIM Type'];
+                const missingColumns = requiredColumns.filter((name) => !headers.includes(name.toLowerCase()));
+                if (missingColumns.length) {
+                    setErrors(missingColumns.map((name) => `Required column '${name}' is missing.`));
+                    setLoading(false);
+                    return;
+                }
+                const columns = ['purchase date', 'sim no', 'sim type', 'notes'].map((name) => headers.indexOf(name));
+                const rows = sheetRows.slice(1)
+                    .map((cells, index) => ({ cells, rowNum: index + 2 }))
+                    .filter(({ cells }) => cells.some((cell) => String(cell ?? '').trim() !== ''));
+                if (!rows.length) {
+                    setErrors(['Excel file contains no data rows.']);
+                    setLoading(false);
+                    return;
+                }
+                const sims = rows.map(({ cells, rowNum }) => ({
+                    row_number: rowNum,
+                    purchase_date: cells[columns[0]],
+                    sim_no: String(cells[columns[1]] ?? '').trim(),
+                    sim_type: String(cells[columns[2]] ?? '').trim(),
+                    notes: columns[3] < 0 ? '' : String(cells[columns[3]] ?? '').trim()
+                }));
+
+                const response = await api.post('/sims/create.php', { sims });
                 if (response.data.success) {
                     setSuccessMsg("SIMs uploaded successfully!");
                     setTimeout(() => {
@@ -121,15 +105,13 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                     }, 1500);
                 } else {
                     const errMsg = response.data.message || 'Failed to upload SIMs';
-                    setErrors([errMsg]);
-                    showGlobalError(errMsg);
+                    setErrors(normalizeBulkUploadErrors(response.data, errMsg));
                 }
 
             } catch (error) {
                 console.error(error);
                 const errMsg = error.response?.data?.message || 'Error parsing Excel file or network error';
-                setErrors([errMsg]);
-                showGlobalError(errMsg);
+                setErrors(normalizeBulkUploadErrors(error.response?.data, errMsg));
             } finally {
                 setLoading(false);
             }
@@ -171,6 +153,8 @@ const SimExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading}
                         />
                     </div>
+
+                    <BulkUploadValidationErrors errors={errors} />
 
                     {successMsg && (
                         <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

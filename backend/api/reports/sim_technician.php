@@ -10,10 +10,67 @@ $conn = $db->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed', [], [], 500);
 $technicianId = isset($_GET['technician_id']) && $_GET['technician_id'] !== '' ? (int) $_GET['technician_id'] : null;
 $sql = "SELECT t.technician_name, s.sim_no, s.sim_type, v.months AS sim_validity_months, s.purchase_date AS sim_purchase_date, COALESCE(sa.sim_status, 'Available') AS sim_status, sa.notes, sa.allocation_date FROM stock_allocations sa JOIN sims s ON sa.sim_id = s.id LEFT JOIN sim_validities v ON v.id = s.sim_validity_id JOIN technicians t ON sa.owner_type = 'technician' AND sa.owner_id = t.id";
-if ($technicianId) { $stmt = $conn->prepare($sql . ' WHERE t.id = ? ORDER BY sa.allocation_date DESC'); $stmt->bind_param('i', $technicianId); $stmt->execute(); $result = $stmt->get_result(); } else { $result = $conn->query($sql . ' ORDER BY sa.allocation_date DESC'); }
-$report = [];
-while ($result && ($row = $result->fetch_assoc())) $report[] = $row;
-if (isset($stmt)) $stmt->close();
+$where = [];
+$params = [];
+$types = '';
+if ($technicianId) { $where[] = 't.id = ?'; $params[] = $technicianId; $types .= 'i'; }
+if (($search = trim((string) ($_GET['search'] ?? ''))) !== '') {
+    $where[] = '(t.technician_name LIKE ? OR s.sim_no LIKE ? OR s.sim_type LIKE ? OR sa.notes LIKE ?)';
+    $like = '%' . $search . '%';
+    array_push($params, $like, $like, $like, $like);
+    $types .= 'ssss';
+}
+if (($simType = trim((string) ($_GET['sim_type'] ?? ''))) !== '') {
+    $where[] = 'LOWER(s.sim_type) = ?';
+    $params[] = strtolower($simType);
+    $types .= 's';
+}
+if (($validity = (int) ($_GET['sim_validity'] ?? 0)) > 0) {
+    $where[] = 'v.months = ?';
+    $params[] = $validity;
+    $types .= 'i';
+}
+if (($dateFrom = trim((string) ($_GET['date_from'] ?? ''))) !== '') {
+    $where[] = 'sa.allocation_date >= ?';
+    $params[] = $dateFrom;
+    $types .= 's';
+}
+if (($dateTo = trim((string) ($_GET['date_to'] ?? ''))) !== '') {
+    $where[] = 'sa.allocation_date < DATE_ADD(?, INTERVAL 1 DAY)';
+    $params[] = $dateTo;
+    $types .= 's';
+}
+$whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pagination = null;
+if ($paginated) {
+    $countStmt = $conn->prepare('SELECT COUNT(*) AS total FROM stock_allocations sa JOIN sims s ON sa.sim_id = s.id LEFT JOIN sim_validities v ON v.id = s.sim_validity_id JOIN technicians t ON sa.owner_type = \'technician\' AND sa.owner_id = t.id' . $whereSql);
+    if (!$countStmt) { $conn->close(); sendResponse(false, 'Failed to prepare technician SIM report count query.', [], [], 500); }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to count technician SIM report rows.', [], [], 500); }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $pagination = ['total' => $total, 'page' => $page, 'page_size' => $pageSize, 'total_pages' => max(1, (int) ceil($total / $pageSize))];
+    $countStmt->close();
+}
+$sql .= $whereSql . ' ORDER BY sa.allocation_date DESC, sa.id DESC';
+$listParams = $params;
+$listTypes = $types;
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $listParams[] = $pageSize;
+    $listParams[] = ($page - 1) * $pageSize;
+    $listTypes .= 'ii';
+}
+$stmt = $conn->prepare($sql);
+if (!$stmt) { $conn->close(); sendResponse(false, 'Failed to prepare technician SIM report query.', [], [], 500); }
+if ($listParams) $stmt->bind_param($listTypes, ...$listParams);
+if (!$stmt->execute()) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to fetch technician SIM report.', [], [], 500); }
+$report = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 $conn->close();
-sendResponse(true, 'Technician SIM report fetched', ['report' => $report]);
+$response = ['report' => $report];
+if ($paginated) $response['pagination'] = $pagination;
+sendResponse(true, 'Technician SIM report fetched', $response);
 ?>

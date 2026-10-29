@@ -6,6 +6,7 @@ require_once '../../../utils/audit.php';
 require_once '../../../middleware/auth.php';
 require_once '../../../utils/payment_modes.php';
 require_once '../../../utils/transaction_ids.php';
+require_once '../../../utils/customer_payment_verification.php';
 
 handlePreflight();
 
@@ -39,6 +40,8 @@ $customerId = isset($data->customer_id)
     ? (int) $data->customer_id
     : 0;
 $vehicleId = isset($data->vehicle_id) ? (int) $data->vehicle_id : 0;
+$verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
+$isCourierVerification = false;
 
 $paymentStep = isset($data->payment_step)
     ? (int) $data->payment_step
@@ -472,6 +475,32 @@ try {
 
     $conn->begin_transaction();
 
+    if ($verificationSubmissionId > 0) {
+        assertCustomerVerificationCommitAccess(
+            $conn,
+            $verificationSubmissionId,
+            (int) ($currentUser['user_id'] ?? 0)
+        );
+        $submissionStmt = $conn->prepare(
+            'SELECT submission_data FROM customer_payment_verification_submissions
+             WHERE id = ? AND status = \'Applying\' FOR UPDATE'
+        );
+        if (!$submissionStmt) {
+            throw new Exception('Unable to verify the customer payment submission.');
+        }
+        $submissionStmt->bind_param('i', $verificationSubmissionId);
+        if (!$submissionStmt->execute()) {
+            $submissionStmt->close();
+            throw new Exception('Unable to load the customer payment submission.');
+        }
+        $submissionData = json_decode(
+            (string) ($submissionStmt->get_result()->fetch_assoc()['submission_data'] ?? ''),
+            true
+        );
+        $submissionStmt->close();
+        $isCourierVerification = is_array($submissionData) && ($submissionData['source'] ?? '') === 'courier';
+    }
+
     if ($vehicleId > 0) {
         $vehicleCheck = $conn->prepare('SELECT id FROM customer_vehicle_details WHERE id = ? AND customer_id = ? LIMIT 1');
         $vehicleCheck->bind_param('ii', $vehicleId, $customerId);
@@ -483,15 +512,74 @@ try {
         $vehicleCheck->close();
     }
 
-    $completeCustomerStock = static function ($conn, $customerId, $vehicleId) {
-        $vehicleStmt = $conn->prepare('SELECT device_id, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE ' . ($vehicleId > 0 ? 'id = ?' : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1') . ' FOR UPDATE');
+    $completeCustomerStock = static function ($conn, $customerId, $vehicleId) use ($currentUser) {
+        $vehicleStmt = $conn->prepare('SELECT id, device_id, imei_no, sim_id_1, sim_id_2 FROM customer_vehicle_details WHERE ' . ($vehicleId > 0 ? 'id = ? AND customer_id = ?' : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1') . ' FOR UPDATE');
         $stockTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
-        $vehicleStmt->bind_param('i', $stockTargetId);
+        if ($vehicleId > 0) {
+            $vehicleStmt->bind_param('ii', $stockTargetId, $customerId);
+        } else {
+            $vehicleStmt->bind_param('i', $stockTargetId);
+        }
         $vehicleStmt->execute();
         $vehicle = $vehicleStmt->get_result()->fetch_assoc();
         $vehicleStmt->close();
         if (!$vehicle) {
             throw new Exception('Customer vehicle details are required before completing payment.');
+        }
+
+        if (trim((string) ($vehicle['imei_no'] ?? '')) !== '') {
+            $deviceLookup = $conn->prepare(
+                'SELECT id FROM devices
+                 WHERE BINARY imei_no = BINARY ? AND deleted_at IS NULL
+                 LIMIT 1 FOR UPDATE'
+            );
+            $deviceLookup->bind_param('s', $vehicle['imei_no']);
+            $deviceLookup->execute();
+            $device = $deviceLookup->get_result()->fetch_assoc();
+            $deviceLookup->close();
+            if (!$device) {
+                throw new Exception('Customer device IMEI was not found in active device inventory.');
+            }
+            $deviceId = (int) $device['id'];
+            $vehicleRecordId = (int) $vehicle['id'];
+            if (!empty($vehicle['device_id']) && (int) $vehicle['device_id'] !== $deviceId) {
+                throw new Exception('Customer device ID does not match the saved IMEI.');
+            }
+            $assignmentCheck = $conn->prepare(
+                'SELECT id FROM customer_vehicle_details
+                 WHERE (device_id = ? OR BINARY imei_no = BINARY ?)
+                   AND id <> ? LIMIT 1 FOR UPDATE'
+            );
+            $assignmentCheck->bind_param('isi', $deviceId, $vehicle['imei_no'], $vehicleRecordId);
+            $assignmentCheck->execute();
+            $assignedElsewhere = $assignmentCheck->get_result()->num_rows > 0;
+            $assignmentCheck->close();
+            if ($assignedElsewhere) {
+                throw new Exception('Customer device is already linked to another vehicle.');
+            }
+
+            if (empty($vehicle['device_id'])) {
+                writeChangedFields(
+                    $conn,
+                    $vehicleRecordId,
+                    'Customer Vehicle Details',
+                    ['device_id' => null],
+                    ['device_id' => $deviceId],
+                    $currentUser
+                );
+                $linkStmt = $conn->prepare(
+                    'UPDATE customer_vehicle_details
+                     SET device_id = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ? AND device_id IS NULL AND BINARY imei_no = BINARY ?'
+                );
+                $linkStmt->bind_param('iis', $deviceId, $vehicleRecordId, $vehicle['imei_no']);
+                if (!$linkStmt->execute() || $linkStmt->affected_rows !== 1) {
+                    $linkStmt->close();
+                    throw new Exception('Failed to link the customer device before completing payment.');
+                }
+                $linkStmt->close();
+                $vehicle['device_id'] = $deviceId;
+            }
         }
 
         $consume = static function ($conn, $assetType, $assetId, $customerId) {
@@ -804,7 +892,9 @@ if ($existingPaymentId !== null) {
     reserveTransactionId($conn, (string) ($transactionIdValue ?? ''), 'customer_payments', (string) $existingPaymentId);
     if ($paymentStep === 2) {
         $syncCashCollection($conn, $customerId, $vehicleId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $cashToEt, $currentUser);
-        $completeCustomerStock($conn, $customerId, $vehicleId);
+        if (!$isCourierVerification) {
+            $completeCustomerStock($conn, $customerId, $vehicleId);
+        }
     }
     $conn->commit();
     $conn->close();
@@ -912,7 +1002,9 @@ if ($existingPaymentId !== null) {
 
     if ($paymentStep === 2) {
         $syncCashCollection($conn, $customerId, $vehicleId, $paymentId, $totalAmount, $cashToTechnician, $cashToDealer, $cashToEt, $currentUser);
-        $completeCustomerStock($conn, $customerId, $vehicleId);
+        if (!$isCourierVerification) {
+            $completeCustomerStock($conn, $customerId, $vehicleId);
+        }
     }
 
 

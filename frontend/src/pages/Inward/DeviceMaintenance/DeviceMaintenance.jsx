@@ -8,8 +8,7 @@ import EditDeviceModal from './EditDeviceModal';
 import DeviceExcelUploadModal from './DeviceExcelUploadModal';
 import Modal from '../../../components/Modal/Modal';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 import useDeviceModels from '../../../hooks/useDeviceModels';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../../context/AuthContext';
@@ -26,6 +25,9 @@ const DeviceMaintenance = () => {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
     const [editingDevice, setEditingDevice] = useState(null);
@@ -33,12 +35,23 @@ const DeviceMaintenance = () => {
     const [deleteTarget, setDeleteTarget] = useState(null);
     const { models } = useDeviceModels();
 
-    const fetchDevices = async () => {
+    const fetchDevices = async (targetPage = page, targetPageSize = pageSize, targetFilters = filters) => {
         setLoading(true);
         try {
-            const response = await api.get('/devices/list.php');
+            const response = await api.get('/devices/list.php', {
+                params: {
+                    page: targetPage,
+                    page_size: targetPageSize,
+                    search: targetFilters.search || '',
+                    device_model: targetFilters.deviceModel || '',
+                    status: targetFilters.status || '',
+                    date_from: targetFilters.date_from || '',
+                    date_to: targetFilters.date_to || ''
+                }
+            });
             if (response.data.success) {
                 setDevices(response.data.data.devices || []);
+                setPagination(response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 });
                 setLoadError('');
             } else {
                 setLoadError(response.data.message || 'Failed to fetch devices.');
@@ -68,19 +81,18 @@ const DeviceMaintenance = () => {
     };
 
     useEffect(() => {
-        fetchDevices();
-    }, []);
+        fetchDevices(page, pageSize, filters);
+    }, [page, pageSize, filters]);
 
-    const filteredDevices = filterTableRows(devices, filters, { dateKeys: ['purchase_date'], deviceKey: 'model_name', searchKeys: ['imei_no', 'model_name', 'notes'] });
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
 
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredDevices, 10, [filters]);
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     const getStatusBadge = (status) => {
         switch(status) {
@@ -117,8 +129,8 @@ const DeviceMaintenance = () => {
             <div className="card">
                 <TableFilterBar
                     filters={filters}
-                    onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
+                    onChange={updateFilters}
+                    onReset={() => updateFilters(emptyTableFilters())}
                     items={devices}
                     dateKeys={['purchase_date']}
                     showDeviceModel
@@ -149,14 +161,14 @@ const DeviceMaintenance = () => {
                                 <tr>
                                     <td colSpan="5" className="text-center">{loadError}</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : devices.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map(device => (
+                                devices.map(device => (
                                     <tr key={device.id}>
                                         <td>{formatDate(device.purchase_date)}</td>
                                         <td className="truncate-cell" title={device.model_name}>{device.model_name}</td>
@@ -178,10 +190,10 @@ const DeviceMaintenance = () => {
 
                 <Pagination
                     currentPage={page}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="devices"
                 />
             </div>

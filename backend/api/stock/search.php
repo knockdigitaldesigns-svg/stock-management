@@ -63,7 +63,8 @@ if (preg_match($devicePattern, $searchValue)) {
         LEFT JOIN stock_allocations sa ON sa.device_id = d.id
         LEFT JOIN dealers dl ON dl.id = sa.owner_id AND sa.owner_type = 'dealer'
         LEFT JOIN technicians t ON t.id = sa.owner_id AND sa.owner_type = 'technician'
-        LEFT JOIN customer_vehicle_details cvd ON cvd.device_id = d.id
+        LEFT JOIN customer_vehicle_details cvd
+            ON cvd.device_id = d.id OR BINARY cvd.imei_no = BINARY d.imei_no
         LEFT JOIN customers c ON c.id = cvd.customer_id
         WHERE d.imei_no = ?
           AND d.deleted_at IS NULL
@@ -93,7 +94,7 @@ if (preg_match($devicePattern, $searchValue)) {
             'owner_id' => $row['owner_id'] ? (int) $row['owner_id'] : null,
             'owner_name' => $row['owner_name'] ?? 'Warehouse',
             'owner_type' => $row['owner_type'] ?: null,
-            'status' => strtolower($row['status'] ?? 'available'),
+            'status' => $isUsed ? 'used' : strtolower($row['status'] ?? 'available'),
             'usage_type' => $usageType ?: null,
             'status_label' => $isUsed ? 'Used for ' . ($usageType === 'ET' ? 'ET' : ucfirst(strtolower($usageType))) : 'Available',
             'is_used' => $isUsed,

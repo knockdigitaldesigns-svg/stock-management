@@ -15,8 +15,8 @@ $submissionId = (int) ($data['submission_id'] ?? 0);
 $customerId = (int) ($data['customer_id'] ?? 0);
 $vehicleId = (int) ($data['vehicle_id'] ?? 0);
 $paymentId = (int) ($data['payment_id'] ?? 0);
-if ($submissionId <= 0 || $customerId <= 0 || $paymentId <= 0) {
-    sendResponse(false, 'Submission, customer, and payment IDs are required to complete approval.', [], [], 400);
+if ($submissionId <= 0 || $customerId <= 0) {
+    sendResponse(false, 'Submission and customer IDs are required to complete approval.', [], [], 400);
 }
 $conn = (new Database())->getConnection();
 if (!$conn) {
@@ -24,13 +24,42 @@ if (!$conn) {
 }
 try {
     $conn->begin_transaction();
-    $stmt = $conn->prepare('SELECT status, reviewer_user_id FROM customer_payment_verification_submissions WHERE id = ? FOR UPDATE');
+    $stmt = $conn->prepare(
+        'SELECT status, reviewer_user_id, submission_data
+         FROM customer_payment_verification_submissions WHERE id = ? FOR UPDATE'
+    );
     $stmt->bind_param('i', $submissionId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if (!$row) {
         throw new RuntimeException('Verification submission not found.');
+    }
+    $submissionData = decodeCustomerPaymentSubmission((string) $row['submission_data']);
+    $isCourierSubmission = ($submissionData['source'] ?? '') === 'courier';
+    if ($paymentId <= 0 && !$isCourierSubmission) {
+        throw new RuntimeException('Payment ID is required to complete this customer payment approval.');
+    }
+    if ($isCourierSubmission) {
+        $requestIds = array_values(array_unique(array_filter(
+            array_map('intval', is_array($submissionData['courier_request_ids'] ?? null)
+                ? $submissionData['courier_request_ids']
+                : []),
+            static function (int $requestId): bool {
+                return $requestId > 0;
+            }
+        )));
+        $finalizedIds = array_values(array_unique(array_filter(
+            array_map('intval', is_array($submissionData['courier_finalized_request_ids'] ?? null)
+                ? $submissionData['courier_finalized_request_ids']
+                : []),
+            static function (int $requestId): bool {
+                return $requestId > 0;
+            }
+        )));
+        if (!$requestIds || count(array_diff($requestIds, $finalizedIds)) > 0) {
+            throw new RuntimeException('Courier assets must be allocated through the linked verification approval before completion.');
+        }
     }
     if ($row['status'] === 'Approved') {
         $conn->commit();
@@ -43,7 +72,7 @@ try {
     $stmt = $conn->prepare(
         "UPDATE customer_payment_verification_submissions
          SET status = 'Approved', linked_customer_id = ?, linked_vehicle_id = NULLIF(?, 0),
-             linked_payment_id = ?, decided_at = CURRENT_TIMESTAMP,
+             linked_payment_id = NULLIF(?, 0), decided_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = ?"
     );

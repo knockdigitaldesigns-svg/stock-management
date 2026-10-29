@@ -25,6 +25,133 @@ if (!$conn) {
     );
 }
 
+$search = trim((string) ($_GET['search'] ?? ''));
+$platform = trim((string) ($_GET['platform'] ?? ''));
+$location = trim((string) ($_GET['location'] ?? ''));
+$paymentFilter = trim((string) ($_GET['payment_status'] ?? ''));
+$dateFrom = trim((string) ($_GET['date_from'] ?? ''));
+$dateTo = trim((string) ($_GET['date_to'] ?? ''));
+$filters = [];
+$filterParams = [];
+$filterTypes = '';
+
+if ($search !== '') {
+    $filters[] = "(c.username LIKE ? OR c.primary_mobile_no LIKE ? OR EXISTS (
+        SELECT 1 FROM customer_vehicle_details cv_search
+        WHERE cv_search.customer_id = c.id
+          AND (cv_search.vehicle_no LIKE ? OR cv_search.imei_no LIKE ?)
+    ))";
+    $like = '%' . $search . '%';
+    array_push($filterParams, $like, $like, $like, $like);
+    $filterTypes .= 'ssss';
+}
+if ($platform !== '') {
+    $filters[] = 'p.platform_name = ?';
+    $filterParams[] = $platform;
+    $filterTypes .= 's';
+}
+if ($location !== '') {
+    $filters[] = 'c.location = ?';
+    $filterParams[] = $location;
+    $filterTypes .= 's';
+}
+$paymentStatusSql = "CASE
+    WHEN COALESCE(cpa.total_amount, 0) = 0 THEN COALESCE(cp.payment_status, 'Pending')
+    WHEN COALESCE(cpa.amount_paid, 0) >= COALESCE(cpa.total_amount, 0) THEN 'Paid'
+    WHEN COALESCE(cpa.amount_paid, 0) = 0 THEN 'Not Paid'
+    WHEN COALESCE(cpa.amount_pending, 0) > 0 THEN 'Partially Paid'
+    ELSE 'Paid'
+END";
+if ($paymentFilter !== '') {
+    if ($paymentFilter === 'Pending') {
+        $filters[] = "$paymentStatusSql IN ('Pending', 'Not Paid', 'Partially Paid')";
+    } else {
+        $filters[] = "$paymentStatusSql = ?";
+        $filterParams[] = $paymentFilter;
+        $filterTypes .= 's';
+    }
+}
+$installationDateSql = "(SELECT ci_filter.installation_date FROM customer_installations ci_filter WHERE ci_filter.customer_id = c.id ORDER BY ci_filter.created_at DESC, ci_filter.id DESC LIMIT 1)";
+if ($dateFrom !== '') {
+    $filters[] = "DATE(COALESCE($installationDateSql, c.created_at)) >= ?";
+    $filterParams[] = $dateFrom;
+    $filterTypes .= 's';
+}
+if ($dateTo !== '') {
+    $filters[] = "DATE(COALESCE($installationDateSql, c.created_at)) <= ?";
+    $filterParams[] = $dateTo;
+    $filterTypes .= 's';
+}
+
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$whereClause = $filters ? ' WHERE ' . implode(' AND ', $filters) : '';
+$customerIdSql = "
+    FROM customers c
+    LEFT JOIN platforms p ON p.id = c.platform_id
+    LEFT JOIN (
+        SELECT customer_id,
+               SUM(COALESCE(total_amount, 0)) AS total_amount,
+               SUM(COALESCE(amount_paid, 0)) AS amount_paid,
+               SUM(COALESCE(amount_pending, 0)) AS amount_pending
+        FROM customer_payments
+        GROUP BY customer_id
+    ) cpa ON cpa.customer_id = c.id
+    LEFT JOIN customer_payments cp ON cp.id = (
+        SELECT id FROM customer_payments
+        WHERE customer_id = c.id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    )
+    $whereClause
+";
+
+$customerIds = [];
+$total = null;
+if ($paginated || $filters) {
+    if ($paginated) {
+        $countStmt = $conn->prepare('SELECT COUNT(DISTINCT c.id) AS total ' . $customerIdSql);
+        if (!$countStmt) {
+            $conn->close();
+            sendResponse(false, 'Failed to prepare customer count query.', [], [], 500);
+        }
+        if ($filterParams) $countStmt->bind_param($filterTypes, ...$filterParams);
+        if (!$countStmt->execute()) {
+            $countStmt->close();
+            $conn->close();
+            sendResponse(false, 'Failed to count customers.', [], [], 500);
+        }
+        $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+        $countStmt->close();
+    }
+
+    $idSql = 'SELECT c.id ' . $customerIdSql . ' ORDER BY c.id DESC';
+    $idParams = $filterParams;
+    $idTypes = $filterTypes;
+    if ($paginated) {
+        $idSql .= ' LIMIT ? OFFSET ?';
+        $idParams[] = $pageSize;
+        $idParams[] = ($page - 1) * $pageSize;
+        $idTypes .= 'ii';
+    }
+    $idStmt = $conn->prepare($idSql);
+    if (!$idStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare customer page query.', [], [], 500);
+    }
+    if ($idParams) $idStmt->bind_param($idTypes, ...$idParams);
+    if (!$idStmt->execute()) {
+        $idStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to fetch customer page.', [], [], 500);
+    }
+    $idResult = $idStmt->get_result();
+    while ($idRow = $idResult->fetch_assoc()) {
+        $customerIds[] = (int) $idRow['id'];
+    }
+    $idStmt->close();
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -161,8 +288,12 @@ $sql = "
             LIMIT 1
         )
 
-    ORDER BY c.id DESC, cv.created_at DESC, cv.id DESC
 ";
+
+$sql .= $customerIds
+    ? ' WHERE c.id IN (' . implode(',', $customerIds) . ')'
+    : (($paginated || $filters) ? ' WHERE 1 = 0' : '');
+$sql .= ' ORDER BY c.id DESC, cv.created_at DESC, cv.id DESC';
 
 $result = $conn->query($sql);
 
@@ -246,15 +377,30 @@ while ($row = $result->fetch_assoc()) {
     }
 }
 
+$responseData = ['customers' => $customers];
+if ($paginated) {
+    $responseData['pagination'] = [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ];
+    $locationsResult = $conn->query("SELECT DISTINCT location FROM customers WHERE location IS NOT NULL AND TRIM(location) <> '' ORDER BY location");
+    if (!$locationsResult) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch customer location options.', [], [], 500);
+    }
+    $responseData['locations'] = [];
+    while ($locationRow = $locationsResult->fetch_assoc()) {
+        $responseData['locations'][] = $locationRow['location'];
+    }
+}
 $conn->close();
-
 
 sendResponse(
     true,
     'Customers fetched successfully.',
-    [
-        'customers' => $customers
-    ]
+    $responseData
 );
 
 ?>

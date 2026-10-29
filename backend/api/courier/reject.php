@@ -50,6 +50,15 @@ if (!$request) {
     sendResponse(false, "Courier request not found", [], [], 404);
 }
 
+if ($request['courier_to_person'] === 'Customer' && !empty($request['new_customer_data'])) {
+    $customerWorkflow = json_decode((string) $request['new_customer_data'], true);
+    if (!empty($customerWorkflow['_verification']['submission_id'])) {
+        $conn->rollback();
+        $conn->close();
+        sendResponse(false, 'Customer courier requests must be rejected from My Verification Requests.', [], [], 403);
+    }
+}
+
 if ($request['approval_status'] !== 'Pending Approval') {
     $conn->rollback();
     $conn->close();

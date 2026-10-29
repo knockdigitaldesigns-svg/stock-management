@@ -49,7 +49,30 @@ function customerVerificationPayment(array $payment, ?string $vehicleName, bool 
     if ($transactionId !== null && $transactionId !== '') {
         $display['Transaction ID'] = $transactionId;
     }
+    $paymentDate = $payment['payment_date'] ?? $payment['paymentDate'] ?? null;
+    if ($paymentDate !== null && $paymentDate !== '') {
+        $display['Payment Date'] = $paymentDate;
+    }
     if (!$part2) {
+        foreach ([
+            'payment_date',
+            'paymentDate'
+        ] as $field) {
+            if (isset($payment[$field]) && $payment[$field] !== '') {
+                $display['Payment Date'] = $payment[$field];
+                break;
+            }
+        }
+        foreach ($payment as $field => $value) {
+            if (in_array($field, [
+                'total_sale_amount', 'totalSaleAmount', 'payment_mode', 'paymentMode',
+                'transaction_id', 'transactionId', 'payment_date', 'paymentDate'
+            ], true) || preg_match('/^(?:_.*|id|.*_id)$/i', $field)
+                || $value === null || $value === '') {
+                continue;
+            }
+            $display[$field] = $value;
+        }
         return $display;
     }
     foreach ([
@@ -76,6 +99,23 @@ function customerVerificationPayment(array $payment, ?string $vehicleName, bool 
                 : (!empty($payment['cash_to_et']) ? 'Direct Cash to ET' : 'Not specified'));
     }
     $display['Cash Collection Recipient'] = $recipient;
+    foreach ($payment as $field => $value) {
+        if (in_array($field, [
+            'total_sale_amount', 'totalSaleAmount', 'payment_mode', 'paymentMode',
+            'transaction_id', 'transactionId', 'payment_date', 'paymentDate',
+            'device_charge', 'deviceCharge', 'software_charge', 'softwareCharge',
+            'technician_charge', 'technicianCharge', 'sim_charge', 'simCharge',
+            'courier_charge', 'courierCharge', 'total_amount', 'totalAmount',
+            'amount_paid', 'amountPaid', 'amount_pending', 'amountPending',
+            'payment_status', 'paymentStatus', 'cash_recipient_type',
+            'cash_to_technician', 'cashToTechnician', 'cash_to_dealer',
+            'cashToDealer', 'cash_to_et', 'cashToEt'
+        ], true) || preg_match('/^(?:_.*|id|.*_id)$/i', $field)
+            || $value === null || $value === '') {
+            continue;
+        }
+        $display[$field] = $value;
+    }
     return $display;
 }
 
@@ -148,7 +188,7 @@ if ($existingCustomerId > 0 && $customerName === '') {
     $customerStmt->close();
 }
 $customerDisplay = [
-    'Customer' => $customerName !== ''
+    'Username' => $customerName !== ''
         ? $customerName
         : ($existingCustomerId > 0 ? 'Existing Customer' : 'New Customer — Pending Approval'),
     'Platform' => $customer['platform_name'] ?? null
@@ -272,7 +312,9 @@ foreach ($vehicles as $vehicle) {
         $personId = (int) ($installation['installation_person_id'] ?? 0);
         $personTable = stripos($personType, 'dealer') !== false ? 'dealers' : 'technicians';
         $personLabelColumn = $personTable === 'dealers' ? 'dealer_name' : 'technician_name';
-        $installationPerson = customerVerificationLookup($conn, $personTable, $personLabelColumn, $personId);
+        $installationPerson = $personType === 'Direct'
+            ? 'Not applicable'
+            : customerVerificationLookup($conn, $personTable, $personLabelColumn, $personId);
         $leadClosure = customerVerificationLookup(
             $conn,
             'lead_closures',

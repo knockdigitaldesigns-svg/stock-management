@@ -3,6 +3,7 @@
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
 require_once '../../../utils/customer_payment_verification.php';
+require_once '../../../utils/audit.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -39,6 +40,21 @@ try {
     $stmt->close();
     if (!$row) {
         throw new RuntimeException('Verification submission not found.');
+    }
+    $submissionData = decodeCustomerPaymentSubmission((string) $row['submission_data']);
+    $isCourierSubmission = ($submissionData['source'] ?? '') === 'courier';
+    $courierRequestIds = [];
+    if ($isCourierSubmission) {
+        foreach (($submissionData['courier_request_ids'] ?? []) as $courierRequestId) {
+            $courierRequestId = (int) $courierRequestId;
+            if ($courierRequestId > 0) {
+                $courierRequestIds[] = $courierRequestId;
+            }
+        }
+        $courierRequestIds = array_values(array_unique($courierRequestIds));
+        if (!$courierRequestIds) {
+            throw new RuntimeException('Courier verification has no linked courier requests.');
+        }
     }
     $oldStatus = (string) $row['status'];
     $submissionJson = null;
@@ -81,7 +97,6 @@ try {
             throw new RuntimeException('Only a pending submission can be approved.');
         }
         if ($oldStatus === 'Pending Verification' && (int) ($row['existing_customer_id'] ?? 0) > 0) {
-            $submissionData = decodeCustomerPaymentSubmission((string) $row['submission_data']);
             $customerId = (int) $row['existing_customer_id'];
             $customerStmt = $conn->prepare(
                 'SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no,
@@ -113,7 +128,17 @@ try {
         $message = 'Approval started. Complete the commit steps to finish approval.';
     } else {
         if ($oldStatus === 'Applying') {
-            $submissionData = decodeCustomerPaymentSubmission((string) $row['submission_data']);
+            if ($isCourierSubmission) {
+                $finalizedIds = array_map(
+                    'intval',
+                    is_array($submissionData['courier_finalized_request_ids'] ?? null)
+                        ? $submissionData['courier_finalized_request_ids']
+                        : []
+                );
+                if (array_intersect($courierRequestIds, $finalizedIds)) {
+                    throw new RuntimeException('Courier assets have already been committed and this verification cannot be rejected safely. Resume approval instead.');
+                }
+            }
             rejectCustomerPaymentVerificationApplication(
                 $conn,
                 $submissionId,
@@ -124,6 +149,84 @@ try {
             );
         } elseif ($oldStatus !== 'Pending Verification') {
             throw new RuntimeException('Only a pending or safely reversible approval can be rejected.');
+        }
+        if ($isCourierSubmission) {
+            $idList = implode(',', array_map('intval', $courierRequestIds));
+            $requestsStmt = $conn->prepare(
+                "SELECT id, device_id, sim_id, approval_status
+                 FROM courier_requests WHERE id IN ({$idList}) FOR UPDATE"
+            );
+            if (!$requestsStmt || !$requestsStmt->execute()) {
+                throw new RuntimeException('Unable to lock the linked courier requests for rejection.');
+            }
+            $courierRows = $requestsStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $requestsStmt->close();
+            if (count($courierRows) !== count($courierRequestIds)) {
+                throw new RuntimeException('A linked courier request could not be found.');
+            }
+            foreach ($courierRows as $courierRow) {
+                if ($courierRow['approval_status'] === 'Approved') {
+                    continue;
+                }
+                if ($courierRow['approval_status'] === 'Pending Approval') {
+                    $rejectRequest = $conn->prepare(
+                        "UPDATE courier_requests SET approval_status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+                    );
+                    $courierRequestId = (int) $courierRow['id'];
+                    $rejectRequest->bind_param('i', $courierRequestId);
+                    if (!$rejectRequest->execute()) {
+                        $rejectRequest->close();
+                        throw new RuntimeException('Unable to reject a linked courier request.');
+                    }
+                    $rejectRequest->close();
+                    writeAudit(
+                        $conn,
+                        $courierRequestId,
+                        'Courier',
+                        'Verification Rejected',
+                        'approval_status',
+                        'Pending Approval',
+                        'Rejected',
+                        $reviewer
+                    );
+                }
+            }
+            foreach ($courierRows as $courierRow) {
+                if ($courierRow['approval_status'] !== 'Pending Approval') {
+                    continue;
+                }
+                foreach ([
+                    ['devices', 'device_id', $courierRow['device_id'] ?? null],
+                    ['sims', 'sim_id', $courierRow['sim_id'] ?? null]
+                ] as [$table, $assetColumn, $assetId]) {
+                    $assetId = (int) $assetId;
+                    if ($assetId <= 0) {
+                        continue;
+                    }
+                    $assetStmt = $conn->prepare(
+                        "SELECT id FROM courier_requests
+                         WHERE {$assetColumn} = ? AND approval_status = 'Pending Approval' LIMIT 1"
+                    );
+                    $assetStmt->bind_param('i', $assetId);
+                    if (!$assetStmt->execute()) {
+                        $assetStmt->close();
+                        throw new RuntimeException('Unable to check remaining asset reservations.');
+                    }
+                    $hasOtherPendingRequest = $assetStmt->get_result()->num_rows > 0;
+                    $assetStmt->close();
+                    if (!$hasOtherPendingRequest) {
+                        $releaseStmt = $conn->prepare(
+                            "UPDATE {$table} SET status = 'available' WHERE id = ? AND status = 'reserved'"
+                        );
+                        $releaseStmt->bind_param('i', $assetId);
+                        if (!$releaseStmt->execute()) {
+                            $releaseStmt->close();
+                            throw new RuntimeException('Unable to release a rejected courier asset reservation.');
+                        }
+                        $releaseStmt->close();
+                    }
+                }
+            }
         }
         $newStatus = 'Rejected';
         $storedReason = $reason;

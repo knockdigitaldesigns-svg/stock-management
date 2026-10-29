@@ -9,8 +9,7 @@ import EditSimModal from './EditSimModal';
 import SimExcelUploadModal from './SimExcelUploadModal';
 import Modal from '../../../components/Modal/Modal';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 
 const SimMaintenance = () => {
@@ -24,6 +23,9 @@ const SimMaintenance = () => {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
     const [editingSim, setEditingSim] = useState(null);
@@ -31,12 +33,23 @@ const SimMaintenance = () => {
     const [deleteTarget, setDeleteTarget] = useState(null);
     
 
-    const fetchSims = async () => {
+    const fetchSims = async (targetPage = page, targetPageSize = pageSize, targetFilters = filters) => {
         setLoading(true);
         try {
-            const response = await api.get('/sims/list.php');
+            const response = await api.get('/sims/list.php', {
+                params: {
+                    page: targetPage,
+                    page_size: targetPageSize,
+                    search: targetFilters.search || '',
+                    simType: targetFilters.simType || '',
+                    status: targetFilters.status || '',
+                    date_from: targetFilters.date_from || '',
+                    date_to: targetFilters.date_to || ''
+                }
+            });
             if (response.data.success) {
                 setSims(response.data.data.sims || []);
+                setPagination(response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 });
                 setLoadError('');
             } else {
                 setLoadError(response.data.message || 'Failed to fetch SIMs.');
@@ -79,20 +92,19 @@ const SimMaintenance = () => {
     };
 
     useEffect(() => {
-        fetchSims();
+        fetchSims(page, pageSize, filters);
         // fetchValidities();
-    }, []);
+    }, [page, pageSize, filters]);
 
-    const filteredSims = filterTableRows(sims, filters, { dateKeys: ['purchase_date'], searchKeys: ['sim_no', 'sim_type', 'notes'] });
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
 
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredSims, 10, [filters]);
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     const getStatusBadge = (status) => {
         switch(status) {
@@ -127,8 +139,8 @@ const SimMaintenance = () => {
             <div className="card">
                 <TableFilterBar
     filters={filters}
-    onChange={setFilters}
-    onReset={() => setFilters(emptyTableFilters())}
+    onChange={updateFilters}
+    onReset={() => updateFilters(emptyTableFilters())}
     items={sims}
     dateKeys={['purchase_date']}
     showSimType
@@ -159,14 +171,14 @@ const SimMaintenance = () => {
                                 <tr>
                                     <td colSpan="5" className="text-center">{loadError}</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : sims.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map(sim => (
+                                sims.map(sim => (
                                     <tr key={sim.id}>
                                         <td>{formatDate(sim.purchase_date)}</td>
                                         <td className="truncate-cell" title={sim.sim_no}>{sim.sim_no}</td>
@@ -188,10 +200,10 @@ const SimMaintenance = () => {
 
                 <Pagination
                     currentPage={page}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="SIMs"
                 />
             </div>

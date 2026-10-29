@@ -3,8 +3,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, LifeBuoy, RefreshCw, Save, Shi
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
-import TableFilterBar, { filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
-import usePagination from '../../hooks/usePagination';
+import TableFilterBar from '../../components/TableFilterBar/TableFilterBar';
 import Pagination from '../../components/Pagination/Pagination';
 
 const initialVerification = { mobile_no: '', vehicle_no: '', imei_no: '', username: '' };
@@ -25,6 +24,9 @@ const SupportPage = () => {
     const [questions, setQuestions] = useState([]);
     const [expandedQuestion, setExpandedQuestion] = useState(null);
     const [tickets, setTickets] = useState([]);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalItems, setTotalItems] = useState(0);
     const [queueFilters, setQueueFilters] = useState({ search: '', date_from: '', date_to: '', status: '' });
     const [users, setUsers] = useState([]);
     const [issue, setIssue] = useState('');
@@ -32,8 +34,6 @@ const SupportPage = () => {
     const [assignedTo, setAssignedTo] = useState('');
     const [selectedTicket, setSelectedTicket] = useState(null);
     
-    const filteredTickets = filterTableRows(tickets, queueFilters, { dateKeys: ['created_at'], searchKeys: ['ticket_id', 'username', 'mobile_no', 'issue', 'assigned_to', 'status'] });
-    const { page, setPage, pageSize, setPageSize, totalItems, paginatedItems } = usePagination(filteredTickets, 10, [queueFilters]);
     const [resolution, setResolution] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -44,15 +44,23 @@ const SupportPage = () => {
         try { const response = await api.get('/support/questions.php'); setQuestions(response.data?.data?.questions || []); } catch (requestError) { fail(requestError.response?.data?.message || 'Unable to load support questions.'); }
     };
     const loadQueue = async () => {
-        try { const [ticketResponse, userResponse] = await Promise.all([api.get('/support/tickets.php'), api.get('/support/users.php')]); setTickets(ticketResponse.data?.data?.tickets || []); setUsers(userResponse.data?.data?.users || []); } catch (requestError) { fail(requestError.response?.data?.message || 'Unable to load support task queue.'); }
+        try {
+            const [ticketResponse, userResponse] = await Promise.all([
+                api.get('/support/tickets.php', { params: { ...queueFilters, page, page_size: pageSize } }),
+                api.get('/support/users.php')
+            ]);
+            setTickets(ticketResponse.data?.data?.tickets || []);
+            setTotalItems(ticketResponse.data?.data?.pagination?.total || 0);
+            setUsers(userResponse.data?.data?.users || []);
+        } catch (requestError) { fail(requestError.response?.data?.message || 'Unable to load support task queue.'); }
     };
     useEffect(() => {
         refreshPermissions().catch((requestError) => {
             fail(requestError.response?.data?.message || requestError.message || 'Unable to refresh Support permissions.');
         });
         loadQuestions();
-        loadQueue();
     }, [refreshPermissions]);
+    useEffect(() => { loadQueue(); }, [page, pageSize, queueFilters]);
 
     const verifyCustomer = async (event) => {
         event.preventDefault(); setError(''); setVerifying(true); setCustomer(null);
@@ -132,9 +140,9 @@ const SupportPage = () => {
 
         <div className="card" style={{ marginTop: 20 }}>
             <div className="customer-section-title"><LifeBuoy size={20} /><h3>Support Task Queue</h3></div>
-            <TableFilterBar filters={queueFilters} onChange={setQueueFilters} onReset={() => setQueueFilters({ search: '', date_from: '', date_to: '', status: '' })} items={tickets} dateKeys={['created_at']} showStatus statusOptions={statuses} searchPlaceholder="Search tickets..." />
-            <div className="table-container"><table><thead><tr><th>Ticket ID</th><th>Customer</th><th>Mobile No</th><th>Issue</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{paginatedItems.length === 0 ? <tr><td colSpan="9" className="text-center">No support tickets found.</td></tr> : paginatedItems.map((ticket) => <tr key={ticket.id}><td>{ticket.ticket_id}</td><td>{ticket.username}</td><td>{ticket.mobile_no}</td><td className="truncate-cell" title={ticket.issue}>{ticket.issue}</td><td>{ticket.priority}</td><td>{ticket.assigned_to || '-'}</td><td><span className={`badge ${ticket.status === 'Closed' ? 'badge-success' : ticket.status === 'In Progress' ? 'badge-warning' : 'badge-info'}`}>{ticket.status}</span></td><td>{ticket.created_at}</td><td><button className="icon-btn view" type="button" title="Update ticket" onClick={() => openTicket(ticket)}><Save size={16} /></button></td></tr>)}</tbody></table></div>
-            <Pagination currentPage={page} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} itemName="tickets" />
+            <TableFilterBar filters={queueFilters} onChange={(nextFilters) => { setQueueFilters(nextFilters); setPage(1); }} onReset={() => { setQueueFilters({ search: '', date_from: '', date_to: '', status: '' }); setPage(1); }} items={tickets} dateKeys={['created_at']} showStatus statusOptions={statuses} searchPlaceholder="Search tickets..." />
+            <div className="table-container"><table><thead><tr><th>Ticket ID</th><th>Customer</th><th>Mobile No</th><th>Issue</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{tickets.length === 0 ? <tr><td colSpan="9" className="text-center">No support tickets found.</td></tr> : tickets.map((ticket) => <tr key={ticket.id}><td>{ticket.ticket_id}</td><td>{ticket.username}</td><td>{ticket.mobile_no}</td><td className="truncate-cell" title={ticket.issue}>{ticket.issue}</td><td>{ticket.priority}</td><td>{ticket.assigned_to || '-'}</td><td><span className={`badge ${ticket.status === 'Closed' ? 'badge-success' : ticket.status === 'In Progress' ? 'badge-warning' : 'badge-info'}`}>{ticket.status}</span></td><td>{ticket.created_at}</td><td><button className="icon-btn view" type="button" title="Update ticket" onClick={() => openTicket(ticket)}><Save size={16} /></button></td></tr>)}</tbody></table></div>
+            <Pagination currentPage={page} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} itemName="tickets" />
         </div>
 
         {isSuperAdmin && <div className="card" style={{ marginTop: 20 }}><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Manage Support Questions</h3></div><form onSubmit={saveQuestion}><div className="form-group"><label className="form-label">Question</label><input className="form-control" value={questionForm.question} onChange={(event) => setQuestionForm({ ...questionForm, question: event.target.value })} required /></div><div className="form-group"><label className="form-label">Answer</label><textarea className="form-control" rows="3" value={questionForm.answer} onChange={(event) => setQuestionForm({ ...questionForm, answer: event.target.value })} required /></div><button className="btn btn-primary" disabled={saving}>{questionForm.id ? 'Update Question' : 'Add Question'}</button></form><div className="table-container" style={{ marginTop: 16 }}><table><thead><tr><th>Question</th><th>Answer</th><th>Actions</th></tr></thead><tbody>{questions.map((question) => <tr key={question.id}><td>{question.question}</td><td>{question.answer}</td><td><button className="btn btn-outline" type="button" onClick={() => setQuestionForm({ ...question, is_active: Boolean(Number(question.is_active)) })}>Edit</button> <button className="btn btn-danger" type="button" onClick={() => deleteQuestion(question.id)}>Delete</button></td></tr>)}</tbody></table></div></div>}

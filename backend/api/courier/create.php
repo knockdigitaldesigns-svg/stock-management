@@ -6,6 +6,8 @@ require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/courier_request_details.php';
 require_once '../../utils/courier_payment_validation.php';
+require_once '../../utils/customer_payment_verification.php';
+require_once '../../utils/courier_customer_validation.php';
 
 handlePreflight();
 
@@ -31,6 +33,8 @@ $technician_id = null;
 $customer_id = null;
 $is_new_customer = false;
 $newCustomerData = null;
+$software = trim((string) ($data->software ?? ''));
+$custRow = [];
 $personName = '';
 $personStatus = '';
 
@@ -87,27 +91,38 @@ if ($courier_to_person === 'Dealer') {
         || $customerIdInput === '__create_new__'
         || ($customerIdInput === '' && !empty($data->new_customer_data));
     $newCustomerData = $data->new_customer_data ?? null;
-    
+    if (!$newCustomerData) {
+        $conn->close();
+        sendResponse(false, 'Customer Details are required for a customer courier request.', [], [], 400);
+    }
+    $workflowData = json_decode(json_encode($newCustomerData), true);
+    if (!is_array($workflowData)) {
+        $conn->close();
+        sendResponse(false, 'Customer workflow data is invalid.', [], [], 400);
+    }
+    $step1Data = is_array($workflowData['step1'] ?? null) ? $workflowData['step1'] : [];
     if ($is_new_customer) {
-        $newCustomerData = $newCustomerData ?? (object)[];
-        $step1 = $newCustomerData->step1 ?? (object)[];
-        $username = trim((string)($step1->username ?? $data->username ?? ''));
-        $primaryMobile = trim((string)($step1->primary_mobile_no ?? $data->primary_mobile_no ?? ''));
+        $step1Data['username'] = $step1Data['username'] ?? $data->username ?? '';
+        $step1Data['primary_mobile_no'] = $step1Data['primary_mobile_no'] ?? $data->primary_mobile_no ?? '';
+        $workflowData['step1'] = $step1Data;
+    }
+    try {
+        $workflowData = mapCourierSoftwareToCustomerPlatform($conn, $workflowData, $software);
+        $step1Data = $workflowData['step1'];
+        if ($is_new_customer) {
+            $validatedCustomer = validateCourierNewCustomerProfile($step1Data);
+            $workflowData['step1'] = array_merge($step1Data, $validatedCustomer);
+        }
+    } catch (InvalidArgumentException $e) {
+        $conn->close();
+        sendResponse(false, $e->getMessage(), [], [], 400);
+    }
+    $newCustomerData = json_decode(json_encode($workflowData));
 
-        if ($username === '') {
-            $conn->close();
-            sendResponse(false, "Username is required for new customer.", [], [], 400);
-        }
-        if ($primaryMobile === '') {
-            $conn->close();
-            sendResponse(false, "Primary mobile number is required for new customer.", [], [], 400);
-        }
-        if (!preg_match('/^[0-9]{10}$/', $primaryMobile)) {
-            $conn->close();
-            sendResponse(false, "Primary mobile number must contain exactly 10 digits.", [], [], 400);
-        }
-
-        $platformId = (int)($step1->platform_id ?? 0);
+    if ($is_new_customer) {
+        $username = $validatedCustomer['username'];
+        $primaryMobile = $validatedCustomer['primary_mobile_no'];
+        $platformId = $validatedCustomer['platform_id'];
         $platformStmt = $conn->prepare("SELECT id FROM platforms WHERE id = ? AND status = 'Active' LIMIT 1");
         $platformStmt->bind_param('i', $platformId);
         $platformStmt->execute();
@@ -117,10 +132,8 @@ if ($courier_to_person === 'Dealer') {
             $conn->close();
             sendResponse(false, "Select an active Platform for the new customer.", [], [], 400);
         }
-
-        // Check if username already exists with different mobile
-        $stmt = $conn->prepare("SELECT id FROM customers WHERE LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) != ? LIMIT 1");
-        $stmt->bind_param("ss", $username, $primaryMobile);
+        $stmt = $conn->prepare("SELECT id FROM customers WHERE platform_id = ? AND LOWER(TRIM(username)) = LOWER(?) AND TRIM(primary_mobile_no) != ? LIMIT 1");
+        $stmt->bind_param("iss", $platformId, $username, $primaryMobile);
         $stmt->execute();
         if ($stmt->get_result()->num_rows > 0) {
             $stmt->close();
@@ -128,7 +141,6 @@ if ($courier_to_person === 'Dealer') {
             sendResponse(false, "Username already exists with a different mobile number.", [], [], 409);
         }
         $stmt->close();
-
         $personName = $username;
         $personStatus = 'New Customer';
         $customer_id = null;
@@ -139,7 +151,11 @@ if ($courier_to_person === 'Dealer') {
             sendResponse(false, "Select Customer is required", [], [], 400);
         }
         // Verify Customer Exists
-        $custStmt = $conn->prepare("SELECT id, username, status FROM customers WHERE id = ?");
+        $custStmt = $conn->prepare(
+            "SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no,
+                    email, location, pincode, status
+             FROM customers WHERE id = ?"
+        );
         $custStmt->bind_param("i", $customer_id);
         $custStmt->execute();
         $custRow = $custStmt->get_result()->fetch_assoc();
@@ -231,7 +247,6 @@ if ($courier_send_via !== null && !in_array($courier_send_via, $validSendVias, t
     $courier_send_via = null;
 }
 
-$software = trim((string)($data->software ?? ''));
 $courier_date = trim((string)($data->courier_date ?? getTodayDate()));
 $request_date = trim((string)($data->request_date ?? $data->date ?? $courier_date));
 
@@ -242,10 +257,7 @@ if (isFutureDate($request_date) || isFutureDate($courier_date)) {
 
 $notes = trim((string)($data->notes ?? ''));
 $tracking_id = !empty($data->tracking_id) ? trim((string)$data->tracking_id) : null;
-$courier_status = !empty($data->courier_status) ? trim((string)$data->courier_status) : 'Pending';
-if (!in_array($courier_status, ['Pending', 'Reached', 'Not Reached'], true)) {
-    $courier_status = 'Pending';
-}
+$courier_status = 'Pending';
 $courier_reason = !empty($data->courier_reason) ? trim((string)$data->courier_reason) : null;
 
 // Validate Device Availability & Duplicate Protection
@@ -368,10 +380,11 @@ try {
 
     $firstRequestId = null;
     $requestCode = '';
+    $createdRequestIds = [];
 
     for ($i = 0; $i < $totalItems; $i++) {
-        $curDev = $validatedDevices[$i] ?? ($totalDevices > 0 ? $validatedDevices[0] : null);
-        $curSim = $validatedSims[$i] ?? ($totalSims > 0 ? $validatedSims[0] : null);
+        $curDev = $validatedDevices[$i] ?? null;
+        $curSim = $validatedSims[$i] ?? null;
 
         $curDevModelId = $curDev ? $curDev['device_model_id'] : null;
         $curDeviceId = $curDev ? $curDev['device_id'] : null;
@@ -436,6 +449,7 @@ try {
 
         $rowId = $stmt->insert_id;
         $stmt->close();
+        $createdRequestIds[] = (int) $rowId;
         saveCourierRequestDetails($conn, $rowId, $courierDetails);
 
         if ($i === 0) {

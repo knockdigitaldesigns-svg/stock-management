@@ -30,6 +30,9 @@ if (!$isSuperAdmin && !in_array('courier.view', $userPermissions, true)) {
 }
 
 $canApprove = $isSuperAdmin || in_array('courier.approve', $userPermissions, true);
+$where = [];
+$params = [];
+$types = '';
 
 // Search filter
 if (($search = trim((string)($_GET['search'] ?? ''))) !== '') {
@@ -184,10 +187,65 @@ $sql = "
 ";
 
 if (!empty($where)) {
-    $sql .= ' WHERE ' . implode(' AND ', $where);
+    $whereSql = ' WHERE ' . implode(' AND ', $where);
+    $sql .= $whereSql;
+} else {
+    $whereSql = '';
 }
 
 $sql .= ' ORDER BY cr.created_at DESC, cr.id DESC';
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pagination = null;
+$pendingCount = 0;
+
+if ($paginated) {
+    $countSql = "
+        SELECT COUNT(*) AS total
+        FROM courier_requests cr
+        LEFT JOIN dealers dl ON dl.id = cr.dealer_id
+        LEFT JOIN technicians tech ON tech.id = cr.technician_id
+        LEFT JOIN customers c ON c.id = cr.customer_id
+        LEFT JOIN device_types dt ON dt.id = cr.device_model_id
+        LEFT JOIN devices d ON d.id = cr.device_id
+        LEFT JOIN sims s ON s.id = cr.sim_id
+        LEFT JOIN users u ON u.id = cr.requested_by_user_id
+        $whereSql
+    ";
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare courier count query: ' . $conn->error, [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to count courier requests.', [], [], 500);
+    }
+    $pagination = [
+        'total' => (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0),
+        'page' => $page,
+        'page_size' => $pageSize
+    ];
+    $pagination['total_pages'] = max(1, (int) ceil($pagination['total'] / $pageSize));
+    $countStmt->close();
+
+    if ($canApprove) {
+        $pendingResult = $conn->query("SELECT COUNT(*) AS total FROM courier_requests WHERE approval_status = 'Pending Approval'");
+        if (!$pendingResult) {
+            $conn->close();
+            sendResponse(false, 'Failed to count pending courier approvals.', [], [], 500);
+        }
+        $pendingCount = (int) ($pendingResult->fetch_assoc()['total'] ?? 0);
+    }
+
+    $sql .= ' LIMIT ? OFFSET ?';
+    $params[] = $pageSize;
+    $params[] = ($page - 1) * $pageSize;
+    $types .= 'ii';
+}
 
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
@@ -199,13 +257,19 @@ if (!empty($params)) {
     $stmt->bind_param($types, ...$params);
 }
 
-$stmt->execute();
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch courier requests.', [], [], 500);
+}
 $result = $stmt->get_result();
 
 $requests = [];
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $row['request_code'] = 'CR-' . str_pad((string)$row['id'], 4, '0', STR_PAD_LEFT);
+        $workflowData = json_decode((string) ($row['new_customer_data'] ?? ''), true);
+        $row['requires_customer_verification'] = !empty($workflowData['_verification']['submission_id']);
         $requests[] = $row;
     }
 }
@@ -215,6 +279,7 @@ $conn->close();
 
 sendResponse(true, "Courier requests fetched successfully", [
     "requests" => $requests,
-    "can_approve" => $canApprove
+    "can_approve" => $canApprove,
+    ...($paginated ? ['pagination' => $pagination, 'pending_count' => $pendingCount] : [])
 ]);
 ?>

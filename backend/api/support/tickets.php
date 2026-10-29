@@ -15,11 +15,61 @@ $listSql = "SELECT st.id, st.ticket_id, st.customer_id, st.vehicle_id, st.assign
 
 if ($method === 'GET') {
     requirePermission('support.view');
-    $result = $conn->query($listSql . ' ORDER BY st.updated_at DESC, st.id DESC');
-    $tickets = [];
-    while ($result && ($row = $result->fetch_assoc())) $tickets[] = $row;
+    $where = [];
+    $params = [];
+    $types = '';
+    if (($search = trim((string) ($_GET['search'] ?? ''))) !== '') {
+        $where[] = '(st.ticket_id LIKE ? OR c.username LIKE ? OR c.primary_mobile_no LIKE ? OR st.issue LIKE ? OR COALESCE(au.employee_name, au.username) LIKE ? OR st.status LIKE ?)';
+        $like = '%' . $search . '%';
+        array_push($params, $like, $like, $like, $like, $like, $like);
+        $types .= 'ssssss';
+    }
+    if (($status = trim((string) ($_GET['status'] ?? ''))) !== '') {
+        $where[] = 'st.status = ?';
+        $params[] = $status;
+        $types .= 's';
+    }
+    if (($dateFrom = trim((string) ($_GET['date_from'] ?? ''))) !== '') {
+        $where[] = 'st.created_at >= ?';
+        $params[] = $dateFrom;
+        $types .= 's';
+    }
+    if (($dateTo = trim((string) ($_GET['date_to'] ?? ''))) !== '') {
+        $where[] = 'st.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+        $params[] = $dateTo;
+        $types .= 's';
+    }
+    $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+    $countSql = 'SELECT COUNT(*) AS total FROM support_tickets st INNER JOIN customers c ON c.id = st.customer_id LEFT JOIN users au ON au.id = st.assigned_to_user_id' . $whereSql;
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) { $conn->close(); sendResponse(false, 'Failed to prepare support ticket count query.', [], [], 500); }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to count support tickets.', [], [], 500); }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $countStmt->close();
+    $query = $listSql . $whereSql . ' ORDER BY st.updated_at DESC, st.id DESC LIMIT ? OFFSET ?';
+    $listParams = $params;
+    $listParams[] = $pageSize;
+    $listParams[] = ($page - 1) * $pageSize;
+    $listTypes = $types . 'ii';
+    $stmt = $conn->prepare($query);
+    if (!$stmt) { $conn->close(); sendResponse(false, 'Failed to prepare support ticket query.', [], [], 500); }
+    $stmt->bind_param($listTypes, ...$listParams);
+    if (!$stmt->execute()) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to fetch support tickets.', [], [], 500); }
+    $tickets = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
     $conn->close();
-    sendResponse(true, 'Support tickets fetched successfully.', ['tickets' => $tickets]);
+    sendResponse(true, 'Support tickets fetched successfully.', [
+        'tickets' => $tickets,
+        'pagination' => [
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total_pages' => max(1, (int) ceil($total / $pageSize))
+        ]
+    ]);
 }
 
 $data = json_decode(file_get_contents('php://input'));

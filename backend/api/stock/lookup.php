@@ -161,14 +161,8 @@ function lookupAssetStatus($asset, $assetType, $allocations, $transfers, $transa
 
     if (!empty($asset['deleted_at'])) {
         $label = 'Archived';
-    } elseif ($assetType === 'device' && $assetVehicles && $hasRecordedInstallation) {
+    } elseif ($assetType === 'device' && $assetVehicles) {
         $label = 'Used';
-    } elseif ($assetType === 'device' && $assetVehicles && $status === 'allocated') {
-        $label = 'Allocated';
-    } elseif ($assetType === 'device' && $assetVehicles && ($status === 'used' || $usedTransaction)) {
-        $label = 'Used';
-    } elseif ($assetType === 'device' && $assetVehicles && $status === 'available') {
-        $label = 'Status conflict';
     } elseif ($assetType !== 'device' && $assetVehicles) {
         $label = $hasRecordedInstallation ? 'Installed' : 'Used / Customer linked';
     } elseif ($assetType === 'sim' && $allocation && strtolower((string) $allocation['sim_status']) === 'deactive') {

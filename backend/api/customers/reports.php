@@ -87,6 +87,53 @@ if ($validity > 0) {
 }
 
 $where = implode(' AND ', $conditions);
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$offset = ($page - 1) * $pageSize;
+$total = null;
+$pagination = null;
+$countSql = "
+    SELECT COUNT(*) AS total
+    FROM customers c
+    LEFT JOIN customer_vehicle_details cv ON cv.id = (
+        SELECT id FROM customer_vehicle_details
+        WHERE customer_id = c.id
+        ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    LEFT JOIN customer_installations ci ON ci.id = (
+        SELECT id FROM customer_installations
+        WHERE customer_id = c.id
+        ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    LEFT JOIN customer_payments cp ON cp.id = (
+        SELECT id FROM customer_payments
+        WHERE customer_id = c.id
+        ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE $where
+";
+if ($paginated) {
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare customer report count query.', [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to count customer report rows.', [], [], 500);
+    }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $countStmt->close();
+    $pagination = [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ];
+}
 $sql = "
     SELECT
         c.id,
@@ -136,6 +183,12 @@ $sql = "
     ORDER BY c.id DESC
 ";
 
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $params[] = $pageSize;
+    $params[] = $offset;
+    $types .= 'ii';
+}
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     sendResponse(false, 'Failed to prepare customer report query.', [], ['error' => $conn->error], 500);
@@ -143,7 +196,11 @@ if (!$stmt) {
 if ($params) {
     $stmt->bind_param($types, ...$params);
 }
-$stmt->execute();
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch customer report rows.', [], [], 500);
+}
 $result = $stmt->get_result();
 $reports = [];
 while ($row = $result->fetch_assoc()) {
@@ -191,6 +248,7 @@ while ($optionResult && ($row = $optionResult->fetch_assoc())) $validities[] = (
 $conn->close();
 sendResponse(true, 'Customer reports fetched successfully.', [
     'reports' => $reports,
+    ...($paginated ? ['pagination' => $pagination] : []),
     'options' => compact('locations', 'months', 'years', 'people', 'leadClosures', 'deviceTypes', 'validities')
 ]);
 ?>

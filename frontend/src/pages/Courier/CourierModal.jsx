@@ -97,6 +97,7 @@ const initialNewCustomerForm = {
     totalAmount: '',
     cashToTechnician: false,
     cashToDealer: false,
+    cashToEt: false,
     amountPaid: '0',
     amountPending: '',
     paymentStatus: 'Not Paid',
@@ -247,11 +248,11 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
         };
     };
 
-    const getNewCustomerPlatformId = () => {
+    const getSoftwarePlatformId = () => {
         const matchingPlatform = platformsList.find(
-            (platform) => String(platform.name || '').trim().toLowerCase() === String(software || '').trim().toLowerCase()
+            (platform) => String(platform.name || '').trim() === String(software || '').trim()
         );
-        return matchingPlatform?.id || newCustomerForm.platform_id || '';
+        return matchingPlatform?.id || '';
     };
 
     const updateDeliveryAddress = (event) => {
@@ -729,17 +730,20 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             return;
         }
 
-        if (isCreatingNewCustomer) {
-            if (!getNewCustomerPlatformId()) {
-                triggerError('Select a Software that matches an active Platform for the new customer.');
+        if (showCustomerWorkflowSections) {
+            if (!software || !getSoftwarePlatformId()) {
+                triggerError('Select a Software that exactly matches an active Customer Platform.');
                 return;
             }
+        }
+
+        if (isCreatingNewCustomer) {
             if (!newCustomerForm.username.trim()) {
                 triggerError("Username is required for New Customer.");
                 return;
             }
-            if (!/^[a-zA-Z0-9._-]+$/.test(newCustomerForm.username.trim())) {
-                triggerError("Username can contain only letters, numbers, dot, underscore and hyphen.");
+            if (!/^[a-zA-Z0-9.@_-]+$/.test(newCustomerForm.username.trim())) {
+                triggerError("Username can contain only letters, numbers, @, dot, underscore and hyphen.");
                 return;
             }
             if (!newCustomerForm.primary_mobile_no.trim()) {
@@ -758,7 +762,11 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                 triggerError("Secondary Mobile No cannot be the same as Primary Mobile No.");
                 return;
             }
-            if (newCustomerForm.pincode && !/^\d{6}$/.test(newCustomerForm.pincode.trim())) {
+            if (!newCustomerForm.location.trim()) {
+                triggerError("Location is required for New Customer.");
+                return;
+            }
+            if (!/^\d{6}$/.test(newCustomerForm.pincode.trim())) {
                 triggerError("Pincode must contain exactly 6 digits.");
                 return;
             }
@@ -924,14 +932,15 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                     amountPending: calculatePaymentTotals(newCustomerForm).amountPending,
                     paymentStatus: calculatePaymentTotals(newCustomerForm).paymentStatus,
                     paymentMode,
-                    transactionId
+                    transactionId,
+                    cashToTechnician: Boolean(newCustomerForm.cashToTechnician),
+                    cashToDealer: Boolean(newCustomerForm.cashToDealer),
+                    cashToEt: Boolean(newCustomerForm.cashToEt)
                 }
             };
             const customerWorkflowData = showCustomerWorkflowSections ? {
                 step1: {
-                    platform_id: isCreatingNewCustomer
-                        ? (getNewCustomerPlatformId() ? Number(getNewCustomerPlatformId()) : null)
-                        : (selectedCustomerDetails?.platform_id ? Number(selectedCustomerDetails.platform_id) : null),
+                    platform_id: getSoftwarePlatformId() ? Number(getSoftwarePlatformId()) : null,
                     username: isCreatingNewCustomer ? newCustomerForm.username.trim() : selectedCustomerDetails?.username || '',
                     primary_mobile_no: isCreatingNewCustomer ? newCustomerForm.primary_mobile_no.trim() : selectedCustomerDetails?.mobile_no || '',
                     secondary_mobile_no: isCreatingNewCustomer ? newCustomerForm.secondary_mobile_no.trim() : selectedCustomerDetails?.secondary_mobile_no || '',
@@ -1113,6 +1122,17 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                     <div className="row">
                                     <div className="col-md-6 mb-3">
                                         <label className="form-label small font-weight-bold">
+                                            Platform <span className="text-danger">*</span>
+                                        </label>
+                                        <select className="form-control" value={getSoftwarePlatformId()} disabled>
+                                            <option value="">{software ? 'Software has no matching active Platform' : 'Select Software below'}</option>
+                                            {platformsList.map((platform) => (
+                                                <option key={platform.id} value={platform.id}>{platform.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="col-md-6 mb-3">
+                                        <label className="form-label small font-weight-bold">
                                             Username <span className="text-danger">*</span>
                                         </label>
                                         <input
@@ -1168,7 +1188,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         />
                                     </div>
                                     <div className="col-md-6 mb-3">
-                                        <label className="form-label small font-weight-bold">Location</label>
+                                        <label className="form-label small font-weight-bold">
+                                            Location <span className="text-danger">*</span>
+                                        </label>
                                         <input
                                             type="text"
                                             className="form-control"
@@ -1180,7 +1202,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         />
                                     </div>
                                     <div className="col-md-6 mb-3">
-                                        <label className="form-label small font-weight-bold">Pincode</label>
+                                        <label className="form-label small font-weight-bold">
+                                            Pincode <span className="text-danger">*</span>
+                                        </label>
                                         <input
                                             type="text"
                                             className="form-control"
@@ -1195,6 +1219,17 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                     </div>
                                 ) : (
                                     <div className="row">
+                                        <div className="col-md-6 mb-3">
+                                            <label className="form-label small font-weight-bold">
+                                                Platform <span className="text-danger">*</span>
+                                            </label>
+                                            <select className="form-control" value={getSoftwarePlatformId()} disabled>
+                                                <option value="">{software ? 'Software has no matching active Platform' : 'Select Software below'}</option>
+                                                {platformsList.map((platform) => (
+                                                    <option key={platform.id} value={platform.id}>{platform.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                         <div className="col-md-6 mb-3">
                                             <label className="form-label small font-weight-bold">Customer Username</label>
                                             <input className="form-control" value={selectedCustomerDetails?.username || ''} readOnly />
@@ -1944,7 +1979,9 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                     {isSupportedPerson && (
                         <div className="row mb-3">
                             <div className="col-md-6 mb-3">
-                                <label className="form-label font-weight-bold">Software</label>
+                                <label className="form-label font-weight-bold">
+                                    Software {showCustomerWorkflowSections && <span className="text-danger">*</span>}
+                                </label>
                                 <SearchableDropdown
                                     options={availableSoftwareOptions}
                                     value={software}

@@ -3,8 +3,7 @@ import { PenTool, Eye, Edit, Trash2 } from 'lucide-react';
 import api from '../../services/api';
 import UpdateStockModal from './UpdateStockModal';
 import Pagination from '../../components/Pagination/Pagination';
-import usePagination from '../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../components/TableFilterBar/TableFilterBar';
 import Modal from '../../components/Modal/Modal';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import StockAllocationEditModal from './StockAllocationEditModal';
@@ -21,6 +20,9 @@ const StockManagement = () => {
     const [stockAllocations, setStockAllocations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filters, setFilters] = useState(emptyTableFilters);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
     const [editingAllocationId, setEditingAllocationId] = useState(null);
     const [viewingAllocation, setViewingAllocation] = useState(null);
@@ -28,12 +30,31 @@ const StockManagement = () => {
     const [deleting, setDeleting] = useState(false);
     const [platforms, setPlatforms] = useState([]);
 
-    const fetchStockSummary = async () => {
+    const fetchStockSummary = async (targetPage = page, targetPageSize = pageSize, targetFilters = filters) => {
         setLoading(true);
         try {
-            const response = await api.get('/stock/list.php').catch(() => ({ data: { success: true, data: { allocations: [] } } }));
+            const response = await api.get('/stock/list.php', {
+                params: {
+                    page: targetPage,
+                    page_size: targetPageSize,
+                    search: targetFilters.search || '',
+                    date_from: targetFilters.date_from || '',
+                    date_to: targetFilters.date_to || '',
+                    owner_type: targetFilters.ownerType || '',
+                    asset: targetFilters.asset || '',
+                    platform: targetFilters.platform || '',
+                    payment_status: targetFilters.paymentStatus || '',
+                    given_date: targetFilters.given_date || '',
+                    given_date_operator: targetFilters.given_date_operator || 'exact',
+                    activation_date: targetFilters.activation_date || '',
+                    activation_date_operator: targetFilters.activation_date_operator || 'exact'
+                }
+            });
             if (response.data.success) {
                 setStockAllocations(response.data.data.allocations || []);
+                const nextPagination = response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (targetPage > nextPagination.total_pages) setPage(nextPagination.total_pages);
             }
         } catch (error) {
             console.error('Failed to fetch stock summary', error);
@@ -56,9 +77,22 @@ const StockManagement = () => {
     };
 
     useEffect(() => {
-        fetchStockSummary();
         fetchPlatforms();
     }, []);
+
+    useEffect(() => {
+        fetchStockSummary(page, pageSize, filters);
+    }, [page, pageSize, filters]);
+
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
+
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     const deleteOwnerStock = async () => {
         if (!deleteTarget) return;
@@ -74,32 +108,6 @@ const StockManagement = () => {
             setDeleting(false);
         }
     };
-
-    // Filter out Not Willing Dealers on frontend as well
-    const allowedAllocations = stockAllocations.filter((row) => {
-        if (row.owner_type === 'dealer' && (row.dealer_installation_status === 'Not Willing' || row.installation_status === 'Not Willing')) {
-            return false;
-        }
-        return true;
-    });
-
-    const filteredStock = filterTableRows(allowedAllocations, filters, {
-        dateKeys: ['allocation_date'],
-        searchKeys: ['owner_name', 'owner_type', 'imei_no', 'sim_no', 'software'],
-        customDateFilters: [
-            { key: 'given_date', label: 'Given Date' },
-            { key: 'activation_date', label: 'Activation Date' }
-        ]
-    });
-
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredStock, 10, [filters]);
 
     return (
         <div className="page-container">
@@ -120,9 +128,9 @@ const StockManagement = () => {
             <div className="card">
                 <TableFilterBar
                     filters={filters}
-                    onChange={setFilters}
-                    onReset={() => setFilters(emptyTableFilters())}
-                    items={allowedAllocations}
+                    onChange={updateFilters}
+                    onReset={() => updateFilters(emptyTableFilters())}
+                    items={stockAllocations}
                     dateKeys={['allocation_date']}
                     customDateFilters={[
                         { key: 'given_date', label: 'Given Date' },
@@ -161,14 +169,14 @@ const StockManagement = () => {
                                 <tr>
                                     <td colSpan="13" className="text-center">Loading stock data...</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : stockAllocations.length === 0 ? (
                                 <tr>
                                     <td colSpan="13" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map((row) => {
+                                stockAllocations.map((row) => {
                                     const isDeviceRow = row.device_id !== null || Boolean(row.imei_no);
                                     const deviceText = isDeviceRow ? (row.imei_no || '-') : '-';
                                     const simText = !isDeviceRow && (row.sim_id !== null || Boolean(row.sim_no)) ? (row.sim_no || '-') : '-';
@@ -223,10 +231,10 @@ const StockManagement = () => {
 
                 <Pagination
                     currentPage={page}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="allocations"
                 />
             </div>

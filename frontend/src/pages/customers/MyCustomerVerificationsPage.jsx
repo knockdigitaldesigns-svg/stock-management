@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, RefreshCw, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
+import Pagination from '../../components/Pagination/Pagination';
 import './CustomerPaymentVerificationPage.css';
 
 const detailSections = [
     ['customer', 'Customer Details'],
+    ['courier', 'Courier Request'],
     ['vehicle', 'Vehicle Details'],
     ['installation', 'Installation Details'],
     ['payment_part1', 'Payment Part 1'],
@@ -46,6 +48,9 @@ const getCorrectionStep = (reason) => {
 const MyCustomerVerificationsPage = () => {
     const navigate = useNavigate();
     const [submissions, setSubmissions] = useState([]);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [selected, setSelected] = useState(null);
@@ -54,17 +59,27 @@ const MyCustomerVerificationsPage = () => {
         try {
             setLoading(true);
             setError('');
-            const response = await api.get('/customers/verification/mine.php');
+            const response = await api.get('/customers/verification/mine.php', {
+                params: { page, page_size: pageSize }
+            });
             if (!response.data?.success) {
                 throw new Error(response.data?.message || 'Failed to load your submissions.');
             }
             setSubmissions(response.data.data?.submissions || []);
+            const nextPagination = response.data.data?.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+            setPagination(nextPagination);
+            if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
         } catch (loadError) {
             setError(loadError.response?.data?.message || loadError.message || 'Failed to load your submissions.');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [page, pageSize]);
+
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     useEffect(() => {
         loadSubmissions();
@@ -156,7 +171,7 @@ const MyCustomerVerificationsPage = () => {
             <div className="page-header">
                 <div>
                     <h1>My Verification Requests</h1>
-                    <p>Review your requests. If a request is rejected, you can correct it and resubmit it.</p>
+                    <p>Review your customer and courier verification requests.</p>
                 </div>
                 <button type="button" className="btn btn-secondary" onClick={loadSubmissions} disabled={loading}>
                     <RefreshCw size={16} /> Refresh
@@ -167,6 +182,7 @@ const MyCustomerVerificationsPage = () => {
                 <table className="data-table">
                     <thead>
                         <tr>
+                            <th>Request Type</th>
                             <th>Customer</th>
                             <th>Mobile</th>
                             <th>Location</th>
@@ -180,6 +196,7 @@ const MyCustomerVerificationsPage = () => {
                     <tbody>
                         {submissions.map((item) => (
                             <tr key={item.id}>
+                                <td>{item.submission_type || 'Customer Payment'}</td>
                                 <td>{item.customer_name}</td>
                                 <td>{item.primary_mobile_no || '—'}</td>
                                 <td>{item.location || '—'}</td>
@@ -198,10 +215,13 @@ const MyCustomerVerificationsPage = () => {
                                             <button type="button" className="btn btn-secondary" onClick={() => viewDetails(item.id)}>
                                                 <Eye size={16} /> View Details
                                             </button>
-                                            {item.status === 'Rejected' && (
+                                            {item.status === 'Rejected' && item.submission_type !== 'Courier Request' && (
                                                 <button type="button" className="btn btn-secondary" onClick={() => resumeDraft(item.id)}>
                                                     <RotateCcw size={16} /> Correct &amp; Resubmit
                                                 </button>
+                                            )}
+                                            {item.status === 'Rejected' && item.submission_type === 'Courier Request' && (
+                                                <span>Submit a new courier request with corrected information.</span>
                                             )}
                                         </>
                                     )}
@@ -209,10 +229,18 @@ const MyCustomerVerificationsPage = () => {
                                 </td>
                             </tr>
                         ))}
-                        {!loading && submissions.length === 0 && <tr><td colSpan="8">No verification requests yet.</td></tr>}
+                        {!loading && submissions.length === 0 && <tr><td colSpan="9">No verification requests yet.</td></tr>}
                     </tbody>
                 </table>
             </div>
+            <Pagination
+                currentPage={page}
+                pageSize={pageSize}
+                totalItems={pagination.total}
+                onPageChange={setPage}
+                onPageSizeChange={updatePageSize}
+                itemName="verification requests"
+            />
             <Modal
                 isOpen={Boolean(selected)}
                 onClose={() => setSelected(null)}

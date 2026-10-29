@@ -33,18 +33,20 @@ if (!$conn) {
 
 try {
     if ($existingCustomerId === 0 && is_array($step1)) {
+        $platformId = max(0, (int) ($step1['platform_id'] ?? 0));
         $username = trim((string) ($step1['username'] ?? ''));
         $primaryMobile = trim((string) ($step1['primary_mobile_no'] ?? ''));
-        if ($username !== '' && $primaryMobile !== '') {
+        if ($platformId > 0 && $username !== '' && $primaryMobile !== '') {
             $stmt = $conn->prepare(
                 'SELECT id, platform_id, username, primary_mobile_no,
                         secondary_mobile_no, email, location, pincode, status
                  FROM customers
-                 WHERE LOWER(TRIM(username)) = LOWER(?)
+                 WHERE platform_id = ?
+                   AND LOWER(TRIM(username)) = LOWER(?)
                    AND TRIM(primary_mobile_no) = ?
                  ORDER BY id ASC LIMIT 1'
             );
-            $stmt->bind_param('ss', $username, $primaryMobile);
+            $stmt->bind_param('iss', $platformId, $username, $primaryMobile);
             $stmt->execute();
             $existing = $stmt->get_result()->fetch_assoc();
             $stmt->close();
@@ -57,11 +59,12 @@ try {
             }
             $stmt = $conn->prepare(
                 'SELECT id FROM customers
-                 WHERE LOWER(TRIM(username)) = LOWER(?)
+                 WHERE platform_id = ?
+                   AND LOWER(TRIM(username)) = LOWER(?)
                    AND TRIM(primary_mobile_no) <> ?
                  ORDER BY id ASC LIMIT 1'
             );
-            $stmt->bind_param('ss', $username, $primaryMobile);
+            $stmt->bind_param('iss', $platformId, $username, $primaryMobile);
             $stmt->execute();
             $differentMobile = $stmt->get_result()->fetch_assoc();
             $stmt->close();

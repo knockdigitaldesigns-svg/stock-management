@@ -7,6 +7,7 @@ require_once '../../utils/excel_reader.php';
 require_once '../../utils/date.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/customer_payment_verification.php';
+require_once '../../utils/validation_error_response.php';
 
 handlePreflight();
 
@@ -191,6 +192,7 @@ if ($worksheet === false) {
 }
 
 $rawRows = [];
+$rawRowNumbers = [];
 foreach ($worksheet->xpath('//*[local-name()="sheetData"]/*[local-name()="row"]') ?: [] as $rowNode) {
     $values = [];
     foreach ($rowNode->xpath('./*[local-name()="c"]') ?: [] as $cell) {
@@ -208,6 +210,7 @@ foreach ($worksheet->xpath('//*[local-name()="sheetData"]/*[local-name()="row"]'
     }
     if ($hasContent) {
         $rawRows[] = $values;
+        $rawRowNumbers[] = (int) ($rowNode['r'] ?? (count($rawRowNumbers) + 1));
     }
 }
 $zip->close();
@@ -246,7 +249,12 @@ foreach ($mandatoryHeaders as $mandField) {
 }
 
 if (!empty($missingColumns)) {
-    sendResponse(false, "Required column '" . $missingColumns[0] . "' is missing.", [], [], 400);
+    sendValidationErrorResponse(
+        'Required customer import columns are missing.',
+        array_map(static function ($field) {
+            return "Required column '{$field}' is missing.";
+        }, $missingColumns)
+    );
 }
 
 $dataRows = array_slice($rawRows, 1);
@@ -361,11 +369,12 @@ if ($res) {
         $usernameValue = strtolower(trim((string) $r['username']));
         $mobileValue = trim((string) $r['primary_mobile_no']);
 
-        $existingCustomersByUsername[$usernameValue][] = [
+        $platformCustomerKey = (int) $r['platform_id'] . '|' . $usernameValue;
+        $existingCustomersByUsername[$platformCustomerKey][] = [
             'primary_mobile_no' => $mobileValue
         ];
 
-        $customerKey = $usernameValue . '|' . $mobileValue;
+        $customerKey = (int) $r['platform_id'] . '|' . $usernameValue . '|' . $mobileValue;
         if (!isset($existingUsernameMobileMap[$customerKey])) {
             $existingUsernameMobileMap[$customerKey] = (int) $r['id'];
             $existingCustomerByKey[$customerKey] = $r;
@@ -461,7 +470,7 @@ $batchImeis = [];
 $batchSims = [];
 
 foreach ($dataRows as $idx => $row) {
-    $rowNumber = $idx + 2;
+    $rowNumber = $rawRowNumbers[$idx + 1] ?? ($idx + 2);
 
     $getVal = function ($field) use ($row, $fieldToColIndex) {
         $colIdx = $fieldToColIndex[$field] ?? null;
@@ -471,19 +480,19 @@ foreach ($dataRows as $idx => $row) {
     // 1. Customer Fields
     $platform = $getVal('Platform');
     $username = $getVal('Username');
-    $primaryMobile = preg_replace('/\D/', '', $getVal('Primary Mobile No'));
-    $secondaryMobile = preg_replace('/\D/', '', $getVal('Secondary Mobile No'));
+    $primaryMobile = $getVal('Primary Mobile No');
+    $secondaryMobile = $getVal('Secondary Mobile No');
     $email = $getVal('Email');
     $location = $getVal('Location');
-    $pincode = preg_replace('/\D/', '', $getVal('Pincode'));
+    $pincode = $getVal('Pincode');
     $customerStatus = $getVal('Customer Status');
 
     // 2. Vehicle Fields
     $vehicleNo = strtoupper($getVal('Vehicle No'));
     $vehicleType = $getVal('Vehicle Type');
-    $imeiNo = preg_replace('/\D/', '', $getVal('IMEI No'));
-    $simNo1 = preg_replace('/\D/', '', $getVal('SIM No 1'));
-    $simNo2 = preg_replace('/\D/', '', $getVal('SIM No 2'));
+    $imeiNo = $getVal('IMEI No');
+    $simNo1 = $getVal('SIM No 1');
+    $simNo2 = $getVal('SIM No 2');
     $deviceModel = $getVal('Device Model');
     $simValidity = $getVal('SIM Validity');
 
@@ -528,18 +537,19 @@ foreach ($dataRows as $idx => $row) {
     if ($username === '') {
         $allErrors[] = "Row {$rowNumber}: Username - Username is required.";
     } elseif (strlen($username) > 100) {
-        $allErrors[] = "Row {$rowNumber}: Username - Username must not exceed 100 characters.";
+        $allErrors[] = "Row {$rowNumber}: Username - Value '{$username}' must not exceed 100 characters.";
     } elseif (!preg_match('/^[a-zA-Z0-9.@_-]+$/', $username)) {
-        $allErrors[] = "Row {$rowNumber}: Username - Username can contain only letters, numbers, @, dot, underscore and hyphen.";
+        $allErrors[] = "Row {$rowNumber}: Username - Value '{$username}' can contain only letters, numbers, @, dot, underscore and hyphen.";
     } else {
         $lowerUser = strtolower($username);
-        if (isset($batchUsernameMobiles[$lowerUser]) && $batchUsernameMobiles[$lowerUser] !== $primaryMobile) {
-            $allErrors[] = "Row {$rowNumber}: Username already exists with a different mobile number.";
+        $platformCustomerKey = (int) ($platformId ?? 0) . '|' . $lowerUser;
+        if (isset($batchUsernameMobiles[$platformCustomerKey]) && $batchUsernameMobiles[$platformCustomerKey] !== $primaryMobile) {
+            $allErrors[] = "Row {$rowNumber}: Username - Username '{$username}' already exists on platform '{$platform}' with a different primary mobile number '{$primaryMobile}'.";
         } else {
-            $batchUsernameMobiles[$lowerUser] = $primaryMobile;
+            $batchUsernameMobiles[$platformCustomerKey] = $primaryMobile;
         }
 
-        $dbUserMatches = $existingCustomersByUsername[$lowerUser] ?? [];
+        $dbUserMatches = $existingCustomersByUsername[$platformCustomerKey] ?? [];
         $hasDifferentUsernameMobile = false;
         foreach ($dbUserMatches as $customer) {
             if (trim((string) $customer['primary_mobile_no']) !== $primaryMobile) {
@@ -548,7 +558,7 @@ foreach ($dataRows as $idx => $row) {
         }
 
         if ($hasDifferentUsernameMobile) {
-            $allErrors[] = "Row {$rowNumber}: Username already exists with a different mobile number.";
+            $allErrors[] = "Row {$rowNumber}: Username - Username '{$username}' already exists on platform '{$platform}' with a different primary mobile number '{$primaryMobile}'.";
         }
     }
 
@@ -556,21 +566,21 @@ foreach ($dataRows as $idx => $row) {
     if ($primaryMobile === '') {
         $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Primary Mobile is required.";
     } elseif (!preg_match('/^[0-9]{10}$/', $primaryMobile)) {
-        $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Primary Mobile must contain exactly 10 digits.";
+        $allErrors[] = "Row {$rowNumber}: Primary Mobile No - Value '{$primaryMobile}' must contain exactly 10 digits.";
     }
 
     // Secondary Mobile
     if ($secondaryMobile !== '') {
         if (!preg_match('/^[0-9]{10}$/', $secondaryMobile)) {
-            $allErrors[] = "Row {$rowNumber}: Secondary Mobile No - Secondary Mobile must contain exactly 10 digits.";
+            $allErrors[] = "Row {$rowNumber}: Secondary Mobile No - Value '{$secondaryMobile}' must contain exactly 10 digits.";
         } elseif ($secondaryMobile === $primaryMobile) {
-            $allErrors[] = "Row {$rowNumber}: Secondary Mobile No - Secondary Mobile cannot be the same as Primary Mobile.";
+            $allErrors[] = "Row {$rowNumber}: Secondary Mobile No - Value '{$secondaryMobile}' cannot be the same as Primary Mobile '{$primaryMobile}'.";
         }
     }
 
     // Email
     if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $allErrors[] = "Row {$rowNumber}: Email - Invalid email format.";
+        $allErrors[] = "Row {$rowNumber}: Email - Value '{$email}' is not a valid email address.";
     }
 
     // Location
@@ -582,7 +592,7 @@ foreach ($dataRows as $idx => $row) {
     if ($pincode === '') {
         $allErrors[] = "Row {$rowNumber}: Pincode - Pincode is required.";
     } elseif (!preg_match('/^[0-9]{6}$/', $pincode)) {
-        $allErrors[] = "Row {$rowNumber}: Pincode - Pincode must contain exactly 6 digits.";
+        $allErrors[] = "Row {$rowNumber}: Pincode - Value '{$pincode}' must contain exactly 6 digits.";
     }
 
     // Customer Status
@@ -594,7 +604,7 @@ foreach ($dataRows as $idx => $row) {
         } elseif ($statusLower === 'inactive') {
             $resolvedCustomerStatus = 'Inactive';
         } else {
-            $allErrors[] = "Row {$rowNumber}: Customer Status - Customer Status must be 'Active' or 'Inactive'.";
+            $allErrors[] = "Row {$rowNumber}: Customer Status - Value '{$customerStatus}' must be 'Active' or 'Inactive'.";
         }
     }
 
@@ -606,10 +616,10 @@ foreach ($dataRows as $idx => $row) {
     if ($vehicleNo === '') {
         $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle No is required.";
     } else {
-        $customerKey = strtolower(trim($username)) . '|' . trim($primaryMobile);
+        $customerKey = (int) ($platformId ?? 0) . '|' . strtolower(trim($username)) . '|' . trim($primaryMobile);
         if (isset($batchVehicleNos[$vehicleNo])) {
             if (($batchVehicleOwners[$vehicleNo] ?? null) === $customerKey) {
-                $allErrors[] = "Row {$rowNumber}: Vehicle already exists under this customer.";
+                $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle '{$vehicleNo}' already appears under this customer in the upload.";
             } else {
                 $allErrors[] = "Row {$rowNumber}: Vehicle No - Duplicate Vehicle No in uploaded Excel ({$vehicleNo}).";
             }
@@ -624,7 +634,7 @@ foreach ($dataRows as $idx => $row) {
             if ($matchedCustomerId !== null && $existingCustomerId === $matchedCustomerId) {
                 $allErrors[] = "Row {$rowNumber}: Vehicle already exists under this customer.";
             } else {
-                $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle No '{$vehicleNo}' already exists in database.";
+                $allErrors[] = "Row {$rowNumber}: Vehicle No - Vehicle '{$vehicleNo}' already exists in the database.";
             }
         }
     }
@@ -632,9 +642,9 @@ foreach ($dataRows as $idx => $row) {
     // Vehicle Type
     $vehicleTypeId = null;
     if ($vehicleType === '') {
-        $allErrors[] = "Row {$rowNumber}: Vehicle Type - Vehicle Type is required.";
+        $allErrors[] = "Row {$rowNumber}: Vehicle Type - Required field is missing.";
     } elseif (!isset($vehicleTypeMap[strtolower($vehicleType)])) {
-        $allErrors[] = "Row {$rowNumber}: Vehicle Type - Vehicle Type '{$vehicleType}' is invalid or inactive.";
+        $allErrors[] = "Row {$rowNumber}: Vehicle Type - Value '{$vehicleType}' is invalid or inactive.";
     } else {
         $vehicleTypeId = $vehicleTypeMap[strtolower($vehicleType)];
     }
@@ -644,7 +654,7 @@ foreach ($dataRows as $idx => $row) {
     if ($imeiNo === '') {
         $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI No is required.";
     } elseif (!preg_match('/^[0-9]{15}$/', $imeiNo)) {
-        $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI No must contain exactly 15 digits.";
+        $allErrors[] = "Row {$rowNumber}: IMEI No - Value '{$imeiNo}' must contain exactly 15 digits.";
     } else {
         if (isset($batchImeis[$imeiNo])) {
             $allErrors[] = "Row {$rowNumber}: IMEI No - Duplicate IMEI No in uploaded Excel ({$imeiNo}).";
@@ -653,13 +663,13 @@ foreach ($dataRows as $idx => $row) {
         }
 
         if (isset($assignedImeis[$imeiNo])) {
-            $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI is already assigned to another customer.";
+            $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI '{$imeiNo}' is already assigned to another customer.";
         } elseif (!isset($deviceInventory[$imeiNo])) {
-            $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI does not exist in Device Maintenance.";
+            $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI '{$imeiNo}' does not exist in Device Maintenance.";
         } else {
             $deviceInfo = $deviceInventory[$imeiNo];
             if ($deviceInfo['status'] === 'used') {
-                $allErrors[] = "Row {$rowNumber}: IMEI No - This IMEI is not available for allocation.";
+                $allErrors[] = "Row {$rowNumber}: IMEI No - IMEI '{$imeiNo}' is not available for allocation.";
             }
         }
     }
@@ -673,7 +683,7 @@ foreach ($dataRows as $idx => $row) {
         if ($deviceInfo !== null) {
             $linkedModelNorm = $deviceModelIdToName[$deviceInfo['device_model_id']] ?? '';
             if ($deviceModelNorm !== $linkedModelNorm) {
-                $allErrors[] = "Row {$rowNumber}: Device Model - Device Model does not match the IMEI device.";
+                $allErrors[] = "Row {$rowNumber}: Device Model - Value '{$deviceModel}' does not match the model for IMEI '{$imeiNo}'.";
             } else {
                 $deviceModelId = $deviceInfo['device_model_id'];
             }
@@ -689,7 +699,7 @@ foreach ($dataRows as $idx => $row) {
     if ($simNo1 === '') {
         $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM No 1 is required.";
     } elseif (!preg_match('/^\d{10}$/', $simNo1) && !preg_match('/^\d{13}$/', $simNo1)) {
-        $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM No 1 must contain exactly 10 or 13 digits.";
+        $allErrors[] = "Row {$rowNumber}: SIM No 1 - Value '{$simNo1}' must contain exactly 10 or 13 digits.";
     } else {
         if (isset($batchSims[$simNo1])) {
             $allErrors[] = "Row {$rowNumber}: SIM No 1 - Duplicate SIM No 1 in uploaded Excel ({$simNo1}).";
@@ -698,13 +708,13 @@ foreach ($dataRows as $idx => $row) {
         }
 
         if (isset($assignedSims[$simNo1])) {
-            $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM already assigned to another customer.";
+            $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM '{$simNo1}' is already assigned to another customer.";
         } elseif (!isset($simInventory[$simNo1])) {
-            $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM No 1 was not found in SIM Maintenance.";
+            $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM '{$simNo1}' was not found in SIM Maintenance.";
         } else {
             $sim1Info = $simInventory[$simNo1];
             if ($sim1Info['status'] === 'used') {
-                $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM No 1 is not available for allocation.";
+                $allErrors[] = "Row {$rowNumber}: SIM No 1 - SIM '{$simNo1}' is not available for allocation.";
             }
         }
     }
@@ -713,9 +723,9 @@ foreach ($dataRows as $idx => $row) {
     $sim2Info = null;
     if ($simNo2 !== '') {
         if (!preg_match('/^\d{10}$/', $simNo2) && !preg_match('/^\d{13}$/', $simNo2)) {
-            $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM No 2 must contain exactly 10 or 13 digits.";
+            $allErrors[] = "Row {$rowNumber}: SIM No 2 - Value '{$simNo2}' must contain exactly 10 or 13 digits.";
         } elseif ($simNo2 === $simNo1) {
-            $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM No 1 and SIM No 2 cannot be the same.";
+            $allErrors[] = "Row {$rowNumber}: SIM No 2 - Value '{$simNo2}' cannot be the same as SIM No 1 '{$simNo1}'.";
         } else {
             if (isset($batchSims[$simNo2])) {
                 $allErrors[] = "Row {$rowNumber}: SIM No 2 - Duplicate SIM No 2 in uploaded Excel ({$simNo2}).";
@@ -724,13 +734,13 @@ foreach ($dataRows as $idx => $row) {
             }
 
             if (isset($assignedSims[$simNo2])) {
-                $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM No 2 is already assigned to another customer.";
+                $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM '{$simNo2}' is already assigned to another customer.";
             } elseif (!isset($simInventory[$simNo2])) {
-                $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM No 2 was not found in SIM Maintenance.";
+                $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM '{$simNo2}' was not found in SIM Maintenance.";
             } else {
                 $sim2Info = $simInventory[$simNo2];
                 if ($sim2Info['status'] === 'used') {
-                    $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM No 2 is not available for allocation.";
+                    $allErrors[] = "Row {$rowNumber}: SIM No 2 - SIM '{$simNo2}' is not available for allocation.";
                 }
             }
         }
@@ -777,13 +787,13 @@ foreach ($dataRows as $idx => $row) {
         : null;
 
     if ($deviceOwnerKey && $sim1OwnerKey && $deviceOwnerKey !== $sim1OwnerKey) {
-        $allErrors[] = "Row {$rowNumber}: Installation Person - The selected IMEI and SIM No 1 must belong to the same current owner.";
+        $allErrors[] = "Row {$rowNumber}: Installation Person - IMEI '{$imeiNo}' and SIM No 1 '{$simNo1}' must belong to the same current owner.";
     }
     if ($deviceOwnerKey && $sim2OwnerKey && $deviceOwnerKey !== $sim2OwnerKey) {
-        $allErrors[] = "Row {$rowNumber}: Installation Person - The selected IMEI and SIM No 2 must belong to the same current owner.";
+        $allErrors[] = "Row {$rowNumber}: Installation Person - IMEI '{$imeiNo}' and SIM No 2 '{$simNo2}' must belong to the same current owner.";
     }
     if ($sim1OwnerKey && $sim2OwnerKey && $sim1OwnerKey !== $sim2OwnerKey) {
-        $allErrors[] = "Row {$rowNumber}: Installation Person - SIM No 1 and SIM No 2 must belong to the same current owner.";
+        $allErrors[] = "Row {$rowNumber}: Installation Person - SIM No 1 '{$simNo1}' and SIM No 2 '{$simNo2}' must belong to the same current owner.";
     }
 
     // Installation Person Type
@@ -798,16 +808,20 @@ foreach ($dataRows as $idx => $row) {
             $normPersonType = 'Onsite Dealer';
         } elseif ($ptLower === 'offsite dealer') {
             $normPersonType = 'Offsite Dealer';
+        } elseif ($ptLower === 'direct') {
+            $normPersonType = 'Direct';
         } else {
-            $allErrors[] = "Row {$rowNumber}: Installation Person Type - Installation Person Type must be 'Technician', 'Onsite Dealer', or 'Offsite Dealer'.";
+            $allErrors[] = "Row {$rowNumber}: Installation Person Type - Value '{$installationPersonType}' must be Technician, Onsite Dealer, Offsite Dealer, or Direct.";
         }
     }
 
     // Installation Person
     $installationPersonId = null;
-    $installationDbPersonType = null; // 'Technician' or 'Dealer' for DB enum
+    $installationDbPersonType = null;
 
-    if ($installationPerson === '') {
+    if ($normPersonType === 'Direct') {
+        $installationDbPersonType = 'Direct';
+    } elseif ($installationPerson === '') {
         $allErrors[] = "Row {$rowNumber}: Installation Person - Installation Person is required.";
     } elseif ($normPersonType !== '') {
         $personNorm = strtolower($installationPerson);
@@ -821,7 +835,7 @@ foreach ($dataRows as $idx => $row) {
                 // Check if device/sim is allocated to a different technician
                 if ($deviceOwnerKey && $deviceInfo['owner_type'] === 'technician' && $deviceInfo['owner_id'] !== $installationPersonId) {
                     $expectedTech = $technicianIdToName[$deviceInfo['owner_id']] ?? "#{$deviceInfo['owner_id']}";
-                    $allErrors[] = "Row {$rowNumber}: Installation Person - Installation Person does not match the allocated Technician ({$expectedTech}).";
+                    $allErrors[] = "Row {$rowNumber}: Installation Person - Technician '{$installationPerson}' does not match the owner of IMEI '{$imeiNo}' (allocated Technician '{$expectedTech}').";
                 }
             }
         } elseif ($normPersonType === 'Onsite Dealer') {
@@ -836,7 +850,7 @@ foreach ($dataRows as $idx => $row) {
                     $installationPersonId = $dealerInfo['id'];
                     if ($deviceOwnerKey && $deviceInfo['owner_type'] === 'dealer' && $deviceInfo['owner_id'] !== $installationPersonId) {
                         $expectedDealer = $dealerIdMap[$deviceInfo['owner_id']]['name'] ?? "#{$deviceInfo['owner_id']}";
-                        $allErrors[] = "Row {$rowNumber}: Installation Person - Installation Person does not match the allocated Dealer ({$expectedDealer}).";
+                        $allErrors[] = "Row {$rowNumber}: Installation Person - Dealer '{$installationPerson}' does not match the owner of IMEI '{$imeiNo}' (allocated Dealer '{$expectedDealer}').";
                     }
                 }
             }
@@ -852,7 +866,7 @@ foreach ($dataRows as $idx => $row) {
                     $installationPersonId = $dealerInfo['id'];
                     if ($deviceOwnerKey && $deviceInfo['owner_type'] === 'dealer' && $deviceInfo['owner_id'] !== $installationPersonId) {
                         $expectedDealer = $dealerIdMap[$deviceInfo['owner_id']]['name'] ?? "#{$deviceInfo['owner_id']}";
-                        $allErrors[] = "Row {$rowNumber}: Installation Person - Installation Person does not match the allocated Dealer ({$expectedDealer}).";
+                        $allErrors[] = "Row {$rowNumber}: Installation Person - Dealer '{$installationPerson}' does not match the owner of IMEI '{$imeiNo}' (allocated Dealer '{$expectedDealer}').";
                     }
                 }
             }
@@ -876,9 +890,9 @@ foreach ($dataRows as $idx => $row) {
     } else {
         $parsedDate = $normalizeDate($installationDateRaw);
         if ($parsedDate === false || $parsedDate === '') {
-            $allErrors[] = "Row {$rowNumber}: Installation Date - Invalid Installation Date format (expected DD-MM-YYYY).";
+            $allErrors[] = "Row {$rowNumber}: Installation Date - Value '{$installationDateRaw}' has an invalid format (expected DD-MM-YYYY).";
         } elseif ($parsedDate > date('Y-m-d')) {
-            $allErrors[] = "Row {$rowNumber}: Installation Date - Future dates are not allowed.";
+            $allErrors[] = "Row {$rowNumber}: Installation Date - Future date '{$installationDateRaw}' is not allowed.";
         } else {
             $installationDate = $parsedDate;
         }
@@ -892,7 +906,7 @@ foreach ($dataRows as $idx => $row) {
     if ($totalSaleAmountRaw === '') {
         $allErrors[] = "Row {$rowNumber}: Total Sale Amount - Total Sale Amount is required.";
     } elseif (!is_numeric($totalSaleAmountRaw) || (float) $totalSaleAmountRaw <= 0) {
-        $allErrors[] = "Row {$rowNumber}: Total Sale Amount - Total Sale Amount must be greater than zero.";
+        $allErrors[] = "Row {$rowNumber}: Total Sale Amount - Value '{$totalSaleAmountRaw}' must be greater than zero.";
     } else {
         $totalSaleAmount = round((float) $totalSaleAmountRaw, 2);
     }
@@ -936,12 +950,12 @@ foreach ($dataRows as $idx => $row) {
         $parseCharge = function ($val, $fieldName) use ($rowNumber, $totalSaleAmount, &$allErrors) {
             if ($val === '') return 0.0;
             if (!is_numeric($val) || (float) $val < 0) {
-                $allErrors[] = "Row {$rowNumber}: {$fieldName} - {$fieldName} cannot be negative.";
+                $allErrors[] = "Row {$rowNumber}: {$fieldName} - Value '{$val}' must be a non-negative number.";
                 return 0.0;
             }
             $num = round((float) $val, 2);
             if ($totalSaleAmount > 0 && $num > $totalSaleAmount) {
-                $allErrors[] = "Row {$rowNumber}: {$fieldName} - {$fieldName} makes Total Amount exceed Total Sale Amount.";
+                $allErrors[] = "Row {$rowNumber}: {$fieldName} - Value '{$val}' makes Total Amount exceed Total Sale Amount '{$totalSaleAmount}'.";
             }
             return $num;
         };
@@ -956,12 +970,12 @@ foreach ($dataRows as $idx => $row) {
 
         if ($totalAmountRaw !== '') {
             if (!is_numeric($totalAmountRaw) || (float) $totalAmountRaw < 0) {
-                $allErrors[] = "Row {$rowNumber}: Total Amount - Total Amount must be a positive number.";
+                $allErrors[] = "Row {$rowNumber}: Total Amount - Value '{$totalAmountRaw}' must be a non-negative number.";
                 $totalAmount = $sumOfCharges;
             } else {
                 $totalAmount = round((float) $totalAmountRaw, 2);
                 if (abs($totalAmount - $sumOfCharges) > 0.01) {
-                    $allErrors[] = "Row {$rowNumber}: Total Amount - Total Amount must equal the sum of charges.";
+                    $allErrors[] = "Row {$rowNumber}: Total Amount - Value '{$totalAmountRaw}' must equal the sum of charges '{$sumOfCharges}'.";
                 }
             }
         } else {
@@ -970,17 +984,17 @@ foreach ($dataRows as $idx => $row) {
 
         // Total Sale Amount MUST equal Total Amount
         if ($totalSaleAmount > 0 && abs($totalSaleAmount - $totalAmount) > 0.01) {
-            $allErrors[] = "Row {$rowNumber}: Total Amount - Total Sale Amount must equal Total Amount.";
+            $allErrors[] = "Row {$rowNumber}: Total Amount - Value '{$totalAmount}' must equal Total Sale Amount '{$totalSaleAmount}'.";
         }
 
         // Amount Paid
         if ($amountPaidRaw !== '') {
             if (!is_numeric($amountPaidRaw) || (float) $amountPaidRaw < 0) {
-                $allErrors[] = "Row {$rowNumber}: Amount Paid - Amount Paid cannot be negative.";
+                $allErrors[] = "Row {$rowNumber}: Amount Paid - Value '{$amountPaidRaw}' cannot be negative.";
             } else {
                 $amountPaid = round((float) $amountPaidRaw, 2);
                 if ($amountPaid > $totalAmount) {
-                    $allErrors[] = "Row {$rowNumber}: Amount Paid - Amount Paid cannot be greater than Total Amount.";
+                    $allErrors[] = "Row {$rowNumber}: Amount Paid - Value '{$amountPaid}' cannot be greater than Total Amount '{$totalAmount}'.";
                 }
             }
         } else {
@@ -1001,7 +1015,7 @@ foreach ($dataRows as $idx => $row) {
 
         // Payment Mode & Transaction ID
         if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) {
-            $allErrors[] = "Row {$rowNumber}: Transaction ID - Transaction ID must be exactly 6 digits.";
+            $allErrors[] = "Row {$rowNumber}: Transaction ID - Value '{$transactionId}' must contain exactly 6 digits.";
         }
 
         if ($transactionId !== '' && $paymentMode === '') {
@@ -1107,18 +1121,21 @@ if (!empty($allErrors)) {
         }
     }
     $conn->close();
-    sendResponse(false, 'Excel validation failed. No rows were submitted because this import validates the batch atomically.', [
+    $uniqueErrors = array_values(array_unique($allErrors));
+    sendResponse(false, 'Excel validation failed. No rows were submitted because this import validates the batch atomically.' . "\n" . implode("\n", $uniqueErrors), [
         'successful_submissions' => 0,
         'customer_rows_submitted' => 0,
         'rejected_rows' => count($dataRows),
         'duplicate_rows' => count($duplicateRows),
-        'validation_errors' => array_values(array_unique($allErrors))
+        'validation_errors' => $uniqueErrors,
+        'validation_error_details' => buildValidationErrorDetails($uniqueErrors),
+        'validation_error_count' => count($uniqueErrors)
     ], [], 400);
 }
 
 $groups = [];
 foreach ($validRows as $row) {
-    $customerKey = strtolower(trim((string) $row['username'])) . '|' . trim((string) $row['primary_mobile_no']);
+    $customerKey = (int) $row['platform_id'] . '|' . strtolower(trim((string) $row['username'])) . '|' . trim((string) $row['primary_mobile_no']);
     $customer = [
         'platform_id' => (int) $row['platform_id'],
         'platform_name' => $row['platform_name'],
@@ -1139,18 +1156,21 @@ foreach ($validRows as $row) {
             'rows' => []
         ];
     } elseif ($groups[$customerKey]['customer'] !== $customer) {
-        $allErrors[] = 'Row ' . (int) $row['_row_number'] . ': Customer fields must match across rows for the same username and mobile number.';
+        $allErrors[] = 'Row ' . (int) $row['_row_number'] . ": Customer fields for Username '{$customer['username']}' and Primary Mobile No '{$customer['primary_mobile_no']}' must match across rows.";
     }
     $groups[$customerKey]['rows'][] = $row;
 }
 if ($allErrors) {
+    $uniqueErrors = array_values(array_unique($allErrors));
     $conn->close();
-    sendResponse(false, 'Excel validation failed. No rows were submitted.', [
+    sendResponse(false, 'Excel validation failed. No rows were submitted.' . "\n" . implode("\n", $uniqueErrors), [
         'successful_submissions' => 0,
         'customer_rows_submitted' => 0,
         'rejected_rows' => count($dataRows),
         'duplicate_rows' => 0,
-        'validation_errors' => array_values(array_unique($allErrors))
+        'validation_errors' => $uniqueErrors,
+        'validation_error_details' => buildValidationErrorDetails($uniqueErrors),
+        'validation_error_count' => count($uniqueErrors)
     ], [], 400);
 }
 
@@ -1221,6 +1241,10 @@ try {
             $pendingStmt = $conn->prepare(
                 "SELECT id FROM customer_payment_verification_submissions
                  WHERE status IN ('Pending Verification', 'Applying')
+                   AND JSON_UNQUOTE(JSON_EXTRACT(
+                       CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                       '$.customer.platform_id'
+                   )) = ?
                    AND LOWER(JSON_UNQUOTE(JSON_EXTRACT(
                        CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
                        '$.customer.username'
@@ -1231,7 +1255,7 @@ try {
                    )) = ?
                  LIMIT 1"
             );
-            $pendingStmt->bind_param('ss', $customer['username'], $customer['primary_mobile_no']);
+            $pendingStmt->bind_param('iss', $customer['platform_id'], $customer['username'], $customer['primary_mobile_no']);
         }
         $pendingStmt->execute();
         $pendingCustomer = $pendingStmt->get_result()->num_rows > 0;
