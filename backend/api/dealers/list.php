@@ -26,7 +26,7 @@ if (!$conn) {
 }
 
 if (isset($_GET['for_lookup']) && $_GET['for_lookup'] === '1') {
-    $result = $conn->query('SELECT id, dealer_name FROM dealers ORDER BY dealer_name ASC, id ASC');
+    $result = $conn->query('SELECT id, dealer_name, status FROM dealers ORDER BY dealer_name ASC, id ASC');
     if (!$result) {
         $conn->close();
         sendResponse(false, 'Failed to fetch dealer lookup options.', [], [], 500);
@@ -312,6 +312,7 @@ $sql = "
         d.location, 
         d.enrolled_date, 
         d.installation_status,
+        d.status,
         d.software,
         d.threshold_amount,
         d.notes,

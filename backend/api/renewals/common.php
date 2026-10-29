@@ -186,6 +186,11 @@ function renewalListFilters($filters) {
         $params[] = $filters['status'];
         $types .= 's';
     }
+    if (!empty($filters['customer_id'])) {
+        $where[] = 'c.id = ?';
+        $params[] = (int) $filters['customer_id'];
+        $types .= 'i';
+    }
     if (isset($filters['validity']) && $filters['validity'] !== '') {
         $where[] = 'cr.validity_months = ?';
         $params[] = (int)$filters['validity'];

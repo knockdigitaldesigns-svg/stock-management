@@ -29,6 +29,12 @@ if (!empty($validation['errors'])) {
 }
 
 $validData = $validation['data'];
+$requestedStatus = array_key_exists('status', $data)
+    ? strtolower(trim((string) $data['status']))
+    : null;
+if ($requestedStatus !== null && !in_array($requestedStatus, ['active', 'inactive'], true)) {
+    sendResponse(false, 'Technician status must be Active or Inactive.', [], [], 400);
+}
 
 $db = new Database();
 $conn = $db->getConnection();
@@ -43,19 +49,21 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
-$oldStmt = $conn->prepare('SELECT technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, notes FROM technicians WHERE id = ? LIMIT 1');
+$oldStmt = $conn->prepare('SELECT technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, status, notes FROM technicians WHERE id = ? LIMIT 1');
 $oldStmt->bind_param('i', $id);
 $oldStmt->execute();
 $oldTechnician = $oldStmt->get_result()->fetch_assoc();
 $oldStmt->close();
 if (!$oldTechnician) sendResponse(false, 'Technician not found', [], [], 404);
+$status = $requestedStatus ?? strtolower((string) ($oldTechnician['status'] ?? 'active'));
+$validData['status'] = $status;
 
 $conn->begin_transaction();
 try {
 writeChangedFields($conn, $id, 'Technician', $oldTechnician, $validData, $currentUser);
 
-$stmt = $conn->prepare('UPDATE technicians SET technician_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, notes = ? WHERE id = ?');
-$stmt->bind_param('ssssssi', $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['notes'], $id);
+$stmt = $conn->prepare('UPDATE technicians SET technician_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, status = ?, notes = ? WHERE id = ?');
+$stmt->bind_param('sssssssi', $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $status, $validData['notes'], $id);
 
 if ($stmt->execute()) {
     $stmt->close();

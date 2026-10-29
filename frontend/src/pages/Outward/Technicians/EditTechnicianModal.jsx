@@ -12,6 +12,7 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
         alternate_mobile_no: technician?.alternate_mobile_no || '',
         location: technician?.location || '',
         enrolled_date: technician?.enrolled_date || '',
+        status: technician?.status || 'active',
         notes: technician?.notes || ''
     });
     const [loading, setLoading] = useState(false);
@@ -122,6 +123,13 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                 <div className="form-group">
                     <label className="form-label">Enrolled Date *</label>
                     <DateInput className="form-control" value={formData.enrolled_date} onChange={(value) => setFormData((prev) => ({ ...prev, enrolled_date: value }))} required />
+                </div>
+                <div className="form-group">
+                    <label className="form-label">Status *</label>
+                    <select className="form-control" value={formData.status} onChange={(event) => setFormData((prev) => ({ ...prev, status: event.target.value }))} required>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
                 </div>
 
                 <hr />

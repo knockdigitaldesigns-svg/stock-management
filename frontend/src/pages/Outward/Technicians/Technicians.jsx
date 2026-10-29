@@ -209,6 +209,7 @@ const Technicians = () => {
                                 <th>Mobile No</th>
                                 <th>Location</th>
                                 <th>Enrolled Date</th>
+                                <th>Status</th>
                                 <th>Device Count</th>
                                 <th>SIM Count</th>
                                 <th>Payment Status</th>
@@ -218,15 +219,15 @@ const Technicians = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="8" className="text-center">Loading technicians...</td>
+                                    <td colSpan="9" className="text-center">Loading technicians...</td>
                                 </tr>
                             ) : loadError ? (
                                 <tr>
-                                    <td colSpan="8" className="text-center empty-state">{loadError}</td>
+                                    <td colSpan="9" className="text-center empty-state">{loadError}</td>
                                 </tr>
                             ) : technicians.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" className="text-center empty-state">
+                                    <td colSpan="9" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
@@ -237,6 +238,11 @@ const Technicians = () => {
                                         <td>{tech.mobile_no}</td>
                                         <td className="truncate-cell" title={tech.location}>{tech.location}</td>
                                         <td>{formatDate(tech.enrolled_date)}</td>
+                                        <td>
+                                            <span className={`badge ${tech.status === 'inactive' ? 'badge-danger' : 'badge-success'}`}>
+                                                {tech.status === 'inactive' ? 'Inactive' : 'Active'}
+                                            </span>
+                                        </td>
                                         <td>{tech.available_device_count ?? tech.device_count ?? 0}</td>
                                         <td>{tech.available_sim_count ?? tech.sim_count ?? 0}</td>
                                         <td>

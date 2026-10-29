@@ -28,6 +28,11 @@ if (!empty($validation['errors'])) {
 }
 
 $validData = $validation['data'];
+$status = strtolower(trim((string) ($data['status'] ?? 'active')));
+if (!in_array($status, ['active', 'inactive'], true)) {
+    sendResponse(false, 'Technician status must be Active or Inactive.', [], [], 400);
+}
+$validData['status'] = $status;
 
 $db = new Database();
 $conn = $db->getConnection();
@@ -43,8 +48,8 @@ if (!empty($dbErrors)) {
 }
 
 $conn->begin_transaction();
-$stmt = $conn->prepare("INSERT INTO technicians (technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, notes) VALUES (?, ?, ?, ?, ?, ?)");
-$stmt->bind_param("ssssss", $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['notes']);
+$stmt = $conn->prepare("INSERT INTO technicians (technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("sssssss", $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $status, $validData['notes']);
 
 if ($stmt->execute()) {
     $technicianId = $conn->insert_id;
