@@ -173,6 +173,166 @@
     border-bottom: 0;
 }
 
+.my-verification-page {
+    min-width: 0;
+}
+
+.my-verification-status-counts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.my-verification-status-count {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--verification-border);
+    border-radius: 0.75rem;
+    background: #fff;
+    color: #475569;
+    font: inherit;
+    font-size: 0.84rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.my-verification-status-count:hover {
+    border-color: #bfdbfe;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.my-verification-status-count strong {
+    display: inline-flex;
+    min-width: 1.8rem;
+    height: 1.8rem;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 0.8rem;
+}
+
+.my-verification-status-count.active {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.my-verification-status-count-pending strong {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.my-verification-status-count-approved strong {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.my-verification-status-count-rejected strong {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.my-verification-status-count-draft strong {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.my-verification-toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.my-verification-search {
+    flex: 1 1 320px;
+    width: auto;
+    min-width: min(100%, 280px);
+}
+
+.my-verification-filter {
+    flex: 0 1 190px;
+    min-width: 170px;
+    min-height: 42px;
+}
+
+.my-verification-clear {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: #64748b;
+    cursor: pointer;
+}
+
+.my-verification-clear:hover {
+    background: #f1f5f9;
+    color: #1e293b;
+}
+
+.my-verification-table-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.my-verification-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+}
+
+.my-verification-table-scroll::-webkit-scrollbar {
+    height: 10px;
+}
+
+.my-verification-table-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid #f8fafc;
+    border-radius: 999px;
+    background: #94a3b8;
+}
+
+.my-verification-table-scroll::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: #f1f5f9;
+}
+
+.my-verification-table {
+    width: 100%;
+    min-width: 1450px;
+    table-layout: auto;
+}
+
+.my-verification-table th,
+.my-verification-table td {
+    vertical-align: middle;
+}
+
+.my-verification-table td:nth-child(4),
+.my-verification-table td:nth-child(5),
+.my-verification-table td:nth-child(6) {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .verification-table tbody tr:hover td {
     background: #f8fbff;
 }
@@ -181,6 +341,23 @@
     height: 100px;
     color: var(--verification-muted);
     text-align: center;
+}
+
+@media (max-width: 640px) {
+    .my-verification-status-counts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .my-verification-toolbar {
+        align-items: stretch;
+    }
+
+    .my-verification-search,
+    .my-verification-filter {
+        flex: 1 1 100%;
+        width: 100%;
+        min-width: 0;
+    }
 }
 
 .verification-details {
@@ -294,6 +471,66 @@
     color: #1e293b;
 }
 
+.verification-nested-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.5rem 1rem;
+    min-width: 0;
+}
+
+.verification-detail-field {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.verification-detail-label {
+    margin-bottom: 0.2rem;
+    color: var(--verification-muted);
+    font-size: 0.72rem;
+    text-transform: capitalize;
+}
+
+.verification-detail-value {
+    overflow-wrap: anywhere;
+    color: #1e293b;
+}
+
+.verification-nested-group,
+.verification-repeat-list {
+    min-width: 0;
+}
+
+.verification-nested-group {
+    grid-column: 1 / -1;
+}
+
+.verification-nested-group h4,
+.verification-repeat-item h4 {
+    margin: 0.55rem 0 0.35rem;
+    color: #334155;
+    font-size: 0.82rem;
+}
+
+.verification-repeat-list {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.verification-repeat-item {
+    min-width: 0;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #f1f5f9;
+    border-radius: 0.55rem;
+    background: #fbfdff;
+}
+
+.verification-repeat-item > .verification-nested-fields {
+    padding-left: 0.15rem;
+}
+
 .my-verification-actions {
     display: flex;
     flex-wrap: wrap;
@@ -319,5 +556,9 @@
     .verification-tab {
         padding-inline: 0.7rem;
         font-size: 0.78rem;
+    }
+
+    .verification-nested-fields {
+        grid-template-columns: minmax(0, 1fr);
     }
 }

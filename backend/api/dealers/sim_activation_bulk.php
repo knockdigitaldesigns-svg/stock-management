@@ -5,6 +5,7 @@ require_once '../../utils/audit.php';
 require_once '../../utils/date.php';
 require_once '../../utils/dealer_sim_activation.php';
 require_once '../../middleware/auth.php';
+require_once '../../utils/validation_error_response.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -49,31 +50,32 @@ try {
         $simNo = trim((string) ($row['sim_no'] ?? ''));
         $dealerName = trim((string) ($row['dealer_name'] ?? ''));
         $activationDate = trim((string) ($row['activation_date'] ?? ''));
+        $activationDateInput = trim((string) ($row['activation_date_input'] ?? $activationDate));
         $validityValue = $row['validity'] ?? '';
         $validityLabel = trim((string) $validityValue);
         $rowHasErrors = false;
 
         if ($simNo === '') {
-            $errors[] = "Row {$rowNumber}: SIM No is required.";
+            $errors[] = "Row {$rowNumber}: SIM No - Required field is missing.";
             $rowHasErrors = true;
         } elseif (isset($seenSimNumbers[$simNo])) {
-            $errors[] = "Row {$rowNumber}: SIM {$simNo} appears more than once in this file.";
+            $errors[] = "Row {$rowNumber}: SIM No - SIM '{$simNo}' appears more than once in this file.";
             $rowHasErrors = true;
         } else {
             $seenSimNumbers[$simNo] = true;
         }
 
         if ($dealerName === '') {
-            $errors[] = "Row {$rowNumber}: Dealer Name is required.";
+            $errors[] = "Row {$rowNumber}: Dealer Name - Required field is missing.";
             $rowHasErrors = true;
         }
 
         $activationDateObject = null;
         if ($activationDate === '') {
-            $errors[] = "Row {$rowNumber}: Activation Date is required.";
+            $errors[] = "Row {$rowNumber}: Activation Date - Required field is missing.";
             $rowHasErrors = true;
         } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $activationDate)) {
-            $errors[] = "Row {$rowNumber}: Invalid activation date. Use DD-MM-YYYY format.";
+            $errors[] = "Row {$rowNumber}: Activation Date - Value '{$activationDateInput}' is invalid. Use DD-MM-YYYY format.";
             $rowHasErrors = true;
         } else {
             $activationDateObject = DateTimeImmutable::createFromFormat('!Y-m-d', $activationDate);
@@ -83,7 +85,7 @@ try {
                 ($dateErrors && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0)) ||
                 $activationDateObject->format('Y-m-d') !== $activationDate
             ) {
-                $errors[] = "Row {$rowNumber}: Invalid activation date.";
+                $errors[] = "Row {$rowNumber}: Activation Date - Value '{$activationDateInput}' is invalid.";
                 $rowHasErrors = true;
                 $activationDateObject = null;
             }
@@ -102,7 +104,7 @@ try {
             }
 
             if ($validityMonths === null) {
-                $errors[] = "Row {$rowNumber}: Validity - Enter a positive whole number of months for an active SIM validity.";
+                $errors[] = "Row {$rowNumber}: Validity - Value '{$validityLabel}' must be a positive whole number of months.";
                 $rowHasErrors = true;
             } elseif (!isset($validities[$validityMonths])) {
                 $errors[] = "Row {$rowNumber}: Validity - '{$validityLabel}' is not an active supported validity in months.";
@@ -123,7 +125,7 @@ try {
             $dealerRow = $dealerStmt->get_result()->fetch_assoc();
             $dealerStmt->close();
             if (!$dealerRow) {
-                $errors[] = "Row {$rowNumber}: Dealer not found.";
+                $errors[] = "Row {$rowNumber}: Dealer Name - Dealer '{$dealerName}' does not exist.";
                 $rowHasErrors = true;
             } else {
                 $dealerId = (int) $dealerRow['id'];
@@ -276,7 +278,9 @@ try {
     if ($errors) {
         $conn->rollback();
         $conn->close();
-        sendResponse(false, "Bulk upload failed.\n" . implode("\n", $errors), ['row_errors' => $errors], [], 422);
+        sendValidationErrorResponse('Bulk upload failed; no SIMs were activated.', $errors, 422, [
+            'row_errors' => array_values(array_unique($errors))
+        ]);
     }
 
     foreach ($validated as $activation) {

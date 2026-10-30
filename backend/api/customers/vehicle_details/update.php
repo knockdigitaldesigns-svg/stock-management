@@ -172,8 +172,66 @@ if (!$conn) {
 $conn->begin_transaction();
 
 try {
+    $courierReservedDeviceIds = [];
+    $courierReservedSimIds = [];
     if ($verificationSubmissionId > 0) {
         assertCustomerVerificationCommitAccess($conn, $verificationSubmissionId, (int) ($currentUser['user_id'] ?? 0));
+        $submissionStmt = $conn->prepare(
+            'SELECT submission_data FROM customer_payment_verification_submissions
+             WHERE id = ? AND status = \'Applying\' FOR UPDATE'
+        );
+        if (!$submissionStmt) {
+            throw new RuntimeException('Unable to verify the customer submission.');
+        }
+        $submissionStmt->bind_param('i', $verificationSubmissionId);
+        if (!$submissionStmt->execute()) {
+            $submissionStmt->close();
+            throw new RuntimeException('Unable to load the customer submission.');
+        }
+        $submissionData = json_decode(
+            (string) ($submissionStmt->get_result()->fetch_assoc()['submission_data'] ?? ''),
+            true
+        );
+        $submissionStmt->close();
+        if (is_array($submissionData) && ($submissionData['source'] ?? '') === 'courier') {
+            $requestIds = array_values(array_unique(array_filter(
+                array_map('intval', is_array($submissionData['courier_request_ids'] ?? null)
+                    ? $submissionData['courier_request_ids']
+                    : []),
+                static function (int $requestId): bool {
+                    return $requestId > 0;
+                }
+            )));
+            if ($requestIds) {
+                $requestIdList = implode(',', $requestIds);
+                $courierStmt = $conn->prepare(
+                    "SELECT id, device_id, sim_id, approval_status, new_customer_data
+                     FROM courier_requests WHERE id IN ({$requestIdList}) FOR UPDATE"
+                );
+                if (!$courierStmt || !$courierStmt->execute()) {
+                    throw new RuntimeException('Unable to verify courier stock reservations.');
+                }
+                $courierRows = $courierStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $courierStmt->close();
+                if (count($courierRows) !== count($requestIds)) {
+                    throw new RuntimeException('A linked courier reservation could not be found.');
+                }
+                foreach ($courierRows as $courierRow) {
+                    $linkedWorkflow = json_decode((string) $courierRow['new_customer_data'], true);
+                    if ($courierRow['approval_status'] !== 'Approved'
+                        || !is_array($linkedWorkflow)
+                        || (int) ($linkedWorkflow['_verification']['submission_id'] ?? 0) !== $verificationSubmissionId) {
+                        throw new RuntimeException('Courier stock is not reserved for this verification request.');
+                    }
+                    if ((int) ($courierRow['device_id'] ?? 0) > 0) {
+                        $courierReservedDeviceIds[] = (int) $courierRow['device_id'];
+                    }
+                    if ((int) ($courierRow['sim_id'] ?? 0) > 0) {
+                        $courierReservedSimIds[] = (int) $courierRow['sim_id'];
+                    }
+                }
+            }
+        }
     }
 
     /*
@@ -229,8 +287,8 @@ try {
     $findAsset = static function ($conn, $table, $numberColumn, $number, $allowedArchivedId) {
         $allocationColumn = $numberColumn === 'imei_no' ? 'device_id' : 'sim_id';
         $statusExpression = $table === 'devices'
-            ? "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.device_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END"
-            : "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = a.id OR cvd.sim_id_2 = a.id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.sim_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END";
+            ? "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = a.id OR BINARY cvd.imei_no = BINARY a.imei_no) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.device_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END"
+            : "CASE WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = a.id OR cvd.sim_id_2 = a.id OR BINARY TRIM(cvd.sim_no_1) = BINARY a.sim_no OR (cvd.sim_no_2 IS NOT NULL AND BINARY TRIM(cvd.sim_no_2) = BINARY a.sim_no)) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = a.id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.id = (SELECT MAX(st_latest.id) FROM stock_transactions st_latest WHERE st_latest.sim_id = a.id AND st_latest.from_owner_type = sa.owner_type AND st_latest.from_owner_id = sa.owner_id) AND st.transaction_type = 'USE') THEN 'used' ELSE a.status END";
         $stmt = $conn->prepare("SELECT a.id, {$statusExpression} AS status, sa.owner_type, sa.owner_id, (SELECT installation_status FROM dealers WHERE id = sa.owner_id AND sa.owner_type = 'dealer' LIMIT 1) AS owner_installation_status FROM {$table} a LEFT JOIN stock_allocations sa ON sa.id = (SELECT latest_sa.id FROM stock_allocations latest_sa WHERE latest_sa.{$allocationColumn} = a.id ORDER BY latest_sa.created_at DESC, latest_sa.id DESC LIMIT 1) WHERE a.{$numberColumn} = ? AND (a.deleted_at IS NULL OR a.id = ?) LIMIT 1 FOR UPDATE");
         $stmt->bind_param('si', $number, $allowedArchivedId);
         $stmt->execute();
@@ -255,15 +313,31 @@ try {
     foreach ($assetChecks as [$asset, $customerColumn, $assignedMessage, $unavailableMessage]) {
         if (!$asset) continue;
         $assetId = (int) $asset['id'];
-        $sameExistingAsset = (int) ($old[$customerColumn] ?? 0) === $assetId;
+        $oldNumberColumn = $customerColumn === 'device_id'
+            ? 'imei_no'
+            : ($customerColumn === 'sim_id_1' ? 'sim_no_1' : 'sim_no_2');
+        $requestedNumber = $customerColumn === 'device_id'
+            ? $imeiNo
+            : ($customerColumn === 'sim_id_1' ? $simNo1 : $simNo2);
+        $sameExistingAsset = (int) ($old[$customerColumn] ?? 0) === $assetId
+            || ($requestedNumber !== '' && trim((string) ($old[$oldNumberColumn] ?? '')) === $requestedNumber);
         $assetStatus = strtolower(trim((string) ($asset['status'] ?? '')));
         if ($assetStatus === 'used' && !$sameExistingAsset) {
             throw new Exception($customerColumn === 'device_id'
                 ? 'IMEI is already used and cannot be assigned again.'
                 : 'SIM is already used and cannot be assigned again.');
         }
-        $customerCheck = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$customerColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
-        $customerCheck->bind_param('ii', $assetId, $id);
+        if ($customerColumn === 'device_id') {
+            $customerCheck = $conn->prepare(
+                'SELECT id FROM customer_vehicle_details
+                 WHERE (device_id = ? OR BINARY imei_no = BINARY ?)
+                   AND id <> ? LIMIT 1 FOR UPDATE'
+            );
+            $customerCheck->bind_param('isi', $assetId, $requestedNumber, $id);
+        } else {
+            $customerCheck = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$customerColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
+            $customerCheck->bind_param('ii', $assetId, $id);
+        }
         $customerCheck->execute();
         $alreadyUsed = $customerCheck->get_result()->num_rows > 0;
         $customerCheck->close();
@@ -276,7 +350,13 @@ try {
             $assetOwnerType === 'technician' ||
             ($assetOwnerType === 'dealer' && in_array($ownerInstallationStatus, ['onsite', 'offsite'], true))
         );
-        if (!$sameExistingAsset && $assetStatus !== 'available' && !($assetStatus === 'allocated' && $ownerEligible)) {
+        $reservedForVerification = $customerColumn === 'device_id'
+            ? in_array($assetId, $courierReservedDeviceIds, true)
+            : in_array($assetId, $courierReservedSimIds, true);
+        if (!$sameExistingAsset
+            && $assetStatus !== 'available'
+            && !($assetStatus === 'allocated' && $ownerEligible)
+            && !($assetStatus === 'reserved' && $reservedForVerification)) {
             throw new Exception($unavailableMessage);
         }
     }
@@ -587,8 +667,43 @@ try {
     foreach (['device_id' => 'devices', 'sim_id_1' => 'sims', 'sim_id_2' => 'sims'] as $oldColumn => $table) {
         $oldAssetId = (int) ($old[$oldColumn] ?? 0);
         $newAssetId = $oldColumn === 'device_id' ? $newDeviceId : ($oldColumn === 'sim_id_1' ? $newSimId1 : (int) ($newSimId2 ?? 0));
+        $oldNumberColumn = $oldColumn === 'device_id'
+            ? 'imei_no'
+            : ($oldColumn === 'sim_id_1' ? 'sim_no_1' : 'sim_no_2');
+        $oldNumber = trim((string) ($old[$oldNumberColumn] ?? ''));
+        if (!$oldAssetId && $oldNumber !== '') {
+            $stockNumberColumn = $table === 'devices' ? 'imei_no' : 'sim_no';
+            $legacyAssetStmt = $conn->prepare(
+                "SELECT id FROM {$table} WHERE {$stockNumberColumn} = ? LIMIT 1 FOR UPDATE"
+            );
+            $legacyAssetStmt->bind_param('s', $oldNumber);
+            $legacyAssetStmt->execute();
+            $legacyAssetId = $legacyAssetStmt->get_result()->fetch_assoc();
+            $legacyAssetStmt->close();
+            $oldAssetId = (int) ($legacyAssetId['id'] ?? 0);
+        }
         if (!$oldAssetId || $oldAssetId === $newAssetId) continue;
         $allocationColumn = $oldColumn === 'device_id' ? 'device_id' : 'sim_id';
+        if ($oldColumn === 'device_id') {
+            $assignmentCheck = $conn->prepare(
+                'SELECT id FROM customer_vehicle_details
+                 WHERE device_id = ? OR imei_no = ?
+                 LIMIT 1 FOR UPDATE'
+            );
+            $assignmentCheck->bind_param('is', $oldAssetId, $oldNumber);
+        } else {
+            $assignmentCheck = $conn->prepare(
+                'SELECT id FROM customer_vehicle_details
+                 WHERE sim_id_1 = ? OR sim_id_2 = ? OR sim_no_1 = ? OR sim_no_2 = ?
+                 LIMIT 1 FOR UPDATE'
+            );
+            $assignmentCheck->bind_param('iiss', $oldAssetId, $oldAssetId, $oldNumber, $oldNumber);
+        }
+        $assignmentCheck->execute();
+        $stillAssigned = $assignmentCheck->get_result()->num_rows > 0;
+        $assignmentCheck->close();
+        if ($stillAssigned) continue;
+
         $allocationStmt = $conn->prepare("SELECT owner_type, owner_id FROM stock_allocations WHERE {$allocationColumn} = ? ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE");
         $allocationStmt->bind_param('i', $oldAssetId);
         $allocationStmt->execute();
@@ -599,14 +714,22 @@ try {
         $restoreStmt->bind_param('i', $oldAssetId);
         $restoreStmt->execute();
         $restoreStmt->close();
-        if ($allocation) {
-            $ownerType = (string) $allocation['owner_type'];
-            $ownerId = (int) $allocation['owner_id'];
-            $historyStmt = $conn->prepare("DELETE FROM stock_transactions WHERE {$allocationColumn} = ? AND from_owner_type = ? AND from_owner_id = ? AND transaction_type = 'USE' AND usage_type = 'ET'");
-            $historyStmt->bind_param('isi', $oldAssetId, $ownerType, $ownerId);
-            $historyStmt->execute();
+        $deviceTransactionId = $table === 'devices' ? $oldAssetId : 0;
+        $simTransactionId = $table === 'sims' ? $oldAssetId : 0;
+        $ownerType = (string) ($allocation['owner_type'] ?? '');
+        $ownerId = (int) ($allocation['owner_id'] ?? 0);
+        $returnNote = 'Returned to stock after customer vehicle assignment changed.';
+        $historyStmt = $conn->prepare(
+            "INSERT INTO stock_transactions
+                (device_id, sim_id, from_owner_type, from_owner_id, transaction_type, transaction_date, notes)
+             VALUES (NULLIF(?, 0), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, 0), 'RETURN', CURDATE(), ?)"
+        );
+        $historyStmt->bind_param('iisis', $deviceTransactionId, $simTransactionId, $ownerType, $ownerId, $returnNote);
+        if (!$historyStmt->execute()) {
             $historyStmt->close();
+            throw new Exception('Failed to record the returned customer asset.');
         }
+        $historyStmt->close();
     }
 
 

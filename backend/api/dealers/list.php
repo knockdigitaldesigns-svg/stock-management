@@ -25,6 +25,20 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
+if (isset($_GET['for_lookup']) && $_GET['for_lookup'] === '1') {
+    $result = $conn->query('SELECT id, dealer_name, status FROM dealers ORDER BY dealer_name ASC, id ASC');
+    if (!$result) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch dealer lookup options.', [], [], 500);
+    }
+    $dealers = [];
+    while ($row = $result->fetch_assoc()) {
+        $dealers[] = $row;
+    }
+    $conn->close();
+    sendResponse(true, 'Dealer lookup options fetched successfully.', ['dealers' => $dealers]);
+}
+
 try {
     ensureRenewalHistoryPaymentActionType($conn);
 } catch (Throwable $error) {
@@ -195,6 +209,18 @@ if (($month = filter_input(INPUT_GET, 'month', FILTER_VALIDATE_INT)) !== false &
     $types .= 'i';
 }
 
+if (($dateFrom = trim((string) ($_GET['date_from'] ?? ''))) !== '') {
+    $whereConditions[] = 'd.enrolled_date >= ?';
+    $params[] = $dateFrom;
+    $types .= 's';
+}
+
+if (($dateTo = trim((string) ($_GET['date_to'] ?? ''))) !== '') {
+    $whereConditions[] = 'd.enrolled_date <= ?';
+    $params[] = $dateTo;
+    $types .= 's';
+}
+
 $givenDate = trim((string)($_GET['given_date'] ?? ''));
 if ($givenDate !== '') {
     $givenOperator = strtolower(trim((string)($_GET['given_date_operator'] ?? 'exact')));
@@ -222,6 +248,60 @@ if ($activationDate !== '') {
 }
 
 $whereClause = $whereConditions ? ' WHERE ' . implode(' AND ', $whereConditions) : '';
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pagination = null;
+
+if ($paginated) {
+    $countSql = "
+        SELECT COUNT(*) AS total
+        FROM dealers d
+        LEFT JOIN (
+            SELECT owner_id, SUM(total_amount) AS total_amount,
+                   SUM(amount_paid) AS amount_paid,
+                   SUM(GREATEST(0, total_amount - amount_paid)) AS pending_amount
+            FROM stock_allocations
+            WHERE owner_type = 'dealer' AND (device_id IS NOT NULL OR sim_id IS NOT NULL)
+            GROUP BY owner_id
+        ) allocation_summary ON allocation_summary.owner_id = d.id
+        LEFT JOIN (
+            SELECT sa.owner_id, SUM(rh.payment_amount) AS total_amount,
+                   SUM(rh.amount_paid + COALESCE(rp.amount_paid, 0)) AS amount_paid,
+                   SUM(GREATEST(0, rh.amount_pending - COALESCE(rp.amount_paid, 0))) AS pending_amount
+            FROM stock_allocations sa
+            INNER JOIN renewal_history rh ON rh.allocation_id = sa.id
+                AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
+            LEFT JOIN (
+                SELECT source_history_id, SUM(amount_paid) AS amount_paid
+                FROM renewal_history
+                WHERE action_type = 'Renewal Payment' AND source_balance_updated = 0
+                GROUP BY source_history_id
+            ) rp ON rp.source_history_id = rh.id
+            WHERE sa.owner_type = 'dealer' AND sa.sim_id IS NOT NULL
+            GROUP BY sa.owner_id
+        ) renewal_summary ON renewal_summary.owner_id = d.id
+        $whereClause
+    ";
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Unable to prepare dealer count query: ' . $conn->error, [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Unable to count dealers.', [], [], 500);
+    }
+    $pagination = [
+        'total' => (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0),
+        'page' => $page,
+        'page_size' => $pageSize
+    ];
+    $pagination['total_pages'] = max(1, (int) ceil($pagination['total'] / $pageSize));
+    $countStmt->close();
+}
 
 $sql = "
     SELECT 
@@ -232,6 +312,7 @@ $sql = "
         d.location, 
         d.enrolled_date, 
         d.installation_status,
+        d.status,
         d.software,
         d.threshold_amount,
         d.notes,
@@ -313,14 +394,27 @@ $sql = "
     ORDER BY d.created_at DESC
 ";
 
+$dataParams = $params;
+$dataTypes = $types;
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $dataParams[] = $pageSize;
+    $dataParams[] = ($page - 1) * $pageSize;
+    $dataTypes .= 'ii';
+}
+
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     sendResponse(false, 'Unable to fetch dealers: ' . $conn->error, [], [], 500);
 }
-if ($params) {
-    $stmt->bind_param($types, ...$params);
+if ($dataParams) {
+    $stmt->bind_param($dataTypes, ...$dataParams);
 }
-$stmt->execute();
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Unable to fetch dealers.', [], [], 500);
+}
 $result = $stmt->get_result();
 
 $dealerIds = [];
@@ -426,7 +520,9 @@ foreach ($dealerRows as $row) {
         $dealers[] = $row;
 }
 
-sendResponse(true, "Dealers fetched successfully", ["dealers" => $dealers]);
+$responseData = ["dealers" => $dealers];
+if ($paginated) $responseData['pagination'] = $pagination;
+sendResponse(true, "Dealers fetched successfully", $responseData);
 
 $stmt->close();
 $conn->close();

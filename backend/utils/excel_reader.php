@@ -93,6 +93,7 @@ function parseXlsxRows($filePath, $requiredHeaders, $optionalHeaders = []) {
     }
     if ($worksheet === false) { $zip->close(); return ['error' => 'Unable to read the first Excel worksheet.']; }
     $rows = [];
+    $rowNumbers = [];
     foreach ($worksheet->xpath('//*[local-name()="sheetData"]/*[local-name()="row"]') ?: [] as $row) {
         $values = [];
         foreach ($row->xpath('./*[local-name()="c"]') ?: [] as $cell) {
@@ -110,6 +111,7 @@ function parseXlsxRows($filePath, $requiredHeaders, $optionalHeaders = []) {
         }
         if ($hasContent) {
             $rows[] = $values;
+            $rowNumbers[] = (int) ($row['r'] ?? (count($rowNumbers) + 1));
         }
     }
     $zip->close();
@@ -119,20 +121,30 @@ function parseXlsxRows($filePath, $requiredHeaders, $optionalHeaders = []) {
         $norm = normalizeExcelHeader($header);
         if ($norm !== '') $headers[$norm] = $index;
     }
+    $missingHeaders = [];
     foreach ($requiredHeaders as $header) {
         if (!array_key_exists(normalizeExcelHeader($header), $headers)) {
-            return ['error' => "Required column '$header' is missing."];
+            $missingHeaders[] = $header;
         }
+    }
+    if ($missingHeaders) {
+        return [
+            'error' => "Required columns are missing: " . implode(', ', $missingHeaders) . '.',
+            'errors' => array_map(static function ($header) {
+                return "Required column '{$header}' is missing.";
+            }, $missingHeaders)
+        ];
     }
     $dataRows = array_slice($rows, 1);
     if (empty($dataRows)) return ['error' => 'Excel file contains no data rows.', 'rows' => []];
     $mappedRows = [];
-    foreach ($dataRows as $row) {
+    foreach ($dataRows as $dataIndex => $row) {
         $mapped = [];
         foreach (array_merge($requiredHeaders, $optionalHeaders) as $header) {
-            $index = $headers[normalizeExcelHeader($header)] ?? null;
-            $mapped[$header] = ($index === null || !isset($row[$index])) ? '' : trim((string) $row[$index]);
+            $columnIndex = $headers[normalizeExcelHeader($header)] ?? null;
+            $mapped[$header] = ($columnIndex === null || !isset($row[$columnIndex])) ? '' : trim((string) $row[$columnIndex]);
         }
+        $mapped['__row_number'] = $rowNumbers[$dataIndex + 1] ?? ($dataIndex + 2);
         $mappedRows[] = $mapped;
     }
     return ['rows' => $mappedRows];

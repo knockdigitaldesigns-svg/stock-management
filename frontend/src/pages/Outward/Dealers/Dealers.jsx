@@ -8,9 +8,8 @@ import DealerExcelUploadModal from './DealerExcelUploadModal';
 import AddStockAllocationModal from '../../../components/AddStockAllocationModal/AddStockAllocationModal';
 import Modal from '../../../components/Modal/Modal';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
 import PaymentModal from '../../../components/PaymentModal/PaymentModal';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal';
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 import { useAuth } from '../../../context/AuthContext';
@@ -23,6 +22,9 @@ const Dealers = () => {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [filters, setFilters] = useState(emptyTableFilters);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isAddDealerModalOpen, setIsAddDealerModalOpen] = useState(false);
     const [isDealerUploadModalOpen, setIsDealerUploadModalOpen] = useState(false);
     const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
@@ -54,11 +56,18 @@ const Dealers = () => {
                 payment_status: filters.paymentStatus || '',
                 dealer_id: filters.dealer_id || '',
                 year: filters.year || '',
-                month: filters.month || ''
+                month: filters.month || '',
+                date_from: filters.date_from || '',
+                date_to: filters.date_to || '',
+                page,
+                page_size: pageSize
             };
             const response = await api.get('/dealers/list.php', { params });
             if (response.data.success) {
                 setDealers(response.data.data.dealers || []);
+                const nextPagination = response.data.data.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
             } else {
                 setDealers([]);
                 setLoadError(response.data.message || 'Failed to load dealers.');
@@ -79,7 +88,7 @@ const Dealers = () => {
                 api.get('/device_types/list.php'),
                 api.get('/sim_validities/list.php'),
                 api.get('/sim_types/list.php'),
-                api.get('/dealers/list.php')
+                api.get('/dealers/list.php?for_lookup=1')
             ]);
 
             const rawPlatforms = platformsRes.data?.data?.platforms || [];
@@ -132,7 +141,7 @@ const Dealers = () => {
 
     useEffect(() => {
         fetchDealers();
-    }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.dealer_id, filters.year, filters.month]);
+    }, [filters.search, filters.platform, filters.deviceModel, filters.simType, filters.simValidity, filters.installationStatus, filters.paymentStatus, filters.dealer_id, filters.year, filters.month, filters.date_from, filters.date_to, page, pageSize]);
 
     useEffect(() => {
         refreshPermissions().catch((error) => {
@@ -144,20 +153,15 @@ const Dealers = () => {
         fetchFilterMasters();
     }, []);
 
-    const filteredDealers = filterTableRows(dealers, filters, {
-        dateKeys: ['enrolled_date'],
-        searchKeys: [],
-        searchNestedKeys: []
-    });
+    const updateFilters = (nextFilters) => {
+        setFilters(nextFilters);
+        setPage(1);
+    };
 
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredDealers, 10, [filters]);
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     return (
         <div className="page-container">
@@ -182,9 +186,9 @@ const Dealers = () => {
             <div className="card">
                 <TableFilterBar
                     filters={filters}
-                    onChange={setFilters}
+                    onChange={updateFilters}
                     onReset={() => {
-                        setFilters(emptyTableFilters());
+                        updateFilters(emptyTableFilters());
                         setDealerDropdownResetKey((key) => key + 1);
                     }}
                     onSearch={fetchDealers}
@@ -217,6 +221,7 @@ const Dealers = () => {
                                 <th>Mobile No</th>
                                 <th>Location</th>
                                 <th>Enrolled Date</th>
+                                <th>Status</th>
                                 <th>Installation Status</th>
                                 <th>Software</th>
                                 <th>Device Count</th>
@@ -232,25 +237,30 @@ const Dealers = () => {
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan="14" className="text-center">Loading dealers...</td>
+                                    <td colSpan="15" className="text-center">Loading dealers...</td>
                                 </tr>
                             ) : loadError ? (
                                 <tr>
-                                    <td colSpan="14" className="text-center empty-state">{loadError}</td>
+                                    <td colSpan="15" className="text-center empty-state">{loadError}</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : dealers.length === 0 ? (
                                 <tr>
-                                    <td colSpan="14" className="text-center empty-state">
+                                    <td colSpan="15" className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map(dealer => (
+                                dealers.map(dealer => (
                                     <tr key={dealer.id}>
                                         <td className="truncate-cell" title={dealer.dealer_name}>{dealer.dealer_name}</td>
                                         <td>{dealer.mobile_no}</td>
                                         <td className="truncate-cell" title={dealer.location}>{dealer.location}</td>
                                         <td>{formatDate(dealer.enrolled_date)}</td>
+                                        <td>
+                                            <span className={`badge ${dealer.status === 'inactive' ? 'badge-danger' : 'badge-success'}`}>
+                                                {dealer.status === 'inactive' ? 'Inactive' : 'Active'}
+                                            </span>
+                                        </td>
                                         <td>
                                             <span 
                                                 className={`badge ${dealer.installation_status === 'Not Willing' ? 'badge-danger' : 'badge-info'}`}
@@ -285,10 +295,10 @@ const Dealers = () => {
 
                 <Pagination
                     currentPage={page}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="dealers"
                 />
             </div>
@@ -354,7 +364,7 @@ const Dealers = () => {
                 </Modal>
             )}
             {paymentDealer && <PaymentModal dealer={paymentDealer} onClose={() => setPaymentDealer(null)} onSuccess={() => { setPaymentDealer(null); fetchDealers(); }} />}
-            {viewingDealer && <RecordViewModal isOpen onClose={() => setViewingDealer(null)} title="Dealer Details" record={viewingDealer} fetchRecord={async (dealer) => { const details = (await api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer.id}`)).data.data; return { ...dealer, ...details }; }} fields={[{ label: 'Dealer Name', key: 'dealer_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Installation Status', key: 'installation_status' }, { label: 'Threshold Amount', key: 'threshold_amount', format: (val) => val ? `₹${Number(val).toFixed(2)}` : '-' }, { label: 'Software', key: 'software' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Given Date</th><th>Activation Date</th><th>Validity</th><th>Expiry / Renewal</th><th>Deactivation Date</th><th>SIM Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{formatDate(sim.given_date)}</td><td>{formatDate(sim.activation_date)}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{formatDate(sim.expiry_date)}</td><td>{formatDate(sim.deactivation_date)}</td><td>{sim.sim_status || '-'}</td></tr>)}</tbody></table></div></>} />}
+            {viewingDealer && <RecordViewModal isOpen onClose={() => setViewingDealer(null)} title="Dealer Details" record={viewingDealer} fetchRecord={async (dealer) => { const details = (await api.get(`/stock/owner_details.php?owner_type=dealer&owner_id=${dealer.id}`)).data.data; return { ...dealer, ...details }; }} fields={[{ label: 'Dealer Name', key: 'dealer_name' }, { label: 'Mobile No', key: 'mobile_no' }, { label: 'Location', key: 'location' }, { label: 'Enrolled Date', key: 'enrolled_date' }, { label: 'Status', key: 'status', format: (value) => value === 'inactive' ? 'Inactive' : 'Active' }, { label: 'Installation Status', key: 'installation_status' }, { label: 'Threshold Amount', key: 'threshold_amount', format: (val) => val ? `₹${Number(val).toFixed(2)}` : '-' }, { label: 'Software', key: 'software' }, { label: 'Total Device', key: 'summary', format: (value) => value?.total_device ?? 0 }, { label: 'Used Device', key: 'summary', format: (value) => value?.used_device ?? 0 }, { label: 'Available Device', key: 'summary', format: (value) => value?.available_device ?? 0 }, { label: 'Total SIM', key: 'summary', format: (value) => value?.total_sim ?? 0 }, { label: 'Used SIM', key: 'summary', format: (value) => value?.used_sim ?? 0 }, { label: 'Available SIM', key: 'summary', format: (value) => value?.available_sim ?? 0 }, { label: 'Notes', key: 'notes' }]} renderDetails={(details) => <><h4>Allocated Devices</h4><div className="table-container"><table><thead><tr><th>Device Model</th><th>IMEI No</th><th>Status</th></tr></thead><tbody>{(details.devices || []).map((device) => <tr key={device.allocation_id}><td>{device.model_name}</td><td>{device.imei_no}</td><td>{device.status}</td></tr>)}</tbody></table></div><h4>Allocated SIMs</h4><div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>Given Date</th><th>Activation Date</th><th>Validity</th><th>Expiry / Renewal</th><th>Deactivation Date</th><th>SIM Status</th></tr></thead><tbody>{(details.sims || []).map((sim) => <tr key={sim.allocation_id}><td>{sim.sim_no}</td><td>{sim.sim_type || '-'}</td><td>{formatDate(sim.given_date)}</td><td>{formatDate(sim.activation_date)}</td><td>{sim.sim_validity_months ? `${sim.sim_validity_months} Months` : '-'}</td><td>{formatDate(sim.expiry_date)}</td><td>{formatDate(sim.deactivation_date)}</td><td>{sim.sim_status || '-'}</td></tr>)}</tbody></table></div></>} />}
             {cashDealer && <Modal isOpen onClose={() => setCashDealer(null)} title={`Cash Collections - ${cashDealer.dealer_name}`} maxWidth="1250px" footer={<button type="button" className="btn btn-outline" onClick={() => setCashDealer(null)}>Close</button>}><CustomerCashCollections ownerId={cashDealer.id} recipientType="Dealer" onSaved={fetchDealers} /></Modal>}
         </div>
     );

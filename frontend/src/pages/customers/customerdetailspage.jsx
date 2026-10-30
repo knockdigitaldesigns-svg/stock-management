@@ -30,6 +30,16 @@ const CustomerDetailsPage = () => {
     const [error, setError] = useState('');
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
+    const [masterLocations, setMasterLocations] = useState([]);
+    const [appliedFilters, setAppliedFilters] = useState({
+        search: '',
+        platform: '',
+        location: '',
+        payment_status: '',
+        date_from: '',
+        date_to: ''
+    });
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
 
     const triggerError = (msg) => {
         setError(msg);
@@ -79,15 +89,20 @@ const CustomerDetailsPage = () => {
     // LOAD CUSTOMERS
     // ============================================================
 
-    const loadCustomers = async () => {
+    const loadCustomers = async (targetPage = page, targetPageSize = pageSize, targetFilters = appliedFilters) => {
 
         try {
 
             setLoading(true);
             setError('');
 
-            const response =
-                await api.get('/customers/list.php');
+            const response = await api.get('/customers/list.php', {
+                params: {
+                    ...targetFilters,
+                    page: targetPage,
+                    page_size: targetPageSize
+                }
+            });
 
             if (!response.data?.success) {
 
@@ -120,6 +135,10 @@ const CustomerDetailsPage = () => {
                     }))
                     : []
             );
+            const nextPagination = response.data?.data?.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 };
+            setPagination(nextPagination);
+            setMasterLocations(response.data?.data?.locations || []);
+            if (targetPage > nextPagination.total_pages) setPage(nextPagination.total_pages);
 
         } catch (err) {
 
@@ -157,9 +176,12 @@ const CustomerDetailsPage = () => {
     };
 
     useEffect(() => {
-        loadCustomers();
         loadPlatforms();
     }, []);
+
+    useEffect(() => {
+        loadCustomers(page, pageSize, appliedFilters);
+    }, [page, pageSize, appliedFilters]);
 
 
     // ============================================================
@@ -187,197 +209,17 @@ const CustomerDetailsPage = () => {
 
     const locations = useMemo(() => {
 
-        return [
-            ...new Set(
-                customers
-                    .map(
-                        item =>
-                            item.location ||
-                            ''
-                    )
-                    .filter(Boolean)
-            )
-        ].sort();
+        return masterLocations;
 
-    }, [customers]);
+    }, [masterLocations]);
 
 
     // ============================================================
     // FILTER
     // ============================================================
 
-    const filteredCustomers =
-        useMemo(() => {
-
-            const searchText =
-                search
-                    .trim()
-                    .toLowerCase();
-
-            return customers.filter(
-                item => {
-
-                    const username =
-                        String(
-                            item.username || ''
-                        ).toLowerCase();
-
-                    const mobile =
-                        String(
-                            item.primary_mobile_no ||
-                            item.mobile_no ||
-                            ''
-                        ).toLowerCase();
-
-                    const vehicleSearchValues = (item.vehicles || []).flatMap((vehicle) => [
-                        vehicle.vehicle_no || '',
-                        vehicle.imei_no || ''
-                    ]).map((value) => String(value).toLowerCase());
-
-                    const platform =
-                        String(
-                            item.platform_name ||
-                            item.platform ||
-                            ''
-                        );
-
-                    const location =
-                        String(
-                            item.location ||
-                            ''
-                        );
-
-                    const paymentStatus =
-                        String(
-                            item.payment_status ||
-                            'Pending'
-                        );
-
-
-                    const matchesSearch =
-                        !searchText ||
-                        username.includes(searchText) ||
-                        mobile.includes(searchText) ||
-                        vehicleSearchValues.some((value) => value.includes(searchText));
-
-
-                    const matchesPlatform =
-                        !platformFilter ||
-                        platform === platformFilter;
-
-
-                    const matchesLocation =
-                        !locationFilter ||
-                        location === locationFilter;
-
-
-                    let matchesPayment = true;
-
-                    if (paymentFilter) {
-
-                        if (
-                            paymentFilter ===
-                            'Pending'
-                        ) {
-
-                            matchesPayment =
-                                paymentStatus === 'Pending' ||
-                                paymentStatus === 'Not Paid' ||
-                                paymentStatus === 'Partially Paid';
-
-                        } else {
-
-                            matchesPayment =
-                                paymentStatus ===
-                                paymentFilter;
-
-                        }
-                    }
-
-
-                    const recordDate =
-                        String(
-                            item.installation_date ||
-                            item.created_at ||
-                            ''
-                        ).slice(0, 10);
-
-
-                    const matchesFrom =
-                        !dateFrom ||
-                        recordDate >= dateFrom;
-
-
-                    const matchesTo =
-                        !dateTo ||
-                        recordDate <= dateTo;
-
-
-                    return (
-                        matchesSearch &&
-                        matchesPlatform &&
-                        matchesLocation &&
-                        matchesPayment &&
-                        matchesFrom &&
-                        matchesTo
-                    );
-                }
-            );
-
-        }, [
-            customers,
-            search,
-            platformFilter,
-            locationFilter,
-            paymentFilter,
-            dateFrom,
-            dateTo
-        ]);
-
-
-    // ============================================================
-    // PAGINATION
-    // ============================================================
-
-    const totalPages =
-        Math.max(
-            1,
-            Math.ceil(
-                filteredCustomers.length /
-                pageSize
-            )
-        );
-
-    const currentPage =
-        Math.min(
-            page,
-            totalPages
-        );
-
-    const startIndex =
-        (currentPage - 1) *
-        pageSize;
-
-    const paginatedCustomers =
-        filteredCustomers.slice(
-            startIndex,
-            startIndex + pageSize
-        );
-
-
-    useEffect(() => {
-
-        setPage(1);
-
-    }, [
-        search,
-        platformFilter,
-        locationFilter,
-        paymentFilter,
-        dateFrom,
-        dateTo,
-        pageSize
-    ]);
+    const filteredCustomers = customers;
+    const paginatedCustomers = customers;
 
 
     // ============================================================
@@ -392,8 +234,33 @@ const CustomerDetailsPage = () => {
         setPaymentFilter('');
         setDateFrom('');
         setDateTo('');
+        setAppliedFilters({
+            search: '',
+            platform: '',
+            location: '',
+            payment_status: '',
+            date_from: '',
+            date_to: ''
+        });
         setPage(1);
 
+    };
+
+    const handleSearch = () => {
+        setAppliedFilters({
+            search,
+            platform: platformFilter,
+            location: locationFilter,
+            payment_status: paymentFilter,
+            date_from: dateFrom,
+            date_to: dateTo
+        });
+        setPage(1);
+    };
+
+    const handlePageSizeChange = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
     };
 
 
@@ -573,9 +440,20 @@ const CustomerDetailsPage = () => {
     // EXPORT
     // ============================================================
 
-    const handleExport = () => {
+    const handleExport = async () => {
+        let exportCustomers = [];
+        try {
+            const response = await api.get('/customers/list.php', { params: appliedFilters });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to export customer records.');
+            }
+            exportCustomers = response.data?.data?.customers || [];
+        } catch (exportError) {
+            triggerError(exportError.response?.data?.message || exportError.message || 'Failed to export customer records.');
+            return;
+        }
 
-        if (!filteredCustomers.length) {
+        if (!exportCustomers.length) {
 
             window.alert(
                 'No customer records available to export.'
@@ -619,7 +497,7 @@ const CustomerDetailsPage = () => {
             'Payment Status'
         ];
 
-        const rows = filteredCustomers.flatMap((item) => {
+        const rows = exportCustomers.flatMap((item) => {
             const vehicles = item.vehicles?.length ? item.vehicles : [{}];
             return vehicles.map((vehicle) => [
                 item.username || '',
@@ -952,7 +830,7 @@ const CustomerDetailsPage = () => {
                     </div>
 
                     <div className="table-filter-actions">
-                        <button type="button" className="btn btn-primary" onClick={() => setPage(1)}>
+                        <button type="button" className="btn btn-primary" onClick={handleSearch}>
                             <Search size={16} /> Search
                         </button>
                         <button type="button" className="btn btn-secondary" onClick={handleReset}>
@@ -1046,9 +924,9 @@ const CustomerDetailsPage = () => {
                 <Pagination
                     currentPage={page}
                     pageSize={pageSize}
-                    totalItems={filteredCustomers.length}
+                    totalItems={pagination.total}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={handlePageSizeChange}
                     itemName="entries"
                 />
             </div>

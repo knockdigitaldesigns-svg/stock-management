@@ -15,10 +15,23 @@ import {
 import api from '../../services/api';
 import { showGlobalError } from '../../context/ErrorContext';
 import { useAuth } from '../../context/AuthContext';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
 import {
     commitCustomerSubmission,
     saveCustomerDraft
 } from '../../utils/customerSubmission';
+import {
+    getCustomerFieldErrors,
+    sanitizeCustomerField,
+    validateCustomerForm
+} from '../../utils/customerValidation';
+import {
+    installationTypes,
+    isInstallationDetailsComplete,
+    isInstallationPersonRequired,
+    mergeVehicleDraft
+} from '../../utils/installationValidation';
+import { normalizeCurrency } from '../../utils/paymentValidation';
 
 const sectionCardStyle = {
     background: '#fff',
@@ -47,21 +60,6 @@ const inputStyle = {
     fontSize: '14px',
     background: '#fff'
 };
-
-const paymentModes = [
-    'ET Gpay',
-    'ET Phonepe',
-    'ET Paytm',
-    'ET Account',
-    '8002 Gpay',
-    '8002 Phonepe',
-    '8002 Paytm',
-    'Wati Gpay',
-    'Wati Phonepe',
-    'Wati Paytm',
-    'PG Gateway',
-    'Cash'
-];
 
 const changedVehicleFieldCategories = {
     vehicle: new Set([
@@ -119,8 +117,8 @@ const getPaymentPart2Summary = (vehicle) => {
         vehicle.vehicle_technician_charge,
         vehicle.vehicle_sim_charge,
         vehicle.vehicle_courier_charge
-    ].reduce((total, charge) => total + (Number(charge) || 0), 0);
-    const amountPaid = Number(vehicle.vehicle_amount_paid) || 0;
+    ].reduce((total, charge) => total + normalizeCurrency(charge), 0);
+    const amountPaid = normalizeCurrency(vehicle.vehicle_amount_paid);
 
     return {
         chargeTotal,
@@ -144,29 +142,35 @@ const hasCompletedPaymentPart2 = (vehicle) => {
         && Math.abs(totalAmount - totalSaleAmount) <= 0.005;
 };
 
-const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, step, maxLength }) => (
+const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, max, step, maxLength, inputMode, id, error, onBlur }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         <input
+            id={id}
             type={type}
             value={value ?? ''}
             onChange={(event) => onChange(digitsOnly ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value)}
-            inputMode={digitsOnly ? 'numeric' : undefined}
+            onBlur={onBlur}
+            inputMode={digitsOnly ? 'numeric' : inputMode}
             maxLength={maxLength ?? (digitsOnly ? 6 : undefined)}
             pattern={digitsOnly ? '[0-9]{6}' : undefined}
             min={min}
+            max={max}
             step={step}
             style={inputStyle}
         />
+        {error && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {error}</small>}
     </div>
 );
 
-const EditSelect = ({ label, value, onChange, options, getValue, getLabel, placeholder = 'Select' }) => (
+const EditSelect = ({ label, value, onChange, options, getValue, getLabel, placeholder = 'Select', id, error, onBlur }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         <select
+            id={id}
             value={value ?? ''}
             onChange={(event) => onChange(event.target.value)}
+            onBlur={onBlur}
             style={inputStyle}
         >
             <option value="">{placeholder}</option>
@@ -176,6 +180,7 @@ const EditSelect = ({ label, value, onChange, options, getValue, getLabel, place
                 </option>
             ))}
         </select>
+        {error && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {error}</small>}
     </div>
 );
 
@@ -193,7 +198,9 @@ const CustomerViewPage = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-    const [originalUsername, setOriginalUsername] = useState('');
+    const [validationAttempted, setValidationAttempted] = useState(false);
+    const [touchedFields, setTouchedFields] = useState({});
+    const [assetValidationErrors, setAssetValidationErrors] = useState({});
     const [customerChanged, setCustomerChanged] = useState(false);
     const [changedVehicles, setChangedVehicles] = useState({});
     const [verificationDraftId, setVerificationDraftId] = useState(0);
@@ -207,6 +214,7 @@ const CustomerViewPage = () => {
         vehicleTypes: [],
         deviceTypes: [],
         validities: [],
+        saleAmounts: [],
         technicians: [],
         dealers: [],
         leadClosures: []
@@ -253,7 +261,6 @@ const CustomerViewPage = () => {
             }
 
             const data = response.data?.data || {};
-            setOriginalUsername(String(data.customer?.username || '').trim());
             const vehicles = Array.isArray(data.vehicles)
                 ? data.vehicles
                 : data.vehicle
@@ -276,11 +283,16 @@ const CustomerViewPage = () => {
                 const savedVehicle = resumedVehicles.find(
                     (item) => Number(item.vehicle_record_id || item.id) === Number(vehicle.id)
                 );
-                return savedVehicle ? { ...vehicle, ...savedVehicle } : vehicle;
+                return mergeVehicleDraft(vehicle, savedVehicle);
             });
             setCustomerData({
                 customer: data.customer
-                    ? { ...data.customer, ...(resumedData?.customer || {}), vehicles: hydratedVehicles }
+                    ? {
+                        ...data.customer,
+                        status: data.customer.status || 'Active',
+                        ...(resumedData?.customer || {}),
+                        vehicles: hydratedVehicles
+                    }
                     : null,
                 vehicles: hydratedVehicles,
                 installation: data.installation || null,
@@ -353,7 +365,12 @@ const CustomerViewPage = () => {
 
                 const list = (response, key) => response.data?.data?.[key] || [];
                 setMasterData({
-                    platforms: list(platformsResponse, 'platforms'),
+                    platforms: list(platformsResponse, 'platforms').filter((item) =>
+                        item?.status === undefined ||
+                        item?.status === null ||
+                        item?.status === '' ||
+                        String(item.status).toLowerCase() === 'active'
+                    ),
                     vehicleTypes: list(vehicleTypesResponse, 'vehicle_types'),
                     deviceTypes: list(deviceTypesResponse, 'device_types'),
                     validities: list(validitiesResponse, 'validities'),
@@ -361,6 +378,20 @@ const CustomerViewPage = () => {
                     dealers: list(dealersResponse, 'dealers'),
                     leadClosures: list(leadClosuresResponse, 'lead_closures')
                 });
+                try {
+                    const saleAmountsResponse = await api.get('/sale_amounts/list.php');
+                    setMasterData((previous) => ({
+                        ...previous,
+                        saleAmounts: list(saleAmountsResponse, 'sale_amounts')
+                    }));
+                } catch (saleAmountError) {
+                    console.error('Customer edit sale amount loading error:', saleAmountError);
+                    triggerError(
+                        saleAmountError.response?.data?.message ||
+                        saleAmountError.message ||
+                        'Failed to load sale amount options.'
+                    );
+                }
             } catch (err) {
                 console.error('Customer edit master data loading error:', err);
                 triggerError(
@@ -376,16 +407,25 @@ const CustomerViewPage = () => {
 
     const updateCustomerField = (field, value) => {
         setCustomerChanged(true);
+        setError('');
         setCustomerData((previous) => ({
             ...previous,
             customer: {
                 ...(previous.customer || {}),
-                [field]: value
+                [field]: sanitizeCustomerField(field, value)
             }
         }));
     };
 
     const updateVehicleField = (vehicleId, field, value) => {
+        let updatedValue = value;
+        if (field === 'vehicle_no') updatedValue = value.toUpperCase().replace(/^\s+/, '').slice(0, 20);
+        if (field === 'imei_no') updatedValue = value.replace(/\D/g, '').slice(0, 15);
+        if (field === 'sim_no_1' || field === 'sim_no_2') updatedValue = value.replace(/\D/g, '').slice(0, 13);
+        setError('');
+        if (['imei_no', 'sim_no_1', 'sim_no_2'].includes(field)) {
+            setAssetValidationErrors((previous) => ({ ...previous, [field]: '' }));
+        }
         const category = Object.entries(changedVehicleFieldCategories)
             .find(([, fields]) => fields.has(field))?.[0];
         if (category) {
@@ -402,10 +442,250 @@ const CustomerViewPage = () => {
             ...previous,
             vehicles: previous.vehicles.map((vehicle) =>
                 Number(vehicle.id) === Number(vehicleId)
-                    ? { ...vehicle, [field]: value }
+                    ? { ...vehicle, [field]: updatedValue }
                     : vehicle
             )
         }));
+    };
+
+    const markFieldTouched = (field) => {
+        setTouchedFields((previous) => ({ ...previous, [field]: true }));
+    };
+
+    const fieldPresentation = (field, validationErrors) => ({
+        id: `edit-field-${field}`,
+        error: validationAttempted || touchedFields[field]
+            ? assetValidationErrors[field] || validationErrors[field] || ''
+            : '',
+        onBlur: () => markFieldTouched(field)
+    });
+
+    const getActiveStepErrors = () => {
+        const customer = customerData.customer || {};
+        const vehicle = selectedEditVehicle || {};
+        if (activeEditStep === 1) {
+            return getCustomerFieldErrors(customer, true, true);
+        }
+        if (activeEditStep === 2) {
+            return {
+                vehicle_no: String(vehicle.vehicle_no || '').trim() ? '' : 'Vehicle No is required.',
+                vehicle_type_id: vehicle.vehicle_type_id ? '' : 'Please select Vehicle Type.',
+                imei_no: !vehicle.imei_no
+                    ? 'IMEI No is required.'
+                    : !/^\d{15}$/.test(String(vehicle.imei_no))
+                        ? 'IMEI No must contain exactly 15 digits.'
+                        : '',
+                sim_no_1: !vehicle.sim_no_1
+                    ? 'SIM No 1 is required.'
+                    : !/^(?:\d{10}|\d{13})$/.test(String(vehicle.sim_no_1))
+                        ? 'SIM No 1 must contain exactly 10 or 13 digits.'
+                        : '',
+                sim_no_2: vehicle.sim_no_2 && !/^(?:\d{10}|\d{13})$/.test(String(vehicle.sim_no_2))
+                    ? 'SIM No 2 must contain exactly 10 or 13 digits.'
+                    : vehicle.sim_no_2 && vehicle.sim_no_2 === vehicle.sim_no_1
+                        ? 'SIM No 1 and SIM No 2 cannot be the same.'
+                        : '',
+                device_model_id: vehicle.device_model_id ? '' : 'Please select Device Model.',
+                validity_id: vehicle.validity_id ? '' : 'Please select Validity.'
+            };
+        }
+        if (activeEditStep === 3) {
+            const type = vehicle.vehicle_installation_type || '';
+            const requiresInstallationPerson = isInstallationPersonRequired(type);
+            const deviceOwner = vehicle.device_owner_type && vehicle.device_owner_id
+                ? { type: String(vehicle.device_owner_type).toLowerCase(), id: Number(vehicle.device_owner_id) }
+                : null;
+            const simOwner = vehicle.sim_owner_type && vehicle.sim_owner_id
+                ? { type: String(vehicle.sim_owner_type).toLowerCase(), id: Number(vehicle.sim_owner_id) }
+                : null;
+            const ownerMismatch = deviceOwner && simOwner
+                && (deviceOwner.type !== simOwner.type || deviceOwner.id !== simOwner.id);
+            const date = String(vehicle.vehicle_installation_date || '');
+            let dateError = date ? '' : 'Installation Date is required.';
+            if (date) {
+                const [year, month, day] = date.split('-').map(Number);
+                const selectedDate = new Date(year, month - 1, day);
+                const today = new Date();
+                selectedDate.setHours(0, 0, 0, 0);
+                today.setHours(0, 0, 0, 0);
+                if (
+                    selectedDate.getFullYear() !== year ||
+                    selectedDate.getMonth() !== month - 1 ||
+                    selectedDate.getDate() !== day
+                ) dateError = 'Invalid Installation Date.';
+                else if (selectedDate > today) dateError = 'Future dates are not allowed.';
+            }
+            return {
+                vehicle_installation_type: ownerMismatch
+                    ? 'Device and SIM are allocated to different persons. Please use Stock Transfer to move them to the same person before installation.'
+                    : type ? '' : 'Installation Type is required.',
+                vehicle_installation_person_id: type && requiresInstallationPerson && !vehicle.vehicle_installation_person_id
+                    ? `${type === 'Technician' ? 'Technician' : type} is required.`
+                    : '',
+                vehicle_installation_date: dateError,
+                vehicle_lead_closure_id: vehicle.vehicle_lead_closure_id ? '' : 'Lead Closure By is required.'
+            };
+        }
+        if (activeEditStep === 4) {
+            const amount = Number(vehicle.vehicle_total_sale_amount);
+            const transactionId = String(vehicle.vehicle_transaction_id || '');
+            const paymentMode = String(vehicle.vehicle_payment_mode || '');
+            return {
+                vehicle_total_sale_amount: !vehicle.vehicle_total_sale_amount
+                    ? 'Total Sale Amount is required.'
+                    : !Number.isFinite(amount) || amount <= 0
+                        ? 'Invalid Total Sale Amount.'
+                        : '',
+                vehicle_transaction_id: transactionId && !/^\d{6}$/.test(transactionId)
+                    ? 'Transaction ID must contain exactly 6 digits.'
+                        : '',
+                vehicle_payment_mode: transactionId && !paymentMode
+                        ? 'Payment Mode is required when Transaction ID is entered.'
+                        : !paymentMode
+                            ? 'Please select Payment Mode before continuing to Payment Part 2.'
+                        : !transactionId && paymentMode && paymentMode !== 'Cash'
+                            ? 'Transaction ID is required for this payment mode.'
+                            : ''
+            };
+        }
+        if (activeEditStep === 5) {
+            const saleAmount = Number(vehicle.vehicle_total_sale_amount) || 0;
+            const chargeFields = [
+                ['vehicle_device_charge', 'Device Charge'],
+                ['vehicle_software_charge', 'Software Charge'],
+                ['vehicle_technician_charge', 'Technician Charge'],
+                ['vehicle_sim_charge', 'SIM Charge'],
+                ['vehicle_courier_charge', 'Courier Charge']
+            ];
+            const chargeTotal = chargeFields.reduce((total, [field]) => total + normalizeCurrency(vehicle[field]), 0);
+            const amountPaid = normalizeCurrency(vehicle.vehicle_amount_paid);
+            const saleLabel = `₹${saleAmount.toLocaleString('en-IN')}`;
+            const totalMismatch = saleAmount > 0
+                ? chargeTotal > saleAmount
+                    ? `Total charges cannot exceed Total Sale Amount of ${saleLabel}.`
+                    : Math.abs(chargeTotal - saleAmount) > 0.005
+                        ? `Total charges must equal Total Sale Amount of ${saleLabel}.`
+                        : ''
+                : '';
+            const errors = {
+                vehicle_total_amount: saleAmount <= 0
+                    ? 'Please complete Payment Details Part 1 first.'
+                    : totalMismatch
+            };
+            Object.assign(errors, Object.fromEntries(chargeFields.map(([field, label]) => [
+                field,
+                saleAmount > 0 && normalizeCurrency(vehicle[field]) > saleAmount
+                    ? `${label} cannot exceed Total Sale Amount of ${saleLabel}.`
+                    : ''
+            ])));
+            errors.vehicle_amount_paid = vehicle.vehicle_payment_mode
+                && (vehicle.vehicle_amount_paid === '' || vehicle.vehicle_amount_paid === null || vehicle.vehicle_amount_paid === undefined)
+                    ? 'Please enter Amount Paid.'
+                    : amountPaid < 0
+                        ? 'Amount Paid cannot be negative.'
+                        : amountPaid > chargeTotal
+                            ? `Amount Paid cannot exceed Total Amount of ₹${chargeTotal.toLocaleString('en-IN')}.`
+                            : '';
+            return errors;
+        }
+        return {};
+    };
+
+    const getFirstActiveStepError = () => {
+        if (activeEditStep === 1) {
+            const customer = customerData.customer || {};
+            const validationError = validateCustomerForm(customer, true);
+            if (validationError) {
+                const fieldError = Object.entries(getCustomerFieldErrors(customer, true, true))
+                    .find(([, message]) => message === validationError);
+                return fieldError || ['platform_id', validationError];
+            }
+            return null;
+        }
+        const errors = getActiveStepErrors();
+        return Object.entries(errors).find(([, message]) => message);
+    };
+
+    const focusInvalidField = (field) => {
+        const element = document.getElementById(`edit-field-${field}`);
+        element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element?.focus();
+    };
+
+    const validateVehicleAvailability = async () => {
+        const vehicle = selectedEditVehicle;
+        if (!vehicle) return {};
+        const errors = {};
+        const vehicleId = encodeURIComponent(vehicle.id);
+        if (vehicle.imei_no) {
+            try {
+                const response = await api.get(
+                    `/devices/get_by_imei.php?imei=${encodeURIComponent(vehicle.imei_no)}&customer_id=${encodeURIComponent(customerId)}&vehicle_id=${vehicleId}`
+                );
+                const device = response.data?.data || response.data?.device || {};
+                if (!response.data?.success || !device.id) {
+                    errors.imei_no = response.data?.message || 'IMEI not found in device stock.';
+                } else {
+                    const status = String(device.status || '').toLowerCase();
+                    const ownerType = String(device.owner_type || '').toLowerCase();
+                    const ownerStatus = String(device.owner_installation_status || '').toLowerCase();
+                    const eligibleOwner = Number(device.owner_id) > 0 && (
+                        ownerType === 'technician' ||
+                        (ownerType === 'dealer' && ['onsite', 'offsite'].includes(ownerStatus))
+                    );
+                    if (device.is_assigned_to_another_customer) {
+                        errors.imei_no = 'IMEI is already assigned to another customer.';
+                    } else if (status === 'used' && !device.is_assigned_to_current_customer) {
+                        errors.imei_no = 'IMEI is already used and cannot be assigned again.';
+                    } else if (
+                        !device.is_assigned_to_current_customer &&
+                        status !== 'available' &&
+                        !(status === 'allocated' && eligibleOwner)
+                    ) {
+                        errors.imei_no = 'This IMEI is not available for allocation.';
+                    } else if (device.device_model_id && String(vehicle.device_model_id) !== String(device.device_model_id)) {
+                        updateVehicleField(vehicle.id, 'device_model_id', String(device.device_model_id));
+                    }
+                }
+            } catch (requestError) {
+                errors.imei_no = requestError.response?.data?.message || requestError.message || 'IMEI not found in device stock.';
+            }
+        }
+
+        for (const [field, label] of [['sim_no_1', 'SIM No 1'], ['sim_no_2', 'SIM No 2']]) {
+            const simNo = String(vehicle[field] || '').trim();
+            if (!simNo) continue;
+            try {
+                const response = await api.get(
+                    `/sims/list.php?search=${encodeURIComponent(simNo)}&customer_id=${encodeURIComponent(customerId)}&vehicle_id=${vehicleId}`
+                );
+                const sims = response.data?.data?.sims || [];
+                const sim = sims.find((item) => String(item.sim_no) === simNo);
+                const status = String(sim?.status || '').toLowerCase();
+                if (!sim) {
+                    errors[field] = `${label} does not exist in SIM Maintenance.`;
+                } else if (sim.is_assigned_to_current_customer && !sim.is_assigned_to_another_customer) {
+                    continue;
+                } else if (status === 'used') {
+                    errors[field] = 'SIM is already used and cannot be assigned again.';
+                } else if (sim.is_assigned_to_another_customer) {
+                    errors[field] = 'SIM is already assigned to another customer.';
+                } else {
+                    const ownerType = String(sim.owner_type || '').toLowerCase();
+                    const ownerStatus = String(sim.owner_installation_status || '').toLowerCase();
+                    const eligibleOwner = Number(sim.owner_id) > 0 && (
+                        ownerType === 'technician' ||
+                        (ownerType === 'dealer' && ['onsite', 'offsite'].includes(ownerStatus))
+                    );
+                    if (status !== 'available' && !(status === 'allocated' && eligibleOwner)) {
+                        errors[field] = `${label} is not available for allocation.`;
+                    }
+                }
+            } catch {
+                errors[field] = `${label} does not exist in SIM Maintenance.`;
+            }
+        }
+        return errors;
     };
 
     const updatePaymentPart2Field = (vehicleId, field, value) => {
@@ -473,39 +753,27 @@ const CustomerViewPage = () => {
 
     const handleSave = async ({ advance = false, navigateToStep = null } = {}) => {
         const customer = customerData.customer || {};
-        if (customerChanged && String(customer.username || '').trim() !== originalUsername) {
-            const username = String(customer.username || '').trim();
-            if (!username) {
-                triggerError('Username is required.');
+        const shouldValidateStep = advance ||
+            (navigateToStep !== null && navigateToStep > activeEditStep) ||
+            (navigateToStep === null && activeEditStep === 5);
+        if (shouldValidateStep) {
+            setValidationAttempted(true);
+            const firstError = getFirstActiveStepError();
+            if (firstError) {
+                triggerError(firstError[1]);
+                focusInvalidField(firstError[0]);
                 return false;
             }
-            if (username.length > 100) {
-                triggerError('Username must not exceed 100 characters.');
-                return false;
-            }
-            if (!/^[a-zA-Z0-9.@_-]+$/.test(username)) {
-                triggerError('Username can contain only letters, numbers, @, dot, underscore and hyphen.');
-                return false;
-            }
-        }
-        if (!advance && navigateToStep === null) {
-            for (const vehicle of vehicles) {
-                if (!changedVehicles[vehicle.id]?.paymentPart2) {
-                    continue;
-                }
-
-                const summary = getPaymentPart2Summary(vehicle);
-                const totalSaleAmount = Number(vehicle.vehicle_total_sale_amount) || 0;
-                if (totalSaleAmount <= 0 || Math.abs(summary.chargeTotal - totalSaleAmount) > 0.005) {
-                    triggerError(`Total charges must equal Total Sale Amount of ₹${totalSaleAmount.toLocaleString('en-IN')}.`);
-                    return false;
-                }
-                if (summary.amountPaid > summary.chargeTotal) {
-                    triggerError(`Amount Paid cannot exceed Total Amount of ₹${summary.chargeTotal.toLocaleString('en-IN')}.`);
-                    return false;
-                }
-                if (summary.amountPaid < 0) {
-                    triggerError('Amount Paid cannot be negative.');
+            setAssetValidationErrors({});
+            if (activeEditStep === 2) {
+                setSaving(true);
+                const errors = await validateVehicleAvailability();
+                setSaving(false);
+                setAssetValidationErrors(errors);
+                const assetError = Object.entries(errors).find(([, message]) => message);
+                if (assetError) {
+                    triggerError(assetError[1]);
+                    focusInvalidField(assetError[0]);
                     return false;
                 }
             }
@@ -530,12 +798,16 @@ const CustomerViewPage = () => {
                     const changed = changedVehicles[vehicle.id] || {};
                     const installationValues = [
                         vehicle.vehicle_installation_type,
-                        vehicle.vehicle_installation_person_id,
                         vehicle.vehicle_lead_closure_id,
                         vehicle.vehicle_installation_date
                     ];
                     const hasInstallationData = installationValues.some((value) => value !== null && value !== undefined && value !== '');
-                    const hasCompleteInstallation = installationValues.every((value) => value !== null && value !== undefined && value !== '');
+                    const hasCompleteInstallation = isInstallationDetailsComplete({
+                        installation_person_type: vehicle.vehicle_installation_type,
+                        installation_person_id: vehicle.vehicle_installation_person_id,
+                        lead_closure_id: vehicle.vehicle_lead_closure_id,
+                        installation_date: vehicle.vehicle_installation_date
+                    });
                     if (changed.installation && hasInstallationData && !hasCompleteInstallation) {
                         throw new Error(`Complete all installation fields for ${vehicle.vehicle_no || 'the vehicle'}.`);
                     }
@@ -549,7 +821,9 @@ const CustomerViewPage = () => {
                         changed,
                         installation: changed.installation && hasCompleteInstallation ? {
                             installation_person_type: vehicle.vehicle_installation_type,
-                            installation_person_id: Number(vehicle.vehicle_installation_person_id),
+                            installation_person_id: vehicle.vehicle_installation_person_id
+                                ? Number(vehicle.vehicle_installation_person_id)
+                                : null,
                             lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
                             installation_date: vehicle.vehicle_installation_date
                         } : null,
@@ -562,17 +836,17 @@ const CustomerViewPage = () => {
                             total_sale_amount: saleAmount,
                             transaction_id: vehicle.vehicle_transaction_id || '',
                             payment_mode: vehicle.vehicle_payment_mode || '',
-                            device_charge: Number(vehicle.vehicle_device_charge || 0),
-                            software_charge: Number(vehicle.vehicle_software_charge || 0),
-                            technician_charge: Number(vehicle.vehicle_technician_charge || 0),
-                            sim_charge: Number(vehicle.vehicle_sim_charge || 0),
-                            courier_charge: Number(vehicle.vehicle_courier_charge || 0),
+                            device_charge: normalizeCurrency(vehicle.vehicle_device_charge),
+                            software_charge: normalizeCurrency(vehicle.vehicle_software_charge),
+                            technician_charge: normalizeCurrency(vehicle.vehicle_technician_charge),
+                            sim_charge: normalizeCurrency(vehicle.vehicle_sim_charge),
+                            courier_charge: normalizeCurrency(vehicle.vehicle_courier_charge),
                             cash_to_technician: vehicle.vehicle_cash_recipient_type === 'Technician',
                             cash_to_dealer: vehicle.vehicle_cash_recipient_type === 'Dealer',
                             cash_to_et: vehicle.vehicle_cash_recipient_type === 'ET',
-                            total_amount: Number(vehicle.vehicle_total_amount || 0),
-                            amount_paid: Number(vehicle.vehicle_amount_paid || 0),
-                            amount_pending: Number(vehicle.vehicle_amount_pending || 0),
+                            total_amount: getPaymentPart2Summary(vehicle).chargeTotal,
+                            amount_paid: normalizeCurrency(vehicle.vehicle_amount_paid),
+                            amount_pending: getPaymentPart2Summary(vehicle).amountPending,
                             payment_status: vehicle.vehicle_payment_status || 'Not Paid'
                         } : null
                     };
@@ -640,9 +914,15 @@ const CustomerViewPage = () => {
             if (advance && activeEditStep < 5) {
                 setSuccess(savedDraftId > 0 ? 'Changes saved as a draft.' : 'No changes to save.');
                 setActiveEditStep((step) => step + 1);
+                setValidationAttempted(false);
+                setTouchedFields({});
+                setAssetValidationErrors({});
             } else if (navigateToStep !== null) {
                 setSuccess(savedDraftId > 0 ? 'Changes saved as a draft.' : '');
                 setActiveEditStep(navigateToStep);
+                setValidationAttempted(false);
+                setTouchedFields({});
+                setAssetValidationErrors({});
             } else {
                 if (!verificationPayment) {
                     setSuccess('Customer details updated successfully.');
@@ -680,6 +960,9 @@ const CustomerViewPage = () => {
         }
         if (await loadCustomerDetails()) {
             setActiveEditStep(previousStep);
+            setValidationAttempted(false);
+            setTouchedFields({});
+            setAssetValidationErrors({});
         }
     };
 
@@ -700,17 +983,52 @@ const CustomerViewPage = () => {
             return;
         }
 
+        if (step > activeEditStep) {
+            setValidationAttempted(true);
+            const firstError = getFirstActiveStepError();
+            if (firstError) {
+                triggerError(firstError[1]);
+                focusInvalidField(firstError[0]);
+                return;
+            }
+            if (activeEditStep === 2) {
+                setSaving(true);
+                const errors = await validateVehicleAvailability();
+                setSaving(false);
+                setAssetValidationErrors(errors);
+                const assetError = Object.entries(errors).find(([, message]) => message);
+                if (assetError) {
+                    triggerError(assetError[1]);
+                    focusInvalidField(assetError[0]);
+                    return;
+                }
+            }
+        }
+
         setActiveEditStep(step);
+        setValidationAttempted(false);
+        setTouchedFields({});
+        setAssetValidationErrors({});
         setError('');
         setSuccess('');
     };
 
     const customer = customerData.customer || {};
+    const activeStepErrors = isEditMode ? getActiveStepErrors() : {};
     const existingOption = (options, id, labelKey, value = 'Unknown') => {
         if (!id || options.some((option) => String(option.id) === String(id))) {
             return options;
         }
         return [...options, { id, [labelKey]: value }];
+    };
+    const getSaleAmountOptions = (value) => {
+        const options = masterData.saleAmounts.filter((item) =>
+            !item.status || String(item.status).toLowerCase() === 'active'
+        );
+        if (value && !options.some((item) => Number(item.sale_amount) === Number(value))) {
+            options.push({ id: `saved-${value}`, sale_amount: value, status: 'Inactive' });
+        }
+        return options;
     };
 
     if (!isEditMode) {
@@ -952,7 +1270,12 @@ const CustomerViewPage = () => {
                                 key={vehicle.id}
                                 type="button"
                                 className={String(selectedEditVehicleId) === String(vehicle.id) ? 'btn btn-primary' : 'btn btn-secondary'}
-                                onClick={() => setSelectedEditVehicleId(vehicle.id)}
+                                onClick={() => {
+                                    setSelectedEditVehicleId(vehicle.id);
+                                    setValidationAttempted(false);
+                                    setTouchedFields({});
+                                    setAssetValidationErrors({});
+                                }}
                             >
                                 Vehicle {index + 1} - {vehicle.vehicle_no || 'No vehicle number'}
                             </button>
@@ -1036,7 +1359,7 @@ const CustomerViewPage = () => {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                             {isEditMode ? (
                                 <>
-                                    <EditField label="Username" value={customer.username} onChange={(value) => updateCustomerField('username', value)} maxLength={100} />
+                                    <EditField label="Username" value={customer.username} onChange={(value) => updateCustomerField('username', value)} maxLength={100} {...fieldPresentation('username', activeStepErrors)} />
                                     <EditSelect
                                         label="Platform"
                                         value={customer.platform_id}
@@ -1044,13 +1367,22 @@ const CustomerViewPage = () => {
                                         options={existingOption(masterData.platforms, customer.platform_id, 'platform_name', customer.platform_name)}
                                         getValue={(option) => option.id}
                                         getLabel={(option) => option.platform_name}
+                                        {...fieldPresentation('platform_id', activeStepErrors)}
                                     />
-                                    <EditField label="Primary Mobile" value={customer.primary_mobile_no} onChange={(value) => updateCustomerField('primary_mobile_no', value)} />
-                                    <EditField label="Secondary Mobile" value={customer.secondary_mobile_no} onChange={(value) => updateCustomerField('secondary_mobile_no', value)} />
-                                    <EditField label="Email" value={customer.email} onChange={(value) => updateCustomerField('email', value)} />
-                                    <EditField label="Location" value={customer.location} onChange={(value) => updateCustomerField('location', value)} />
-                                    <EditField label="Pincode" value={customer.pincode} onChange={(value) => updateCustomerField('pincode', value)} />
-                                    <EditField label="Status" value={customer.status} onChange={(value) => updateCustomerField('status', value)} />
+                                    <EditField label="Primary Mobile" value={customer.primary_mobile_no} onChange={(value) => updateCustomerField('primary_mobile_no', value)} inputMode="numeric" maxLength={10} {...fieldPresentation('primary_mobile_no', activeStepErrors)} />
+                                    <EditField label="Secondary Mobile" value={customer.secondary_mobile_no} onChange={(value) => updateCustomerField('secondary_mobile_no', value)} inputMode="numeric" maxLength={10} {...fieldPresentation('secondary_mobile_no', activeStepErrors)} />
+                                    <EditField label="Email" value={customer.email} onChange={(value) => updateCustomerField('email', value)} type="email" maxLength={150} {...fieldPresentation('email', activeStepErrors)} />
+                                    <EditField label="Location" value={customer.location} onChange={(value) => updateCustomerField('location', value)} maxLength={150} {...fieldPresentation('location', activeStepErrors)} />
+                                    <EditField label="Pincode" value={customer.pincode} onChange={(value) => updateCustomerField('pincode', value)} inputMode="numeric" maxLength={6} {...fieldPresentation('pincode', activeStepErrors)} />
+                                    <EditSelect
+                                        label="Status"
+                                        value={customer.status}
+                                        onChange={(value) => updateCustomerField('status', value)}
+                                        options={['Active', 'Inactive']}
+                                        getValue={(option) => option}
+                                        getLabel={(option) => option}
+                                        {...fieldPresentation('status', activeStepErrors)}
+                                    />
                                 </>
                             ) : (
                                 <>
@@ -1091,7 +1423,7 @@ const CustomerViewPage = () => {
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                                 {isEditMode ? (
                                     <>
-                                        <EditField label="Vehicle No" value={vehicle.vehicle_no} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_no', value)} />
+                                        <EditField label="Vehicle No" value={vehicle.vehicle_no} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_no', value)} maxLength={20} {...fieldPresentation('vehicle_no', activeStepErrors)} />
                                         <EditSelect
                                             label="Vehicle Type"
                                             value={vehicle.vehicle_type_id}
@@ -1099,6 +1431,7 @@ const CustomerViewPage = () => {
                                             options={existingOption(masterData.vehicleTypes, vehicle.vehicle_type_id, 'vehicle_type', vehicle.vehicle_type)}
                                             getValue={(option) => option.id}
                                             getLabel={(option) => option.vehicle_type}
+                                            {...fieldPresentation('vehicle_type_id', activeStepErrors)}
                                         />
                                         <EditSelect
                                             label="Device Model"
@@ -1107,10 +1440,11 @@ const CustomerViewPage = () => {
                                             options={existingOption(masterData.deviceTypes, vehicle.device_model_id, 'device_type', vehicle.device_model)}
                                             getValue={(option) => option.id}
                                             getLabel={(option) => option.device_type}
+                                            {...fieldPresentation('device_model_id', activeStepErrors)}
                                         />
-                                        <EditField label="IMEI No" value={vehicle.imei_no} onChange={(value) => updateVehicleField(vehicle.id, 'imei_no', value)} />
-                                        <EditField label="SIM No 1" value={vehicle.sim_no_1} onChange={(value) => updateVehicleField(vehicle.id, 'sim_no_1', value)} />
-                                        <EditField label="SIM No 2" value={vehicle.sim_no_2} onChange={(value) => updateVehicleField(vehicle.id, 'sim_no_2', value)} />
+                                        <EditField label="IMEI No" value={vehicle.imei_no} onChange={(value) => updateVehicleField(vehicle.id, 'imei_no', value)} inputMode="numeric" maxLength={15} {...fieldPresentation('imei_no', activeStepErrors)} />
+                                        <EditField label="SIM No 1" value={vehicle.sim_no_1} onChange={(value) => updateVehicleField(vehicle.id, 'sim_no_1', value)} inputMode="numeric" maxLength={13} {...fieldPresentation('sim_no_1', activeStepErrors)} />
+                                        <EditField label="SIM No 2" value={vehicle.sim_no_2} onChange={(value) => updateVehicleField(vehicle.id, 'sim_no_2', value)} inputMode="numeric" maxLength={13} {...fieldPresentation('sim_no_2', activeStepErrors)} />
                                         <EditSelect
                                             label="Validity"
                                             value={vehicle.validity_id}
@@ -1118,6 +1452,7 @@ const CustomerViewPage = () => {
                                             options={existingOption(masterData.validities, vehicle.validity_id, 'months', vehicle.validity_months)}
                                             getValue={(option) => option.id}
                                             getLabel={(option) => `${option.months} Months`}
+                                            {...fieldPresentation('validity_id', activeStepErrors)}
                                         />
                                     </>
                                 ) : (
@@ -1149,11 +1484,12 @@ const CustomerViewPage = () => {
                                                     updateVehicleField(vehicle.id, 'vehicle_installation_type', value);
                                                     updateVehicleField(vehicle.id, 'vehicle_installation_person_id', '');
                                                 }}
-                                                options={['Technician', 'Onsite Dealer', 'Offsite Dealer']}
+                                                options={installationTypes}
                                                 getValue={(option) => option}
                                                 getLabel={(option) => option}
+                                                {...fieldPresentation('vehicle_installation_type', activeStepErrors)}
                                             />
-                                            {vehicle.vehicle_installation_type === 'Technician' ? (
+                                            {vehicle.vehicle_installation_type === 'Direct' ? null : vehicle.vehicle_installation_type === 'Technician' ? (
                                                 <EditSelect
                                                     label="Installation Person"
                                                     value={vehicle.vehicle_installation_person_id}
@@ -1161,6 +1497,7 @@ const CustomerViewPage = () => {
                                                     options={existingOption(masterData.technicians, vehicle.vehicle_installation_person_id, 'technician_name', vehicle.vehicle_installation_person)}
                                                     getValue={(option) => option.id}
                                                     getLabel={(option) => option.technician_name}
+                                                    {...fieldPresentation('vehicle_installation_person_id', activeStepErrors)}
                                                 />
                                             ) : (
                                                 <EditSelect
@@ -1175,6 +1512,7 @@ const CustomerViewPage = () => {
                                                     )}
                                                     getValue={(option) => option.id}
                                                     getLabel={(option) => option.dealer_name}
+                                                    {...fieldPresentation('vehicle_installation_person_id', activeStepErrors)}
                                                 />
                                             )}
                                             <EditSelect
@@ -1184,8 +1522,9 @@ const CustomerViewPage = () => {
                                                 options={existingOption(masterData.leadClosures, vehicle.vehicle_lead_closure_id, 'lead_closure_name', vehicle.vehicle_lead_closure)}
                                                 getValue={(option) => option.id}
                                                 getLabel={(option) => option.lead_closure_name}
+                                                {...fieldPresentation('vehicle_lead_closure_id', activeStepErrors)}
                                             />
-                                            <EditField label="Installation Date" value={vehicle.vehicle_installation_date} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_installation_date', value)} type="date" />
+                                            <EditField label="Installation Date" value={vehicle.vehicle_installation_date} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_installation_date', value)} type="date" max={new Date().toISOString().split('T')[0]} {...fieldPresentation('vehicle_installation_date', activeStepErrors)} />
                                         </>
                                     ) : (
                                         <>
@@ -1209,15 +1548,25 @@ const CustomerViewPage = () => {
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                                     {isEditMode ? (
                                         <>
-                                            <EditField label="Total Sale Amount" value={vehicle.vehicle_total_sale_amount} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_total_sale_amount', value)} type="number" />
-                                            <EditField label="Transaction ID" value={vehicle.vehicle_transaction_id} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_transaction_id', value)} digitsOnly />
+                                            <EditSelect
+                                                label="Total Sale Amount"
+                                                value={vehicle.vehicle_total_sale_amount}
+                                                onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_total_sale_amount', value)}
+                                                options={getSaleAmountOptions(vehicle.vehicle_total_sale_amount)}
+                                                getValue={(option) => option.sale_amount}
+                                                getLabel={(option) => `₹${Number(option.sale_amount).toLocaleString('en-IN')}`}
+                                                placeholder="Select Sale Amount"
+                                                {...fieldPresentation('vehicle_total_sale_amount', activeStepErrors)}
+                                            />
+                                            <EditField label="Transaction ID" value={vehicle.vehicle_transaction_id} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_transaction_id', value)} digitsOnly {...fieldPresentation('vehicle_transaction_id', activeStepErrors)} />
                                             <EditSelect
                                                 label="Payment Mode"
                                                 value={vehicle.vehicle_payment_mode}
                                                 onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_payment_mode', value)}
-                                                options={[...new Set([...paymentModes, vehicle.vehicle_payment_mode].filter(Boolean))]}
+                                                options={[...new Set([...PAYMENT_MODES, vehicle.vehicle_payment_mode].filter(Boolean))]}
                                                 getValue={(option) => option}
                                                 getLabel={(option) => option}
+                                                {...fieldPresentation('vehicle_payment_mode', activeStepErrors)}
                                             />
                                         </>
                                     ) : (
@@ -1252,24 +1601,20 @@ const CustomerViewPage = () => {
                                                     label={label}
                                                     value={!hasCompletedPaymentPart2(vehicle) && Number(vehicle[field]) === 0 ? '' : vehicle[field]}
                                                     onChange={(value) => updatePaymentPart2Field(vehicle.id, field, value)}
-                                                    type="number"
-                                                    min="0"
-                                                    step="0.01"
+                                                    {...fieldPresentation(field, activeStepErrors)}
                                                 />
                                             ))}
                                             <div style={fieldStyle}>
                                                 <strong>Total Amount</strong>
                                                 <input
+                                                    id="edit-field-vehicle_total_amount"
                                                     type="number"
                                                     value={getPaymentPart2Summary(vehicle).chargeTotal}
                                                     readOnly
                                                     style={inputStyle}
+                                                    onBlur={() => markFieldTouched('vehicle_total_amount')}
                                                 />
-                                                {!hasCompletedPaymentPart2(vehicle) && (
-                                                    <small style={{ color: '#dc2626' }}>
-                                                        ✕ Total charges must equal Total Sale Amount of ₹{(Number(vehicle.vehicle_total_sale_amount) || 0).toLocaleString('en-IN')}.
-                                                    </small>
-                                                )}
+                                                {(validationAttempted || touchedFields.vehicle_total_amount) && activeStepErrors.vehicle_total_amount && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {activeStepErrors.vehicle_total_amount}</small>}
                                             </div>
                                             <div style={fieldStyle}>
                                                 <strong>Cash Collection Recipient</strong>
@@ -1281,9 +1626,7 @@ const CustomerViewPage = () => {
                                                 label="Amount Paid"
                                                 value={vehicle.vehicle_amount_paid}
                                                 onChange={(value) => updatePaymentPart2Field(vehicle.id, 'vehicle_amount_paid', value)}
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
+                                                {...fieldPresentation('vehicle_amount_paid', activeStepErrors)}
                                             />
                                             <div style={fieldStyle}><strong>Amount Pending</strong><span>{getPaymentPart2Summary(vehicle).amountPending.toFixed(2)}</span></div>
                                             <div style={fieldStyle}><strong>Payment Status</strong><span>{getPaymentPart2Summary(vehicle).paymentStatus}</span></div>

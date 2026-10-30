@@ -15,6 +15,7 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         location: '',
         enrolled_date: '',
         installation_status: 'Onsite',
+        status: 'active',
         threshold_amount: '',
         notes: '',
         software: []
@@ -175,6 +176,20 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                                 onChange={(value) => setFormData((prev) => ({ ...prev, enrolled_date: value }))}
                                 required
                             />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Status *</label>
+                            <select
+                                name="status"
+                                className="form-control"
+                                value={formData.status}
+                                onChange={handleChange}
+                                required
+                            >
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
                         </div>
 
                         <div className="form-group" style={{ position: 'relative' }}>

@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, 'Method not allowed.', [], [], 405);
 }
 $currentUser = authenticate();
-requireAnyPermission(['customers.add', 'customers.edit']);
+requireAnyPermission(['customers.add', 'customers.edit', 'courier.add']);
 $userId = (int) ($currentUser['user_id'] ?? 0);
 $submissionId = (int) ($_GET['id'] ?? 0);
 if ($submissionId <= 0) {

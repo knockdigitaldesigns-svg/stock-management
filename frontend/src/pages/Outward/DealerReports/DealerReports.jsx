@@ -5,8 +5,7 @@ import { exportToExcel, exportToPDF } from '../../../utils/export';
 import SearchableDropdown from '../../../components/SearchableDropdown/SearchableDropdown';
 import { formatDate } from '../../../utils/date';
 import Pagination from '../../../components/Pagination/Pagination';
-import usePagination from '../../../hooks/usePagination';
-import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../../components/TableFilterBar/TableFilterBar';
+import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
 
 const tabs = [
     { key: 'dealer-sim', label: 'Dealer SIM Report', owner: 'Dealer', type: 'SIM' },
@@ -25,13 +24,17 @@ const DealerReports = () => {
     const [filters, setFilters] = useState(emptyTableFilters);
     const [reportData, setReportData] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [reportError, setReportError] = useState('');
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalItems, setTotalItems] = useState(0);
     const currentTab = tabs.find((tab) => tab.key === activeTab) || tabs[0];
     const isDealerSim = activeTab === 'dealer-sim';
     const ownerKey = currentTab.owner === 'Dealer' ? 'dealers' : 'technicians';
     const nameKey = currentTab.owner === 'Dealer' ? 'dealer_name' : 'technician_name';
 
     useEffect(() => {
-        Promise.all([api.get('/dealers/list.php'), api.get('/technicians/list.php')])
+        Promise.all([api.get('/dealers/list.php?for_lookup=1'), api.get('/technicians/list.php?for_lookup=1')])
             .then(([dealers, technicians]) =>
                 setOwners({
                     dealers: dealers.data.data?.dealers || [],
@@ -71,29 +74,54 @@ const DealerReports = () => {
             ? '/reports/sim_dealer.php'
             : '/reports/device_dealer.php';
         const parameter = isTechnician ? 'technician_id' : 'dealer_id';
-        const url = selectedOwner ? `${endpoint}?${parameter}=${selectedOwner}` : endpoint;
+        const params = {
+            [parameter]: selectedOwner,
+            search: filters.search || '',
+            date_from: filters.date_from || '',
+            date_to: filters.date_to || '',
+            sim_type: isSim ? filters.simType || '' : '',
+            sim_validity: isSim ? (filters.simValidity || '').replace(/\D/g, '') : '',
+            device_model: isSim ? '' : filters.deviceModel || '',
+            page,
+            page_size: pageSize
+        };
+        setReportError('');
         setLoading(true);
-        api.get(url)
-            .then((response) => setReportData(response.data.data?.report || []))
-            .catch(() => setReportData([]))
+        api.get(endpoint, { params })
+            .then((response) => {
+                setReportData(response.data.data?.report || []);
+                setTotalItems(response.data.data?.pagination?.total || 0);
+            })
+            .catch((error) => {
+                console.error('Failed to load allocation report', error);
+                setReportError(error.response?.data?.message || 'Failed to load allocation report.');
+                setReportData([]);
+                setTotalItems(0);
+            })
             .finally(() => setLoading(false));
-    }, [activeTab, selectedOwner, currentTab]);
+    }, [activeTab, selectedOwner, currentTab, filters, page, pageSize]);
 
-    const filteredReportData = filterTableRows(reportData, filters, currentTab.type === 'SIM'
-        ? { dateKeys: ['allocation_date'], simKey: 'sim_type', searchKeys: [nameKey, 'sim_no', 'sim_type', 'notes'] }
-        : { dateKeys: ['allocation_date'], deviceKey: 'model_name', searchKeys: [nameKey, 'imei_no', 'model_name', 'notes'] });
+    const getReportParams = () => ({
+        [currentTab.owner === 'Technician' ? 'technician_id' : 'dealer_id']: selectedOwner,
+        search: filters.search || '',
+        date_from: filters.date_from || '',
+        date_to: filters.date_to || '',
+        sim_type: currentTab.type === 'SIM' ? filters.simType || '' : '',
+        sim_validity: currentTab.type === 'SIM' ? (filters.simValidity || '').replace(/\D/g, '') : '',
+        device_model: currentTab.type === 'SIM' ? '' : filters.deviceModel || ''
+    });
 
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        paginatedItems
-    } = usePagination(filteredReportData, 10, [filters, selectedOwner, activeTab]);
+    const fetchAllReportRows = async () => {
+        const isTechnician = currentTab.owner === 'Technician';
+        const endpoint = isTechnician
+            ? currentTab.type === 'SIM' ? '/reports/sim_technician.php' : '/reports/device_technician.php'
+            : currentTab.type === 'SIM' ? '/reports/sim_dealer.php' : '/reports/device_dealer.php';
+        const response = await api.get(endpoint, { params: getReportParams() });
+        return response.data.data?.report || [];
+    };
 
-    const exportRows = () =>
-        filteredReportData.map((row) =>
+    const exportRows = (rows) =>
+        rows.map((row) =>
             currentTab.type === 'SIM'
                 ? {
                       [`${currentTab.owner} Name`]: row[nameKey],
@@ -120,8 +148,23 @@ const DealerReports = () => {
                   }
         );
 
-    const handleExportExcel = () => exportToExcel(exportRows(), `${currentTab.owner}_${currentTab.type}_Report`);
-    const handleExportPDF = () => {
+    const handleExportExcel = async () => {
+        try {
+            exportToExcel(exportRows(await fetchAllReportRows()), `${currentTab.owner}_${currentTab.type}_Report`);
+        } catch (error) {
+            console.error('Failed to export allocation report', error);
+            setReportError(error.response?.data?.message || 'Failed to export allocation report.');
+        }
+    };
+    const handleExportPDF = async () => {
+        let rows;
+        try {
+            rows = await fetchAllReportRows();
+        } catch (error) {
+            console.error('Failed to export allocation report', error);
+            setReportError(error.response?.data?.message || 'Failed to export allocation report.');
+            return;
+        }
         const columns =
             currentTab.type === 'SIM'
                 ? [
@@ -147,7 +190,7 @@ const DealerReports = () => {
                       { header: 'Allocation Date', key: 'allocation_date' },
                       { header: 'Notes', key: 'notes' }
                   ];
-        exportToPDF(filteredReportData, `${currentTab.owner}_${currentTab.type}_Report`, currentTab.label, columns);
+        exportToPDF(rows, `${currentTab.owner}_${currentTab.type}_Report`, currentTab.label, columns);
     };
 
     const tableColSpan = currentTab.type === 'SIM' ? (isDealerSim ? 11 : 8) : 6;
@@ -162,14 +205,14 @@ const DealerReports = () => {
                 <div className="header-actions">
                     <button
                         className="btn btn-outline"
-                        disabled={loading || !filteredReportData.length}
+                        disabled={loading || totalItems === 0}
                         onClick={handleExportExcel}
                     >
                         <Download size={16} /> Export Excel
                     </button>
                     <button
                         className="btn btn-outline"
-                        disabled={loading || !filteredReportData.length}
+                        disabled={loading || totalItems === 0}
                         onClick={handleExportPDF}
                     >
                         <Download size={16} /> Export PDF
@@ -195,6 +238,7 @@ const DealerReports = () => {
                             setActiveTab(tab.key);
                             setSelectedOwner('');
                             setFilters(emptyTableFilters());
+                            setPage(1);
                         }}
                     >
                         {tab.label}
@@ -212,7 +256,10 @@ const DealerReports = () => {
                                 ...owners[ownerKey].map((owner) => ({ value: owner.id, label: owner[nameKey] }))
                             ]}
                             value={selectedOwner}
-                            onChange={setSelectedOwner}
+                            onChange={(value) => {
+                                setSelectedOwner(value);
+                                setPage(1);
+                            }}
                             placeholder={`Search ${currentTab.owner}...`}
                         />
                     </div>
@@ -220,8 +267,14 @@ const DealerReports = () => {
                 <div style={{ marginTop: '10px' }}>
                     <TableFilterBar
                         filters={filters}
-                        onChange={setFilters}
-                        onReset={() => setFilters(emptyTableFilters())}
+                        onChange={(nextFilters) => {
+                            setFilters(nextFilters);
+                            setPage(1);
+                        }}
+                        onReset={() => {
+                            setFilters(emptyTableFilters());
+                            setPage(1);
+                        }}
                         items={reportData}
                         dateKeys={['allocation_date']}
                         deviceModelOptions={currentTab.type !== 'SIM' ? deviceModels : undefined}
@@ -237,6 +290,7 @@ const DealerReports = () => {
             </div>
 
             <div className="card">
+                {reportError && <div className="alert alert-danger">{reportError}</div>}
                 <div className="table-container">
                     <table>
                         <thead>
@@ -273,14 +327,14 @@ const DealerReports = () => {
                                         Loading report...
                                     </td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : reportData.length === 0 ? (
                                 <tr>
                                     <td colSpan={tableColSpan} className="text-center empty-state">
                                         No records found for the selected filters.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map((row, index) => (
+                                reportData.map((row, index) => (
                                     <tr key={index}>
                                         <td className="truncate-cell" title={row[nameKey]}>{row[nameKey]}</td>
                                         {currentTab.type === 'SIM' ? (
@@ -321,7 +375,10 @@ const DealerReports = () => {
                     totalItems={totalItems}
                     pageSize={pageSize}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={(size) => {
+                        setPageSize(size);
+                        setPage(1);
+                    }}
                     itemName="allocated records"
                 />
             </div>

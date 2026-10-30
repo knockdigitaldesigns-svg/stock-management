@@ -24,6 +24,33 @@ if (!$conn) {
 $statusSql = $status === 'Pending Verification'
     ? "s.status IN ('Pending Verification', 'Applying')"
     : 's.status = ?';
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$offset = ($page - 1) * $pageSize;
+$pattern = '%' . $search . '%';
+$countStmt = $conn->prepare(
+    'SELECT COUNT(*) AS total
+     FROM customer_payment_verification_submissions s
+     INNER JOIN users submitter ON submitter.id = s.submitter_user_id
+     WHERE ' . $statusSql . '
+       AND (? = \'\' OR s.submission_data LIKE ? OR submitter.employee_name LIKE ? OR submitter.username LIKE ?)'
+);
+if (!$countStmt) {
+    $conn->close();
+    sendResponse(false, 'Unable to prepare verification queue count query.', [], [], 500);
+}
+if ($status === 'Pending Verification') {
+    $countStmt->bind_param('ssss', $search, $pattern, $pattern, $pattern);
+} else {
+    $countStmt->bind_param('sssss', $status, $search, $pattern, $pattern, $pattern);
+}
+if (!$countStmt->execute()) {
+    $countStmt->close();
+    $conn->close();
+    sendResponse(false, 'Unable to count verification submissions.', [], [], 500);
+}
+$total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+$countStmt->close();
 $stmt = $conn->prepare(
     'SELECT s.id, s.submitter_user_id, s.existing_customer_id, s.status, s.submission_data,
             s.submitted_at, s.created_at, s.rejection_reason,
@@ -35,19 +62,22 @@ $stmt = $conn->prepare(
      WHERE ' . $statusSql . '
        AND (? = \'\' OR s.submission_data LIKE ? OR submitter.employee_name LIKE ? OR submitter.username LIKE ?)
      ORDER BY COALESCE(s.submitted_at, s.created_at) DESC, s.id DESC
-     LIMIT 500'
+     LIMIT ? OFFSET ?'
 );
 if (!$stmt) {
     $conn->close();
     sendResponse(false, 'Unable to prepare verification queue query.', [], [], 500);
 }
-$pattern = '%' . $search . '%';
 if ($status === 'Pending Verification') {
-    $stmt->bind_param('ssss', $search, $pattern, $pattern, $pattern);
+    $stmt->bind_param('ssssii', $search, $pattern, $pattern, $pattern, $pageSize, $offset);
 } else {
-    $stmt->bind_param('sssss', $status, $search, $pattern, $pattern, $pattern);
+    $stmt->bind_param('sssssii', $status, $search, $pattern, $pattern, $pattern, $pageSize, $offset);
 }
-$stmt->execute();
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Unable to fetch verification submissions.', [], [], 500);
+}
 $result = $stmt->get_result();
 $submissions = [];
 while ($row = $result->fetch_assoc()) {
@@ -71,6 +101,7 @@ while ($row = $result->fetch_assoc()) {
     $payment = is_array($payment) ? $payment : [];
     $submissions[] = [
         'id' => (int) $row['id'],
+        'submission_type' => ($detail['source'] ?? '') === 'courier' ? 'Courier Request' : 'Customer Payment',
         'submitter_user_id' => (int) $row['submitter_user_id'],
         'existing_customer_id' => $row['existing_customer_id'] !== null ? (int) $row['existing_customer_id'] : null,
         'status' => $row['status'],
@@ -102,4 +133,13 @@ foreach ($allowedStatuses as $countStatus) {
 }
 $counts['Pending Verification'] += $counts['Applying'];
 $conn->close();
-sendResponse(true, 'Verification submissions fetched.', ['submissions' => $submissions, 'counts' => $counts]);
+sendResponse(true, 'Verification submissions fetched.', [
+    'submissions' => $submissions,
+    'counts' => $counts,
+    'pagination' => [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ]
+]);

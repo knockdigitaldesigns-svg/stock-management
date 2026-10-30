@@ -136,6 +136,16 @@ $summary = [
     'used_sims' => 0,
     'total_dealers' => 0,
     'total_technicians' => 0,
+    'active_dealers' => 0,
+    'inactive_dealers' => 0,
+    'active_technicians' => 0,
+    'inactive_technicians' => 0,
+    'total_customers' => 0,
+    'total_vehicles' => 0,
+    'active_sims' => 0,
+    'safe_custody_sims' => 0,
+    'expired_sims' => 0,
+    'deactivated_sims' => 0,
     'pending_payments' => 0
 ];
 
@@ -174,6 +184,77 @@ $techCount = $conn->query("SELECT COUNT(*) as count FROM technicians $techWhere"
 if ($techCount && $techCount->num_rows > 0) {
     $summary['total_technicians'] = (int) $techCount->fetch_assoc()['count'];
 }
+
+$summaryCounts = $conn->query("
+    SELECT
+        (SELECT COUNT(*) FROM dealers WHERE status = 'active') AS active_dealers,
+        (SELECT COUNT(*) FROM dealers WHERE status = 'inactive') AS inactive_dealers,
+        (SELECT COUNT(*) FROM technicians WHERE status = 'active') AS active_technicians,
+        (SELECT COUNT(*) FROM technicians WHERE status = 'inactive') AS inactive_technicians,
+        (SELECT COUNT(DISTINCT id) FROM customers) AS total_customers,
+        (SELECT COUNT(*) FROM customer_vehicle_details cv
+         INNER JOIN customers c ON c.id = cv.customer_id) AS total_vehicles
+");
+if (!$summaryCounts) {
+    $error = $conn->error;
+    $conn->close();
+    error_log('Failed to fetch dashboard summary counts: ' . $error);
+    sendResponse(false, 'Failed to fetch dashboard summary counts.', [], [], 500);
+}
+$summaryCountRow = $summaryCounts->fetch_assoc();
+$summary['active_dealers'] = (int) $summaryCountRow['active_dealers'];
+$summary['inactive_dealers'] = (int) $summaryCountRow['inactive_dealers'];
+$summary['total_dealers'] = $summary['active_dealers'] + $summary['inactive_dealers'];
+$summary['active_technicians'] = (int) $summaryCountRow['active_technicians'];
+$summary['inactive_technicians'] = (int) $summaryCountRow['inactive_technicians'];
+$summary['total_technicians'] = $summary['active_technicians'] + $summary['inactive_technicians'];
+$summary['total_customers'] = (int) $summaryCountRow['total_customers'];
+$summary['total_vehicles'] = (int) $summaryCountRow['total_vehicles'];
+
+$customerSimStatusCounts = $conn->query("
+    SELECT
+        COUNT(DISTINCT CASE WHEN lifecycle.sim_status = 'active' THEN lifecycle.sim_id END) AS active_sims,
+        COUNT(DISTINCT CASE WHEN lifecycle.sim_status = 'safe custody' THEN lifecycle.sim_id END) AS safe_custody_sims,
+        COUNT(DISTINCT CASE WHEN lifecycle.sim_status = 'expired' THEN lifecycle.sim_id END) AS expired_sims,
+        COUNT(DISTINCT CASE WHEN lifecycle.sim_status IN ('deactive', 'deactivated') THEN lifecycle.sim_id END) AS deactivated_sims
+    FROM (
+        SELECT assigned_sims.sim_id,
+               LOWER(TRIM(SUBSTRING_INDEX(
+                   GROUP_CONCAT(assigned_sims.sim_status ORDER BY assigned_sims.renewal_id DESC),
+                   ',',
+                   1
+               ))) AS sim_status
+        FROM (
+            SELECT cv.sim_id_1 AS sim_id, COALESCE(cr.id, 0) AS renewal_id,
+                   COALESCE(cr.sim_status, 'Active') AS sim_status
+            FROM customer_vehicle_details cv
+            INNER JOIN customers c ON c.id = cv.customer_id
+            INNER JOIN sims s ON s.id = cv.sim_id_1
+            LEFT JOIN customer_renewals cr ON cr.vehicle_id = cv.id AND cr.customer_id = c.id
+            WHERE cv.sim_id_1 IS NOT NULL
+            UNION ALL
+            SELECT cv.sim_id_2 AS sim_id, COALESCE(cr.id, 0) AS renewal_id,
+                   COALESCE(cr.sim_status, 'Active') AS sim_status
+            FROM customer_vehicle_details cv
+            INNER JOIN customers c ON c.id = cv.customer_id
+            INNER JOIN sims s ON s.id = cv.sim_id_2
+            LEFT JOIN customer_renewals cr ON cr.vehicle_id = cv.id AND cr.customer_id = c.id
+            WHERE cv.sim_id_2 IS NOT NULL
+        ) assigned_sims
+        GROUP BY assigned_sims.sim_id
+    ) lifecycle
+");
+if (!$customerSimStatusCounts) {
+    $error = $conn->error;
+    $conn->close();
+    error_log('Failed to fetch dashboard customer SIM status counts: ' . $error);
+    sendResponse(false, 'Failed to fetch dashboard customer SIM status counts.', [], [], 500);
+}
+$customerSimStatusRow = $customerSimStatusCounts->fetch_assoc() ?: [];
+$summary['active_sims'] = (int) ($customerSimStatusRow['active_sims'] ?? 0);
+$summary['safe_custody_sims'] = (int) ($customerSimStatusRow['safe_custody_sims'] ?? 0);
+$summary['expired_sims'] = (int) ($customerSimStatusRow['expired_sims'] ?? 0);
+$summary['deactivated_sims'] = (int) ($customerSimStatusRow['deactivated_sims'] ?? 0);
 
 $pendingPaymentsWhere = "WHERE payment_status != 'Paid' AND COALESCE(total_amount, 0) > 0";
 if (!empty($reqStartDate) || !empty($reqEndDate)) {

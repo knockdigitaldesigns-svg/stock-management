@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Truck, Eye, Edit, Trash2, CheckCircle, XCircle, Plus, RefreshCw, AlertCircle } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
-import usePagination from '../../hooks/usePagination';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
@@ -14,6 +14,7 @@ import './CourierPage.css';
 
 const CourierPage = () => {
     const { hasPermission } = useAuth();
+    const navigate = useNavigate();
     const [canApprove, setCanApprove] = useState(() => hasPermission('courier.approve'));
     const [approvalPermissionResolved, setApprovalPermissionResolved] = useState(false);
     const canAdd = hasPermission('courier.add');
@@ -26,6 +27,10 @@ const CourierPage = () => {
     const [requests, setRequests]               = useState([]);
     const [loading, setLoading]                 = useState(true);
     const [activeTab, setActiveTab]             = useState('all'); // 'all' or 'pending'
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
+    const [pendingCount, setPendingCount] = useState(0);
 
     // Filters
     const [search, setSearch]                   = useState('');
@@ -67,11 +72,17 @@ const CourierPage = () => {
             if (courierStatusFilter) params.append('courier_status', courierStatusFilter);
             if (dateFrom) params.append('date_from', dateFrom);
             if (dateTo) params.append('date_to', dateTo);
+            params.append('page', page);
+            params.append('page_size', pageSize);
 
             const res = await api.get(`/courier/list.php?${params.toString()}`, { skipGlobalError: true });
             if (res.data?.success) {
                 setRequests(res.data.data?.requests || []);
                 setCanApprove(Boolean(res.data.data?.can_approve));
+                const nextPagination = res.data.data?.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                setPendingCount(Number(res.data.data?.pending_count || 0));
+                if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
                 setApprovalPermissionResolved(true);
             }
         } catch (err) {
@@ -84,12 +95,12 @@ const CourierPage = () => {
         } finally {
             setLoading(false);
         }
-    }, [search, courierToFilter, activeTab, approvalStatusFilter, courierStatusFilter, dateFrom, dateTo]);
+    }, [search, courierToFilter, activeTab, approvalStatusFilter, courierStatusFilter, dateFrom, dateTo, page, pageSize]);
 
     useEffect(() => {
         if (approvalPermissionResolved && !canApprove && activeTab === 'pending') {
             setActiveTab('all');
-            setApprovalStatusFilter('');
+            updateFilter(setApprovalStatusFilter, '');
         }
     }, [canApprove, approvalPermissionResolved, activeTab]);
 
@@ -157,26 +168,23 @@ const CourierPage = () => {
     // --------------------------------------------------
     // PAGINATION
     // --------------------------------------------------
-    const {
-        page,
-        setPage,
-        pageSize,
-        setPageSize,
-        totalItems,
-        totalPages,
-        paginatedItems
-    } = usePagination(requests, 10, [search, courierToFilter, activeTab, approvalStatusFilter, courierStatusFilter, dateFrom, dateTo]);
+    const updateFilter = (setter, value) => {
+        setter(value);
+        setPage(1);
+    };
 
-    // Pending count for tab badge
-    const pendingCount = requests.filter(r => r.approval_status === 'Pending Approval').length;
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     const resetFilters = () => {
-        setSearch('');
-        setCourierToFilter('');
-        setApprovalStatusFilter('');
-        setCourierStatusFilter('');
-        setDateFrom('');
-        setDateTo('');
+        updateFilter(setSearch, '');
+        updateFilter(setCourierToFilter, '');
+        updateFilter(setApprovalStatusFilter, '');
+        updateFilter(setCourierStatusFilter, '');
+        updateFilter(setDateFrom, '');
+        updateFilter(setDateTo, '');
     };
 
     // Helper to determine and format asset type display (DEVICE, SIM, BOTH)
@@ -232,14 +240,14 @@ const CourierPage = () => {
             <div className="tabs-container">
                 <button
                     className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
-                    onClick={() => { setActiveTab('all'); setApprovalStatusFilter(''); }}
+                    onClick={() => { setActiveTab('all'); updateFilter(setApprovalStatusFilter, ''); }}
                 >
                     All Courier Requests
                 </button>
                 {canApprove && (
                     <button
                         className={`tab-btn ${activeTab === 'pending' ? 'active' : ''}`}
-                        onClick={() => { setActiveTab('pending'); setApprovalStatusFilter('Pending Approval'); }}
+                        onClick={() => { setActiveTab('pending'); updateFilter(setApprovalStatusFilter, 'Pending Approval'); }}
                     >
                         Pending Admin Approvals
                         {pendingCount > 0 && activeTab !== 'pending' && (
@@ -263,7 +271,7 @@ const CourierPage = () => {
                                 className="courier-filter-control"
                                 placeholder="Search dealer, technician, IMEI, SIM, tracking ID..."
                                 value={search}
-                                onChange={(e) => setSearch(e.target.value)}
+                                onChange={(e) => updateFilter(setSearch, e.target.value)}
                             />
                         </div>
 
@@ -273,7 +281,7 @@ const CourierPage = () => {
                             <select
                                 className="courier-filter-control"
                                 value={courierToFilter}
-                                onChange={(e) => setCourierToFilter(e.target.value)}
+                                onChange={(e) => updateFilter(setCourierToFilter, e.target.value)}
                             >
                                 <option value="">All Recipients</option>
                                 <option value="Dealer">Dealer</option>
@@ -290,7 +298,7 @@ const CourierPage = () => {
                                     <select
                                         className="courier-filter-control"
                                         value={approvalStatusFilter}
-                                        onChange={(e) => setApprovalStatusFilter(e.target.value)}
+                                        onChange={(e) => updateFilter(setApprovalStatusFilter, e.target.value)}
                                     >
                                         <option value="">All Approval Statuses</option>
                                         {canApprove && <option value="Pending Approval">Pending Approval</option>}
@@ -312,7 +320,7 @@ const CourierPage = () => {
                             <select
                                 className="courier-filter-control"
                                 value={courierStatusFilter}
-                                onChange={(e) => setCourierStatusFilter(e.target.value)}
+                                onChange={(e) => updateFilter(setCourierStatusFilter, e.target.value)}
                             >
                                 <option value="">All Courier Statuses</option>
                                 <option value="Pending">Pending</option>
@@ -328,7 +336,7 @@ const CourierPage = () => {
                                 type="date"
                                 className="courier-filter-control"
                                 value={dateFrom}
-                                onChange={(e) => setDateFrom(e.target.value)}
+                                onChange={(e) => updateFilter(setDateFrom, e.target.value)}
                             />
                         </div>
 
@@ -339,7 +347,7 @@ const CourierPage = () => {
                                 type="date"
                                 className="courier-filter-control"
                                 value={dateTo}
-                                onChange={(e) => setDateTo(e.target.value)}
+                                onChange={(e) => updateFilter(setDateTo, e.target.value)}
                             />
                         </div>
                     </div>
@@ -391,14 +399,14 @@ const CourierPage = () => {
                                         Loading courier requests...
                                     </td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : requests.length === 0 ? (
                                 <tr>
                                     <td colSpan="18" className="text-center empty-state" style={{ padding: '2rem' }}>
                                         No courier requests found.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map((row) => (
+                                requests.map((row) => (
                                     <tr key={row.id}>
                                         <td className="col-req-id"><strong>{row.request_code}</strong></td>
                                         <td className="col-courier-to">
@@ -467,7 +475,9 @@ const CourierPage = () => {
                                                 row.approval_status === 'Rejected' ? 'badge-danger' :
                                                 'badge-warning'
                                             }`}>
-                                                {row.approval_status || 'Pending Approval'}
+                                                {row.requires_customer_verification && row.approval_status === 'Pending Approval'
+                                                    ? 'Pending Verification'
+                                                    : (row.approval_status || 'Pending Approval')}
                                             </span>
                                         </td>
                                         <td className="col-requested-by">
@@ -494,7 +504,7 @@ const CourierPage = () => {
                                                 </button>
 
                                                 {/* Admin Approve Button (Visible for Admin when Pending) */}
-                                                {canApprove && row.approval_status === 'Pending Approval' && (
+                                                {canApprove && row.approval_status === 'Pending Approval' && !row.requires_customer_verification && (
                                                     <button
                                                         type="button"
                                                         className="courier-action-btn edit"
@@ -507,7 +517,7 @@ const CourierPage = () => {
                                                 )}
 
                                                 {/* Admin Reject Button (Visible for Admin when Pending) */}
-                                                {canApprove && row.approval_status === 'Pending Approval' && (
+                                                {canApprove && row.approval_status === 'Pending Approval' && !row.requires_customer_verification && (
                                                     <button
                                                         type="button"
                                                         className="courier-action-btn delete"
@@ -515,6 +525,17 @@ const CourierPage = () => {
                                                         onClick={() => setRejectTarget(row)}
                                                     >
                                                         <XCircle size={16} />
+                                                    </button>
+                                                )}
+                                                {canApprove && row.approval_status === 'Pending Approval' && row.requires_customer_verification && (
+                                                    <button
+                                                        type="button"
+                                                        className="courier-action-btn view"
+                                                        title="Review in My Verification Requests"
+                                                        aria-label="Review this customer request in My Verification Requests"
+                                                        onClick={() => navigate('/customer-management/my-verifications')}
+                                                    >
+                                                        <AlertCircle size={16} />
                                                     </button>
                                                 )}
 
@@ -532,7 +553,8 @@ const CourierPage = () => {
                                                 )}
 
                                                 {/* Edit Icon (For Pending Approval and Rejected requests) */}
-                                                {canEdit && row.approval_status !== 'Approved' && (
+                                                {canEdit && row.approval_status !== 'Approved'
+                                                    && !(row.requires_customer_verification && row.approval_status === 'Rejected') && (
                                                     <button
                                                         type="button"
                                                         className="courier-action-btn edit"
@@ -568,11 +590,10 @@ const CourierPage = () => {
                 {requests.length > 0 && (
                     <Pagination
                         currentPage={page}
-                        totalPages={totalPages}
                         pageSize={pageSize}
-                        totalItems={totalItems}
+                        totalItems={pagination.total}
                         onPageChange={setPage}
-                        onPageSizeChange={setPageSize}
+                        onPageSizeChange={updatePageSize}
                     />
                 )}
             </div>

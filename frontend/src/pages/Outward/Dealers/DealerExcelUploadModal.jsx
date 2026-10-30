@@ -2,10 +2,9 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
-import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
-import { showGlobalError } from '../../../context/ErrorContext';
-import { PAYMENT_MODES } from '../../../constants/paymentModes';
+import BulkUploadValidationErrors from '../../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../../utils/bulkUploadErrors';
 
 export const BULK_ALLOCATION_COLUMNS = [
     { key: 'dealer_name', header: 'Dealer Name', required: true },
@@ -35,7 +34,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
     useModalScrollLock(true);
 
     const [file, setFile] = useState(null);
-    const [, setErrors] = useState([]);
+    const [errors, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
 
@@ -109,7 +108,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             const msg = 'Only .xlsx files are allowed.';
             setFile(null);
             setErrors([msg]);
-            showGlobalError(msg);
             setSuccessMsg('');
             return;
         }
@@ -118,7 +116,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             const msg = 'Excel file is empty.';
             setFile(null);
             setErrors([msg]);
-            showGlobalError(msg);
             setSuccessMsg('');
             return;
         }
@@ -132,21 +129,18 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!file) {
             const msg = 'Please select an Excel file.';
             setErrors([msg]);
-            showGlobalError(msg);
             return;
         }
 
         if (!file.name.toLowerCase().endsWith('.xlsx')) {
             const msg = 'Only .xlsx files are allowed.';
             setErrors([msg]);
-            showGlobalError(msg);
             return;
         }
 
         if (file.size === 0) {
             const msg = 'Excel file is empty.';
             setErrors([msg]);
-            showGlobalError(msg);
             return;
         }
 
@@ -161,9 +155,8 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                 type: 'array'
             });
         } catch (err) {
-            const msg = 'Invalid or corrupted Excel file.';
+            const msg = err.message || 'Invalid or corrupted Excel file.';
             setErrors([msg]);
-            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -171,7 +164,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
             const msg = 'Excel workbook contains no worksheets.';
             setErrors([msg]);
-            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -182,7 +174,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!worksheet) {
             const msg = 'Unable to read the first Excel worksheet.';
             setErrors([msg]);
-            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -195,7 +186,6 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
         if (!rawRows || rawRows.length === 0) {
             const msg = 'Excel file is empty.';
             setErrors([msg]);
-            showGlobalError(msg);
             setLoading(false);
             return;
         }
@@ -210,105 +200,7 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
             (c) => c.required && !headerMap[normalizeHeader(c.header)]
         );
         if (missingRequired.length > 0) {
-            const msg = `Required column '${missingRequired[0].header}' is missing.`;
-            setErrors([msg]);
-            showGlobalError(msg);
-            setLoading(false);
-            return;
-        }
-
-        const clientErrors = [];
-        const seenImeis = new Set();
-        const seenSims = new Set();
-        const validModes = PAYMENT_MODES.map((mode) => mode.toLowerCase());
-
-        rawRows.forEach((row, idx) => {
-            const rowNum = idx + 2;
-
-            const dealerName = String(row[headerMap[normalizeHeader('Dealer Name')]] || '').trim();
-            const allocType = String(row[headerMap[normalizeHeader('Allocation Type')]] || '').trim().toLowerCase();
-
-            if (!dealerName) {
-                clientErrors.push(`Row ${rowNum}: Dealer Name is required.`);
-            }
-
-            if (!allocType || !['device', 'sim', 'both'].includes(allocType)) {
-                clientErrors.push(`Row ${rowNum}: Allocation Type must be device, sim, or both.`);
-            }
-
-            const hasDevice = allocType === 'device' || allocType === 'both';
-            const hasSim = allocType === 'sim' || allocType === 'both';
-
-            if (hasDevice) {
-                const devDate = row[headerMap[normalizeHeader('Device Date')]];
-                const imeiNo = String(row[headerMap[normalizeHeader('IMEI No')]] || '').trim();
-
-                if (!imeiNo) {
-                    clientErrors.push(`Row ${rowNum}: IMEI No is required for device allocation.`);
-                } else if (seenImeis.has(imeiNo)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate IMEI No '${imeiNo}' in uploaded Excel.`);
-                } else {
-                    seenImeis.add(imeiNo);
-                }
-
-                if (devDate === null || devDate === undefined || devDate === '') {
-                    clientErrors.push(`Row ${rowNum}: Device Date is required.`);
-                } else {
-                    const parsed = parseDate(devDate);
-                    if (!parsed) {
-                        clientErrors.push(`Row ${rowNum}: Invalid Device Date.`);
-                    } else if (isFutureDate(parsed)) {
-                        clientErrors.push(`Row ${rowNum}: Future Device Date is not allowed.`);
-                    }
-                }
-            }
-
-            if (hasSim) {
-                const simDate = row[headerMap[normalizeHeader('SIM Date')]];
-                const simNo = String(row[headerMap[normalizeHeader('SIM Number')]] || '').trim();
-
-                if (!simNo) {
-                    clientErrors.push(`Row ${rowNum}: SIM Number is required for SIM allocation.`);
-                } else if (seenSims.has(simNo)) {
-                    clientErrors.push(`Row ${rowNum}: Duplicate SIM Number '${simNo}' in uploaded Excel.`);
-                } else {
-                    seenSims.add(simNo);
-                }
-
-                if (simDate === null || simDate === undefined || simDate === '') {
-                    clientErrors.push(`Row ${rowNum}: SIM Date is required.`);
-                } else {
-                    const parsed = parseDate(simDate);
-                    if (!parsed) {
-                        clientErrors.push(`Row ${rowNum}: Invalid SIM Date.`);
-                    } else if (isFutureDate(parsed)) {
-                        clientErrors.push(`Row ${rowNum}: Future SIM Date is not allowed.`);
-                    }
-                }
-            }
-
-            const amtPaidRaw = String(row[headerMap[normalizeHeader('Amount Paid')]] || '').trim();
-            const amtPaid = amtPaidRaw !== '' ? parseFloat(amtPaidRaw) : 0;
-            const payMode = String(row[headerMap[normalizeHeader('Payment Mode')]] || '').trim();
-            const txnId = String(row[headerMap[normalizeHeader('Transaction ID')]] || '').trim();
-
-            if (amtPaid > 0) {
-                if (!payMode) {
-                    clientErrors.push(`Row ${rowNum}: Payment Mode is required when Amount Paid > 0.`);
-                } else if (!validModes.includes(payMode.toLowerCase())) {
-                    clientErrors.push(`Row ${rowNum}: Invalid Payment Mode '${payMode}'.`);
-                }
-
-                if (payMode && payMode.toLowerCase() !== 'cash' && !txnId) {
-                    clientErrors.push(`Row ${rowNum}: Transaction ID is required for non-cash payment mode.`);
-                }
-            }
-        });
-
-        if (clientErrors.length > 0) {
-            const uniqueErrors = Array.from(new Set(clientErrors));
-            setErrors(uniqueErrors);
-            showGlobalError(uniqueErrors, 'Import Validation Errors');
+            setErrors(missingRequired.map((column) => `Required column '${column.header}' is missing.`));
             setLoading(false);
             return;
         }
@@ -326,22 +218,12 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                     onSuccess();
                 }, 1000);
             } else {
-                const backendErrors =
-                    response.data?.data?.errors ||
-                    response.data?.errors ||
-                    [response.data.message || 'Failed to upload stock allocations'];
-                const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
+                const errList = normalizeBulkUploadErrors(response.data, 'Failed to upload stock allocations.');
                 setErrors(errList);
-                showGlobalError(errList, 'Upload Failed');
             }
         } catch (error) {
-            const backendErrors =
-                error.response?.data?.data?.errors ||
-                error.response?.data?.errors ||
-                [error.response?.data?.message || error.message || 'Error uploading stock allocations'];
-            const errList = Array.isArray(backendErrors) ? backendErrors : [backendErrors];
+            const errList = normalizeBulkUploadErrors(error.response?.data, error.message || 'Error uploading stock allocations.');
             setErrors(errList);
-            showGlobalError(errList, 'Upload Error');
         } finally {
             setLoading(false);
         }
@@ -419,6 +301,8 @@ const DealerExcelUploadModal = ({ onClose, onSuccess }) => {
                             disabled={loading}
                         />
                     </div>
+
+                    <BulkUploadValidationErrors errors={errors} />
 
                     {successMsg && (
                         <div

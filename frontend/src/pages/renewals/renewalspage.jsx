@@ -3,9 +3,11 @@ import { Download, Eye, History, Pencil, RotateCcw, Trash2, Search, ChevronDown,
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
+import SimStatusSummaryCards from '../../components/SimStatusSummaryCards/SimStatusSummaryCards';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { useAuth } from '../../context/AuthContext';
@@ -13,7 +15,7 @@ import './renewalspage.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STATUSES = ['Active', 'Deactive', 'Expired', 'Safe Custody'];
-const EMPTY_FILTERS = { search: '', date_from: '', date_to: '', validity: '', status: '' };
+const EMPTY_FILTERS = { search: '', customer_id: '', date_from: '', date_to: '', validity: '', status: '' };
 const EMPTY_FORM = { action: '', action_date: '', reactivation_date: '', validity_months: '', payment_amount: '', amount_paid: '0', payment_status: 'Not Paid', payment_mode: '', payment_date: '', transaction_id: '', notes: '', expired_to_safe_days: '', safe_to_deactive_days: '', installation_date: '' };
 
 const display = (value) => value === null || value === undefined || value === '' ? '-' : value;
@@ -55,6 +57,7 @@ const ModalGrid = ({ children }) => (
 const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 16, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}><h4 style={{ margin: '0 0 14px', borderBottom: '1px solid #e2e8f0', paddingBottom: 9, color: '#17243b', fontSize: 14, fontWeight: 700 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : key === 'validity_months' && record?.[key] ? formatValidity(record[key]) : display(record?.[key]); const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <input className="form-control" type="date" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
 
 const RenewalsPage = () => {
+    const location = useLocation();
     const { currentUser } = useAuth();
     const roleName = typeof currentUser?.role === 'string'
         ? currentUser.role
@@ -62,8 +65,15 @@ const RenewalsPage = () => {
     const isSuperAdmin = String(roleName).trim().toLowerCase().replace(/[\s_-]/g, '') === 'superadmin';
     const exportMenuRef = useRef(null);
     const [rows, setRows] = useState([]);
-    const [filters, setFilters] = useState(EMPTY_FILTERS);
+    const [filters, setFilters] = useState(() => {
+        const status = new URLSearchParams(location.search).get('status') || '';
+        return STATUSES.includes(status) ? { ...EMPTY_FILTERS, status } : EMPTY_FILTERS;
+    });
     const [validities, setValidities] = useState([]);
+    const [customers, setCustomers] = useState([]);
+    const [summaryCounts, setSummaryCounts] = useState(null);
+    const [summaryLoading, setSummaryLoading] = useState(true);
+    const [summaryError, setSummaryError] = useState('');
     const [years, setYears] = useState([]);
     const [pagination, setPagination] = useState({ page: 1, page_size: 10, total: 0 });
     const [loading, setLoading] = useState(true);
@@ -90,6 +100,8 @@ const RenewalsPage = () => {
     const load = async (page = 1, nextFilters = filters, pageSize = pagination.page_size) => {
         try {
             setLoading(true);
+            setSummaryLoading(true);
+            setSummaryError('');
             const params = { page, page_size: pageSize, ...Object.fromEntries(Object.entries(nextFilters).filter(([, value]) => value !== '')) };
             const response = await api.get('/renewals/list.php', { params });
             const data = response.data?.data || {};
@@ -97,12 +109,19 @@ const RenewalsPage = () => {
             setPagination(data.pagination || { page, page_size: pageSize, total: 0 });
             setValidities(Array.isArray(data.validities) ? data.validities : []);
             setYears(Array.isArray(data.years) ? data.years : []);
+            setCustomers(Array.isArray(data.customers) ? data.customers : []);
+            setSummaryCounts(data.summary_counts || null);
         } catch (error) {
-            showGlobalError(error.response?.data?.message || error.message || 'Failed to load renewals.');
-        } finally { setLoading(false); }
+            const message = error.response?.data?.message || error.message || 'Failed to load renewals.';
+            setSummaryError(message);
+            showGlobalError(message);
+        } finally {
+            setLoading(false);
+            setSummaryLoading(false);
+        }
     };
 
-    useEffect(() => { load(1, filters); }, [filters.search, filters.date_from, filters.date_to, filters.validity, filters.status]);
+    useEffect(() => { load(1, filters); }, [filters.search, filters.customer_id, filters.date_from, filters.date_to, filters.validity, filters.status]);
 
     useEffect(() => {
         if (!exportMenuOpen) return undefined;
@@ -466,6 +485,13 @@ const RenewalsPage = () => {
             </div>
             <button className="btn" type="button" onClick={() => load(pagination.page, filters)}><RotateCcw size={16} /> Refresh</button>
         </div></div>
+        <SimStatusSummaryCards
+            counts={summaryCounts}
+            loading={summaryLoading}
+            error={summaryError}
+            selectedStatus={filters.status}
+            onSelectStatus={(status) => setFilters((current) => ({ ...current, status }))}
+        />
         {exportNotice && <div className={`renewals-export-notice${exportNotice.startsWith('No renewal') ? ' is-empty' : ''}`} role="status">{exportNotice}</div>}
         <div className="table-filter-card card" style={{ padding: '20px 22px', marginBottom: '20px' }}>
             <div className="table-filter-grid">
@@ -477,6 +503,23 @@ const RenewalsPage = () => {
                         <Search size={16} className="search-icon" />
                         <input className="form-control filter-input has-icon table-filter-search" placeholder="Search username, mobile, vehicle, IMEI, SIM, model" value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} />
                     </div>
+                </div>
+
+                <div className="filter-group">
+                    <label className="filter-label" htmlFor="renewals-customer-filter">Customer</label>
+                    <select
+                        id="renewals-customer-filter"
+                        className="form-control filter-input"
+                        value={filters.customer_id}
+                        onChange={(event) => updateFilter('customer_id', event.target.value)}
+                    >
+                        <option value="">All Customers</option>
+                        {customers.map((customer) => (
+                            <option key={customer.id} value={customer.id}>
+                                {customer.username}{customer.primary_mobile_no ? ` (${customer.primary_mobile_no})` : ''}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
                 {/* DATE FROM */}

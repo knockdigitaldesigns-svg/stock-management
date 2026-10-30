@@ -7,6 +7,7 @@ import { showGlobalError } from '../../../context/ErrorContext';
 import TableFilterBar from '../../../components/TableFilterBar/TableFilterBar';
 import Pagination from '../../../components/Pagination/Pagination';
 import Modal from '../../../components/Modal/Modal';
+import SimStatusSummaryCards from '../../../components/SimStatusSummaryCards/SimStatusSummaryCards';
 import { useAuth } from '../../../context/AuthContext';
 import { Ban, Download, Edit2, Eye, Play, RotateCw, ShieldCheck, Trash2, Undo2, Upload } from 'lucide-react';
 import DealerSimActivationEditModal from './DealerSimActivationEditModal';
@@ -57,6 +58,7 @@ const DealerSimActivation = () => {
     };
 
     const [sims, setSims] = useState([]);
+    const [summaryCounts, setSummaryCounts] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -152,6 +154,7 @@ const DealerSimActivation = () => {
             if (fetchId !== latestFetchId.current) return;
             if (response.data.success) {
                 setSims(response.data.data?.sims || []);
+                setSummaryCounts(response.data.data?.summary_counts || null);
                 setDateYears(response.data.data?.date_years || { expiry_date: [] });
                 setTotalRecords(response.data.data?.pagination?.total_records || 0);
             } else {
@@ -420,6 +423,8 @@ const DealerSimActivation = () => {
             </div>
 
             {uploadSuccess && <div className="alert alert-success">{uploadSuccess}</div>}
+
+            <SimStatusSummaryCards counts={summaryCounts} loading={loading} error={error || ''} />
 
             <div className="card">
                 <div className="header-actions dealer-sim-bulk-actions" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>

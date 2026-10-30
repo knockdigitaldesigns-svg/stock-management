@@ -259,6 +259,52 @@ $countStmt->close();
 
 $totalPages = ceil($totalRecords / $limit);
 
+$summaryWhere = ["latest.owner_type = 'dealer'"];
+$summaryParams = [];
+$summaryTypes = '';
+if ($dealer_id > 0) {
+    $summaryWhere[] = 'latest.owner_id = ?';
+    $summaryParams[] = $dealer_id;
+    $summaryTypes .= 'i';
+}
+$summarySql = "
+    SELECT
+        COUNT(DISTINCT CASE
+            WHEN latest.sim_status = 'Active'
+             AND (latest.sim_expiry_date IS NULL OR latest.sim_expiry_date > CURDATE())
+            THEN latest.sim_id END) AS active_sims,
+        COUNT(DISTINCT CASE WHEN latest.sim_status = 'Safe Custody' THEN latest.sim_id END) AS safe_custody_sims,
+        COUNT(DISTINCT CASE
+            WHEN latest.sim_status = 'Expired'
+              OR (latest.sim_status = 'Active' AND latest.sim_expiry_date <= CURDATE())
+            THEN latest.sim_id END) AS expired_sims,
+        COUNT(DISTINCT CASE WHEN latest.sim_status = 'Deactive' THEN latest.sim_id END) AS deactivated_sims
+    FROM stock_allocations latest
+    INNER JOIN (
+        SELECT sim_id, MAX(id) AS latest_id
+        FROM stock_allocations
+        WHERE sim_id IS NOT NULL
+        GROUP BY sim_id
+    ) current_allocation ON current_allocation.latest_id = latest.id
+    WHERE " . implode(' AND ', $summaryWhere);
+$summaryStmt = $conn->prepare($summarySql);
+if (!$summaryStmt) {
+    $error = $conn->error;
+    $conn->close();
+    sendResponse(false, 'Failed to prepare dealer SIM status summary: ' . $error, [], [], 500);
+}
+if ($summaryParams) {
+    $summaryStmt->bind_param($summaryTypes, ...$summaryParams);
+}
+if (!$summaryStmt->execute()) {
+    $error = $summaryStmt->error;
+    $summaryStmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch dealer SIM status summary: ' . $error, [], [], 500);
+}
+$summaryCounts = $summaryStmt->get_result()->fetch_assoc() ?: [];
+$summaryStmt->close();
+
 $dateYearsQuery = "SELECT 'expiry_date' AS date_key, YEAR(sim_expiry_date) AS year
                    FROM stock_allocations
                    WHERE owner_type = 'dealer' AND sim_id IS NOT NULL
@@ -341,6 +387,12 @@ $conn->close();
 
 sendResponse(true, 'Data fetched successfully', [
     'sims' => $sims,
+    'summary_counts' => [
+        'active_sims' => (int) ($summaryCounts['active_sims'] ?? 0),
+        'safe_custody_sims' => (int) ($summaryCounts['safe_custody_sims'] ?? 0),
+        'expired_sims' => (int) ($summaryCounts['expired_sims'] ?? 0),
+        'deactivated_sims' => (int) ($summaryCounts['deactivated_sims'] ?? 0)
+    ],
     'date_years' => $dateYears,
     'pagination' => [
         'current_page' => $page,

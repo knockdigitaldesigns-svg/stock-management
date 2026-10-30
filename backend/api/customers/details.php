@@ -86,7 +86,11 @@ try {
             cvd.created_at,
             cvd.updated_at,
             vci.id AS vehicle_installation_id,
-            vci.installation_person_type AS vehicle_installation_person_type,
+            CASE
+                WHEN TRIM(COALESCE(vci.installation_person_type, '')) = ''
+                    AND vci.installation_person_id IS NULL THEN 'Direct'
+                ELSE vci.installation_person_type
+            END AS vehicle_installation_person_type,
             vci.installation_person_id AS vehicle_installation_person_id,
             vci.lead_closure_id AS vehicle_lead_closure_id,
             CASE
@@ -94,7 +98,13 @@ try {
                 ELSE vtech.technician_name
             END AS vehicle_installation_person,
             CASE
-                WHEN vci.installation_person_type = 'Dealer' THEN CONCAT(COALESCE(vdlr.installation_status, 'Dealer'), ' Dealer')
+                WHEN vci.installation_person_type = 'Dealer' THEN
+                    CASE
+                        WHEN LOWER(TRIM(COALESCE(vdlr.installation_status, ''))) = 'offsite' THEN 'Offsite Dealer'
+                        ELSE 'Onsite Dealer'
+                    END
+                WHEN TRIM(COALESCE(vci.installation_person_type, '')) = ''
+                    AND vci.installation_person_id IS NULL THEN 'Direct'
                 ELSE vci.installation_person_type
             END AS vehicle_installation_type,
             vlc.lead_closure_name AS vehicle_lead_closure,
@@ -224,14 +234,24 @@ try {
         "SELECT
             ci.id,
             ci.customer_id,
-            ci.installation_person_type,
+            CASE
+                WHEN TRIM(COALESCE(ci.installation_person_type, '')) = ''
+                    AND ci.installation_person_id IS NULL THEN 'Direct'
+                ELSE ci.installation_person_type
+            END AS installation_person_type,
             ci.installation_person_id,
             CASE
                 WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name
                 ELSE t.technician_name
             END AS installation_person,
             CASE
-                WHEN ci.installation_person_type = 'Dealer' THEN CONCAT(COALESCE(d.installation_status, 'Dealer'), ' Dealer')
+                WHEN ci.installation_person_type = 'Dealer' THEN
+                    CASE
+                        WHEN LOWER(TRIM(COALESCE(d.installation_status, ''))) = 'offsite' THEN 'Offsite Dealer'
+                        ELSE 'Onsite Dealer'
+                    END
+                WHEN TRIM(COALESCE(ci.installation_person_type, '')) = ''
+                    AND ci.installation_person_id IS NULL THEN 'Direct'
                 ELSE ci.installation_person_type
             END AS installation_type,
             ci.lead_closure_id,
@@ -381,7 +401,11 @@ $installationStmt = $conn->prepare(
     "SELECT
         ci.id,
         ci.customer_id,
-        ci.installation_person_type,
+        CASE
+            WHEN TRIM(COALESCE(ci.installation_person_type, '')) = ''
+                AND ci.installation_person_id IS NULL THEN 'Direct'
+            ELSE ci.installation_person_type
+        END AS installation_person_type,
         ci.installation_person_id,
         CASE
             WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name

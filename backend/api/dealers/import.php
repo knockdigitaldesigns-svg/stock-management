@@ -9,6 +9,7 @@ require_once '../../middleware/auth.php';
 require_once '../../utils/excel_reader.php';
 require_once '../../utils/payment_modes.php';
 require_once '../../utils/transaction_ids.php';
+require_once '../../utils/validation_error_response.php';
 
 handlePreflight();
 
@@ -42,6 +43,9 @@ $optionalHeaders = [
 
 $parsed = parseXlsxRows($file['tmp_name'], $requiredHeaders, $optionalHeaders);
 if (isset($parsed['error'])) {
+    if (!empty($parsed['errors'])) {
+        sendValidationErrorResponse($parsed['error'], $parsed['errors']);
+    }
     sendResponse(false, $parsed['error'], [], [], 400);
 }
 
@@ -60,11 +64,12 @@ $errors = [];
 $validRows = [];
 $seenImeis = [];
 $seenSimNos = [];
+$seenTransactionIds = [];
 $allowedSoftware = ['Tracoo', 'Tracco', 'Eagle India', 'Navilap', 'Oneqlick', 'Trackzee', 'Gps Monitor'];
 $allowedPaymentModes = getPaymentModes();
 
 foreach ($rows as $index => $row) {
-    $rowNumber = $index + 2;
+    $rowNumber = (int) ($row['__row_number'] ?? ($index + 2));
     $rowErrors = [];
 
     $dealerName = trim((string) ($row['Dealer Name'] ?? ''));
@@ -75,7 +80,7 @@ foreach ($rows as $index => $row) {
     }
 
     if (!in_array($allocationType, ['device', 'sim', 'both'], true)) {
-        $rowErrors[] = "Row {$rowNumber}: Allocation Type must be device, sim, or both.";
+        $rowErrors[] = "Row {$rowNumber}: Allocation Type '{$allocationType}' is invalid; expected device, sim, or both.";
     }
 
     // 1. Dealer Lookup
@@ -138,15 +143,18 @@ foreach ($rows as $index => $row) {
         } else {
             $parsedDevDate = parseAndNormalizeDate($devDateRaw);
             if ($parsedDevDate === false || isFutureDate($parsedDevDate)) {
-                $rowErrors[] = "Row {$rowNumber}: Invalid or future Device Date.";
+                $rowErrors[] = "Row {$rowNumber}: Device Date '{$devDateRaw}' is invalid or in the future.";
             } else {
                 $devDateIso = $parsedDevDate;
             }
         }
 
+        if ($devAmtRaw !== '' && (!is_numeric($devAmtRaw) || (float) $devAmtRaw < 0)) {
+            $rowErrors[] = "Row {$rowNumber}: Device Amount '{$devAmtRaw}' must be a non-negative number.";
+        }
         if ($dealer && $dealer['installation_status'] === 'Not Willing') {
-            if ($devAmtRaw === '' || !is_numeric($devAmtRaw) || (float)$devAmtRaw < 0) {
-                $rowErrors[] = "Row {$rowNumber}: Device Amount is required for Not Willing dealer.";
+            if ($devAmtRaw === '') {
+                $rowErrors[] = "Row {$rowNumber}: Device Amount '{$devAmtRaw}' is required and must be non-negative for Not Willing dealer.";
             }
         }
     }
@@ -184,15 +192,18 @@ foreach ($rows as $index => $row) {
         } else {
             $parsedSimDate = parseAndNormalizeDate($simDateRaw);
             if ($parsedSimDate === false || isFutureDate($parsedSimDate)) {
-                $rowErrors[] = "Row {$rowNumber}: Invalid or future SIM Date.";
+                $rowErrors[] = "Row {$rowNumber}: SIM Date '{$simDateRaw}' is invalid or in the future.";
             } else {
                 $simDateIso = $parsedSimDate;
             }
         }
 
+        if ($simAmtRaw !== '' && (!is_numeric($simAmtRaw) || (float) $simAmtRaw < 0)) {
+            $rowErrors[] = "Row {$rowNumber}: SIM Amount '{$simAmtRaw}' must be a non-negative number.";
+        }
         if ($dealer && $dealer['installation_status'] === 'Not Willing') {
-            if ($simAmtRaw === '' || !is_numeric($simAmtRaw) || (float)$simAmtRaw < 0) {
-                $rowErrors[] = "Row {$rowNumber}: SIM Amount is required for Not Willing dealer.";
+            if ($simAmtRaw === '') {
+                $rowErrors[] = "Row {$rowNumber}: SIM Amount '{$simAmtRaw}' is required and must be non-negative for Not Willing dealer.";
             }
         }
     }
@@ -201,7 +212,7 @@ foreach ($rows as $index => $row) {
     $software = trim((string) ($row['Software'] ?? ''));
     if ($software !== '') {
         if (!in_array($software, $allowedSoftware, true)) {
-            $rowErrors[] = "Row {$rowNumber}: Invalid Software.";
+            $rowErrors[] = "Row {$rowNumber}: Software '{$software}' is invalid.";
         } elseif ($dealer) {
             $swStmt = $conn->prepare("SELECT software FROM dealer_software WHERE dealer_id = ?");
             $swStmt->bind_param("i", $dealer['id']);
@@ -237,20 +248,26 @@ foreach ($rows as $index => $row) {
     $devAmt = is_numeric($devAmtRaw) ? (float)$devAmtRaw : 0.0;
     $simAmt = is_numeric($simAmtRaw) ? (float)$simAmtRaw : 0.0;
     $totalAmountRaw = $row['Total Amount'] ?? '';
+    if ($totalAmountRaw !== '' && (!is_numeric($totalAmountRaw) || (float) $totalAmountRaw < 0)) {
+        $rowErrors[] = "Row {$rowNumber}: Total Amount '{$totalAmountRaw}' must be a non-negative number.";
+    }
     $totalAmount = ($devAmt + $simAmt) > 0 ? ($devAmt + $simAmt) : (is_numeric($totalAmountRaw) ? (float)$totalAmountRaw : 0.0);
 
     if ($dealer && $dealer['installation_status'] === 'Not Willing' && $totalAmount <= 0) {
-        $rowErrors[] = "Row {$rowNumber}: Total Amount is required and must be greater than 0 for Not Willing dealer.";
+        $rowErrors[] = "Row {$rowNumber}: Total Amount '{$totalAmountRaw}' is required and must be greater than 0 for Not Willing dealer.";
     }
 
     $amountPaidRaw = $row['Amount Paid'] ?? '';
     $amountPaid = is_numeric($amountPaidRaw) ? (float)$amountPaidRaw : 0.0;
 
+    if ($amountPaidRaw !== '' && !is_numeric($amountPaidRaw)) {
+        $rowErrors[] = "Row {$rowNumber}: Amount Paid '{$amountPaidRaw}' must be a number.";
+    }
     if ($amountPaid < 0) {
-        $rowErrors[] = "Row {$rowNumber}: Amount Paid cannot be negative.";
+        $rowErrors[] = "Row {$rowNumber}: Amount Paid '{$amountPaidRaw}' cannot be negative.";
     }
     if ($amountPaid > $totalAmount) {
-        $rowErrors[] = "Row {$rowNumber}: Amount Paid cannot exceed Total Amount.";
+        $rowErrors[] = "Row {$rowNumber}: Amount Paid '{$amountPaidRaw}' cannot exceed Total Amount '{$totalAmount}'.";
     }
 
     $pendingAmount = max(0, $totalAmount - $amountPaid);
@@ -260,14 +277,30 @@ foreach ($rows as $index => $row) {
     $paymentMode = trim((string) ($row['Payment Mode'] ?? ''));
     $transactionId = (string) ($row['Transaction ID'] ?? '');
     if ($transactionId !== '' && !preg_match('/^[0-9]{6}$/', $transactionId)) {
-        $rowErrors[] = "Row {$rowNumber}: Transaction ID must contain exactly 6 digits.";
+        $rowErrors[] = "Row {$rowNumber}: Transaction ID '{$transactionId}' must contain exactly 6 digits.";
+    } elseif ($transactionId !== '') {
+        if (isset($seenTransactionIds[$transactionId])) {
+            $rowErrors[] = "Row {$rowNumber}: Transaction ID '{$transactionId}' is duplicated in this file.";
+        } else {
+            $seenTransactionIds[$transactionId] = true;
+        }
+        $transactionStmt = $conn->prepare('SELECT transaction_id FROM transaction_id_registry WHERE transaction_id = ? LIMIT 1');
+        if (!$transactionStmt) {
+            throw new RuntimeException('Unable to prepare transaction ID validation: ' . $conn->error);
+        }
+        $transactionStmt->bind_param('s', $transactionId);
+        $transactionStmt->execute();
+        if ($transactionStmt->get_result()->num_rows > 0) {
+            $rowErrors[] = "Row {$rowNumber}: Transaction ID '{$transactionId}' is already in use.";
+        }
+        $transactionStmt->close();
     }
 
     if ($paymentStatus === 'Partially Paid' || $paymentStatus === 'Paid') {
         if ($paymentMode === '') {
             $rowErrors[] = "Row {$rowNumber}: Payment Mode is required for {$paymentStatus} payment.";
         } elseif (!in_array($paymentMode, $allowedPaymentModes, true)) {
-            $rowErrors[] = "Row {$rowNumber}: Invalid Payment Mode.";
+            $rowErrors[] = "Row {$rowNumber}: Payment Mode '{$paymentMode}' is invalid.";
         }
 
         if ($paymentMode !== '' && $paymentMode !== 'Cash' && $transactionId === '') {
@@ -305,7 +338,7 @@ foreach ($rows as $index => $row) {
 
 if (!empty($errors)) {
     $conn->close();
-    sendResponse(false, 'Excel validation failed.', ['errors' => array_values(array_unique($errors))], [], 400);
+    sendValidationErrorResponse('Excel validation failed; no stock allocations were made.', $errors);
 }
 
 $conn->begin_transaction();

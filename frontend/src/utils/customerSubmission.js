@@ -7,6 +7,47 @@ const ensureSuccess = (response, fallback) => {
     return response.data?.data || {};
 };
 
+const paymentValue = (payment, snakeCase, camelCase, fallback = undefined) => {
+    const value = payment?.[snakeCase] ?? payment?.[camelCase];
+    return value === '' || value === null || value === undefined ? fallback : value;
+};
+
+export const buildPaymentPart2Payload = (paymentPart1 = {}, paymentPart2 = {}) => ({
+    total_sale_amount: Number(paymentValue(
+        paymentPart2,
+        'total_sale_amount',
+        'totalSaleAmount',
+        paymentValue(paymentPart1, 'total_sale_amount', 'totalSaleAmount')
+    )),
+    transaction_id: paymentValue(
+        paymentPart2,
+        'transaction_id',
+        'transactionId',
+        paymentValue(paymentPart1, 'transaction_id', 'transactionId', null)
+    ),
+    payment_mode: paymentValue(
+        paymentPart2,
+        'payment_mode',
+        'paymentMode',
+        paymentValue(paymentPart1, 'payment_mode', 'paymentMode', null)
+    ),
+    device_charge: Number(paymentValue(paymentPart2, 'device_charge', 'deviceCharge', 0)),
+    software_charge: Number(paymentValue(paymentPart2, 'software_charge', 'softwareCharge', 0)),
+    technician_charge: Number(paymentValue(paymentPart2, 'technician_charge', 'technicianCharge', 0)),
+    sim_charge: Number(paymentValue(paymentPart2, 'sim_charge', 'simCharge', 0)),
+    courier_charge: Number(paymentValue(paymentPart2, 'courier_charge', 'courierCharge', 0)),
+    ...(Object.prototype.hasOwnProperty.call(paymentPart2, 'cash_to_technician')
+        || Object.prototype.hasOwnProperty.call(paymentPart2, 'cashToTechnician') ? {
+        cash_to_technician: Boolean(paymentValue(paymentPart2, 'cash_to_technician', 'cashToTechnician', false)),
+        cash_to_dealer: Boolean(paymentValue(paymentPart2, 'cash_to_dealer', 'cashToDealer', false)),
+        cash_to_et: Boolean(paymentValue(paymentPart2, 'cash_to_et', 'cashToEt', false))
+    } : {}),
+    total_amount: Number(paymentValue(paymentPart2, 'total_amount', 'totalAmount', 0)),
+    amount_paid: Number(paymentValue(paymentPart2, 'amount_paid', 'amountPaid', 0)),
+    amount_pending: Number(paymentValue(paymentPart2, 'amount_pending', 'amountPending', 0)),
+    payment_status: paymentValue(paymentPart2, 'payment_status', 'paymentStatus', '')
+});
+
 export const saveCustomerDraft = async (submissionId, existingCustomerId, draftData) => {
     const response = await api.post('/customers/verification/draft.php', {
         submission_id: Number(submissionId || 0),
@@ -104,10 +145,44 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
     let vehicleId = 0;
     let paymentId = 0;
 
+    const savePaymentParts = async (currentVehicleId, paymentPart1, paymentPart2, changed) => {
+        if (changed.paymentPart1 && paymentPart1) {
+            const part1Result = ensureSuccess(await api.post('/customers/payments/create.php', {
+                customer_id: customerId,
+                vehicle_id: currentVehicleId,
+                payment_step: 1,
+                total_sale_amount: Number(paymentValue(paymentPart1, 'total_sale_amount', 'totalSaleAmount')),
+                transaction_id: paymentValue(paymentPart1, 'transaction_id', 'transactionId', null),
+                payment_mode: paymentValue(paymentPart1, 'payment_mode', 'paymentMode', null),
+                payment_status: 'Pending',
+                verification_submission_id: submissionId
+            }), 'Failed to save Payment Part 1.');
+            paymentId = Number(part1Result.payment_id || paymentId || 0);
+            await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
+        }
+
+        if (changed.paymentPart2 && paymentPart2) {
+            const result = ensureSuccess(await api.post('/customers/payments/create.php', {
+                customer_id: customerId,
+                vehicle_id: currentVehicleId,
+                payment_step: 2,
+                ...buildPaymentPart2Payload(paymentPart1, paymentPart2),
+                verification_submission_id: submissionId
+            }), 'Failed to save Payment Part 2.');
+            paymentId = Number(result.payment_id || paymentId || 0);
+            await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
+        }
+    };
+
     for (const vehicle of vehicles) {
         const changed = vehicle.changed || {};
         let currentVehicleId = Number(vehicle.vehicle_record_id || vehicle.id || 0);
-        if (changed.vehicle) {
+        const hasMissingAssetRelationship = currentVehicleId > 0 && (
+            Number(vehicle.device_id || 0) <= 0 ||
+            Number(vehicle.sim_id_1 || 0) <= 0 ||
+            (String(vehicle.sim_no_2 || '').trim() !== '' && Number(vehicle.sim_id_2 || 0) <= 0)
+        );
+        if (changed.vehicle || hasMissingAssetRelationship) {
             const vehiclePayload = {
                 customer_id: customerId,
                 append_vehicle: Boolean(vehicle.append_vehicle),
@@ -157,46 +232,19 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
 
         const paymentPart1 = vehicle.payment_part1 || submission.payment_part1;
         const paymentPart2 = vehicle.payment_part2 || submission.payment_part2;
-        if (changed.paymentPart1 && paymentPart1) {
-            const part1Result = ensureSuccess(await api.post('/customers/payments/create.php', {
-                customer_id: customerId,
-                vehicle_id: currentVehicleId,
-                payment_step: 1,
-                total_sale_amount: Number(paymentPart1.total_sale_amount ?? paymentPart1.totalSaleAmount),
-                transaction_id: paymentPart1.transaction_id ?? paymentPart1.transactionId ?? null,
-                payment_mode: paymentPart1.payment_mode ?? paymentPart1.paymentMode ?? null,
-                payment_status: 'Pending'
-            }), 'Failed to save Payment Part 1.');
-            paymentId = Number(part1Result.payment_id || paymentId || 0);
-            await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
-        }
+        await savePaymentParts(currentVehicleId, paymentPart1, paymentPart2, changed);
+    }
 
-        if (changed.paymentPart2 && paymentPart2) {
-            const result = ensureSuccess(await api.post('/customers/payments/create.php', {
-                customer_id: customerId,
-                vehicle_id: currentVehicleId,
-                payment_step: 2,
-                total_sale_amount: Number(paymentPart2.total_sale_amount),
-                transaction_id: paymentPart2.transaction_id || null,
-                payment_mode: paymentPart2.payment_mode || null,
-                device_charge: Number(paymentPart2.device_charge || 0),
-                software_charge: Number(paymentPart2.software_charge || 0),
-                technician_charge: Number(paymentPart2.technician_charge || 0),
-                sim_charge: Number(paymentPart2.sim_charge || 0),
-                courier_charge: Number(paymentPart2.courier_charge || 0),
-                ...(Object.prototype.hasOwnProperty.call(paymentPart2, 'cash_to_technician') ? {
-                    cash_to_technician: Boolean(paymentPart2.cash_to_technician),
-                    cash_to_dealer: Boolean(paymentPart2.cash_to_dealer),
-                    cash_to_et: Boolean(paymentPart2.cash_to_et)
-                } : {}),
-                total_amount: Number(paymentPart2.total_amount),
-                amount_paid: Number(paymentPart2.amount_paid),
-                amount_pending: Number(paymentPart2.amount_pending),
-                payment_status: paymentPart2.payment_status
-            }), 'Failed to save Payment Part 2.');
-            paymentId = Number(result.payment_id || paymentId || 0);
-            await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
-        }
+    if (vehicles.length === 0) {
+        await savePaymentParts(
+            0,
+            submission.payment_part1,
+            submission.payment_part2,
+            {
+                paymentPart1: Boolean(submission.payment_part1),
+                paymentPart2: Boolean(submission.payment_part2)
+            }
+        );
     }
 
     return { customerId, vehicleId, paymentId };

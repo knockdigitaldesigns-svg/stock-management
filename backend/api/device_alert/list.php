@@ -72,7 +72,12 @@ if ($configResult) {
                 SELECT
                     COUNT(DISTINCT sa.device_id) AS total_count,
                     COUNT(DISTINCT CASE WHEN
-                        EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id)
+                        EXISTS (
+                            SELECT 1 FROM customer_vehicle_details cvd
+                            JOIN devices assigned_device ON assigned_device.id = sa.device_id
+                            WHERE cvd.device_id = sa.device_id
+                               OR BINARY cvd.imei_no = BINARY assigned_device.imei_no
+                        )
                         OR EXISTS (
                             SELECT 1 FROM stock_transactions st
                             WHERE st.device_id = sa.device_id

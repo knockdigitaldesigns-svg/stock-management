@@ -4,6 +4,8 @@ import { Download } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import { parseDate } from '../../../utils/date';
+import BulkUploadValidationErrors from '../../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../../utils/bulkUploadErrors';
 
 const expectedColumns = ['SIM No', 'Dealer Name', 'Activation Date', 'Validity'];
 const normalizeHeader = (value) => String(value ?? '').trim().toLowerCase();
@@ -21,7 +23,7 @@ const activationDateToIso = (value) => {
 
 const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
     const [file, setFile] = useState(null);
-    const [error, setError] = useState('');
+    const [errors, setErrors] = useState([]);
     const [loading, setLoading] = useState(false);
 
     const downloadTemplate = () => {
@@ -38,28 +40,28 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
         const selectedFile = event.target.files?.[0] || null;
         if (selectedFile && !/\.(xlsx|xls)$/i.test(selectedFile.name)) {
             setFile(null);
-            setError('Choose an .xlsx or .xls file.');
+            setErrors(['Choose an .xlsx or .xls file.']);
             event.target.value = '';
             return;
         }
         setFile(selectedFile);
-        setError('');
+        setErrors([]);
     };
 
     const handleUpload = async () => {
         if (!file) {
-            setError('Choose an Excel file to upload.');
+            setErrors(['Choose an Excel file to upload.']);
             return;
         }
 
         setLoading(true);
-        setError('');
+        setErrors([]);
         try {
             const buffer = await file.arrayBuffer();
             const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
             const sheetName = workbook.SheetNames[0];
             if (!sheetName) {
-                setError('Excel file is empty.');
+                setErrors(['Excel file is empty.']);
                 return;
             }
 
@@ -71,7 +73,7 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
                 blankrows: true
             });
             if (!sheetRows.length) {
-                setError('Excel file is empty.');
+                setErrors(['Excel file is empty.']);
                 return;
             }
 
@@ -79,7 +81,7 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
             const columnIndexes = expectedColumns.map((column) => headers.indexOf(normalizeHeader(column)));
             const missingColumns = expectedColumns.filter((_, index) => columnIndexes[index] < 0);
             if (missingColumns.length) {
-                setError(`Missing required columns: ${missingColumns.join(', ')}.`);
+                setErrors(missingColumns.map((column) => `Required column '${column}' is missing.`));
                 return;
             }
 
@@ -98,23 +100,24 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
                     sim_no: simNo,
                     dealer_name: String(cellValue(columnIndexes[1])).trim(),
                     activation_date: activationDate,
+                    activation_date_input: String(rawActivationDate ?? '').trim(),
                     validity: cellValue(columnIndexes[3])
                 }];
             });
 
             if (!rows.length) {
-                setError('Excel file contains no data rows.');
+                setErrors(['Excel file contains no data rows.']);
                 return;
             }
 
             const response = await api.post('/dealers/sim_activation_bulk.php', { rows });
             if (!response.data.success) {
-                setError(response.data.message || 'Bulk upload failed.');
+                setErrors(normalizeBulkUploadErrors(response.data, 'Bulk upload failed.'));
                 return;
             }
             onSuccess(response.data.data?.activated_count || rows.length);
         } catch (uploadError) {
-            setError(uploadError.response?.data?.message || 'Unable to read or upload the Excel file.');
+            setErrors(normalizeBulkUploadErrors(uploadError.response?.data, uploadError.message || 'Unable to read or upload the Excel file.'));
         } finally {
             setLoading(false);
         }
@@ -170,7 +173,7 @@ const DealerSimActivationBulkUploadModal = ({ onClose, onSuccess }) => {
                 />
                 {file && <p className="text-muted" style={{ marginTop: '0.5rem' }}>Selected file: {file.name}</p>}
             </div>
-            {error && <pre className="alert alert-danger" style={{ whiteSpace: 'pre-wrap', marginTop: '1rem' }}>{error}</pre>}
+            <BulkUploadValidationErrors errors={errors} />
         </Modal>
     );
 };

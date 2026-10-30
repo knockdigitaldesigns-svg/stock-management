@@ -29,6 +29,12 @@ if (!empty($validation['errors'])) {
 }
 
 $validData = $validation['data'];
+$requestedStatus = array_key_exists('status', $data)
+    ? strtolower(trim((string) $data['status']))
+    : null;
+if ($requestedStatus !== null && !in_array($requestedStatus, ['active', 'inactive'], true)) {
+    sendResponse(false, 'Dealer status must be Active or Inactive.', [], [], 400);
+}
 
 $db = new Database();
 $conn = $db->getConnection();
@@ -43,7 +49,7 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
-$oldStmt = $conn->prepare('SELECT dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes FROM dealers WHERE id = ? LIMIT 1');
+$oldStmt = $conn->prepare('SELECT dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, status, software, threshold_amount, notes FROM dealers WHERE id = ? LIMIT 1');
 $oldStmt->bind_param('i', $id);
 $oldStmt->execute();
 $oldDealer = $oldStmt->get_result()->fetch_assoc();
@@ -52,6 +58,7 @@ if (!$oldDealer) {
     $conn->close();
     sendResponse(false, 'Dealer not found', [], [], 404);
 }
+$status = $requestedStatus ?? strtolower((string) ($oldDealer['status'] ?? 'active'));
 
 $newDealer = [
     'dealer_name' => $validData['dealer_name'],
@@ -60,6 +67,7 @@ $newDealer = [
     'location' => $validData['location'],
     'enrolled_date' => $validData['enrolled_date'],
     'installation_status' => $validData['installation_status'],
+    'status' => $status,
     'software' => $validData['software'],
     'threshold_amount' => $validData['threshold_amount'],
     'notes' => $validData['notes']
@@ -68,8 +76,8 @@ $conn->begin_transaction();
 try {
     writeChangedFields($conn, $id, 'Dealer', $oldDealer, $newDealer, $currentUser);
 
-    $stmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, software = ?, threshold_amount = ?, notes = ? WHERE id = ?');
-    $stmt->bind_param('sssssssdsi', $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes'], $id);
+    $stmt = $conn->prepare('UPDATE dealers SET dealer_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, installation_status = ?, status = ?, software = ?, threshold_amount = ?, notes = ? WHERE id = ?');
+    $stmt->bind_param('ssssssssdsi', $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $status, $validData['software'], $validData['threshold_amount'], $validData['notes'], $id);
 
     if ($stmt->execute()) {
         $stmt->close();

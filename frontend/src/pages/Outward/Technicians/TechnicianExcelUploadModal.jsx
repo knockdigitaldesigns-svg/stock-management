@@ -2,9 +2,9 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, AlertCircle, CheckCircle } from 'lucide-react';
 import api from '../../../services/api';
-import { parseDate, isFutureDate } from '../../../utils/date';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
-import { showGlobalError } from '../../../context/ErrorContext';
+import BulkUploadValidationErrors from '../../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../../utils/bulkUploadErrors';
 
 export const TECHNICIAN_ALLOCATION_COLUMNS = [
     'Technician Name', 'Allocation Type', 'Device Date', 'IMEI No',
@@ -21,9 +21,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
     const [successMsg, setSuccessMsg] = useState('');
 
     const triggerErrors = (messages) => {
-        const list = Array.isArray(messages) ? messages : [messages];
-        setErrors(list);
-        showGlobalError(list, 'Excel Upload Validation Error');
+        setErrors(normalizeBulkUploadErrors(messages));
     };
 
     const downloadTemplate = () => {
@@ -58,39 +56,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
             if (!rows.length) return triggerErrors(['Excel file is empty.']);
             const headers = headerRow.map(normalizeHeader).filter(Boolean);
             const missing = TECHNICIAN_ALLOCATION_COLUMNS.filter((header) => !headers.includes(normalizeHeader(header)));
-            if (missing.length) return triggerErrors([`Required column '${missing[0]}' is missing.`]);
-
-            const validationErrors = [];
-            const seen = new Set();
-            rows.forEach((row, index) => {
-                const rowNum = index + 2;
-                const value = (header) => row[Object.keys(row).find((key) => normalizeHeader(key) === normalizeHeader(header))];
-                const technician = String(value('Technician Name') || '').trim();
-                const type = String(value('Allocation Type') || '').trim().toLowerCase();
-                const deviceDate = value('Device Date');
-                const simDate = value('SIM Date');
-                const imei = String(value('IMEI No') || '').replace(/\D/g, '');
-                const simNo = String(value('SIM Number') || '').trim();
-                if (!technician) validationErrors.push(`Row ${rowNum}: Technician Name is required.`);
-                if (!['device', 'sim', 'both'].includes(type)) validationErrors.push(`Row ${rowNum}: Allocation Type must be device, sim, or both.`);
-                if (type === 'device' || type === 'both') {
-                    const parsed = parseDate(deviceDate);
-                    if (deviceDate === '' || deviceDate === undefined) validationErrors.push(`Row ${rowNum}: Device Date is required.`);
-                    else if (!parsed || isFutureDate(parsed)) validationErrors.push(`Row ${rowNum}: Invalid or future Device Date.`);
-                    if (!/^\d{15}$/.test(imei)) validationErrors.push(`Row ${rowNum}: IMEI No must contain exactly 15 digits.`);
-                }
-                if (type === 'sim' || type === 'both') {
-                    const parsed = parseDate(simDate);
-                    if (simDate === '' || simDate === undefined) validationErrors.push(`Row ${rowNum}: SIM Date is required.`);
-                    else if (!parsed || isFutureDate(parsed)) validationErrors.push(`Row ${rowNum}: Invalid or future SIM Date.`);
-                    if (!simNo) validationErrors.push(`Row ${rowNum}: SIM Number is required.`);
-                }
-                [imei ? `device:${imei}` : '', simNo ? `sim:${simNo}` : ''].filter(Boolean).forEach((key) => {
-                    if (seen.has(key)) validationErrors.push(`Row ${rowNum}: Duplicate stock item in uploaded Excel.`);
-                    seen.add(key);
-                });
-            });
-            if (validationErrors.length) return triggerErrors([...new Set(validationErrors)]);
+            if (missing.length) return triggerErrors(missing.map((header) => `Required column '${header}' is missing.`));
 
             const formData = new FormData();
             formData.append('file', file);
@@ -100,7 +66,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
             setTimeout(onSuccess, 1000);
         } catch (error) {
             const data = error.response?.data;
-            triggerErrors(data?.data?.errors || data?.errors || [data?.message || error.message || 'Error uploading allocations.']);
+            triggerErrors(normalizeBulkUploadErrors(data, error.message || 'Error uploading allocations.'));
         } finally { setLoading(false); }
     };
 
@@ -120,6 +86,7 @@ const TechnicianExcelUploadModal = ({ onClose, onSuccess }) => {
                         </ul>
                         <button className="btn btn-outline" onClick={downloadTemplate} style={{ marginTop: '1rem', fontSize: '0.875rem' }}><Download size={14} /> Download Sample Allocation Template</button>
                     </div>
+                    <BulkUploadValidationErrors errors={errors} title="Upload failed" />
                     <div className="form-group"><label className="form-label">Select Excel File (.xlsx)</label><input type="file" accept=".xlsx" className="form-control" onChange={handleFileChange} disabled={loading} /></div>
                     {errors.length > 0 && <div className="alert alert-danger" style={{ maxHeight: 240, overflowY: 'auto' }}><div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}><AlertCircle size={16} /><strong>Validation Errors:</strong></div><ul style={{ margin: 0, paddingLeft: '1.5rem' }}>{errors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
                     {successMsg && <div className="alert badge-success" style={{ padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CheckCircle size={16} /> {successMsg}</div>}

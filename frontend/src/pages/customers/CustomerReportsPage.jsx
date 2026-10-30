@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, RotateCcw, Search } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
-import usePagination from '../../hooks/usePagination';
 import { exportToExcel, exportToPDF } from '../../utils/export';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
@@ -155,6 +154,9 @@ const CustomerReportsPage = () => {
     const [reports, setReports] = useState([]);
     const [options, setOptions] = useState({ locations: [], months: [], years: [], people: [], leadClosures: [], deviceTypes: [], validities: [] });
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pageMeta, setPageMeta] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
 
     const fetchReports = useCallback(async () => {
         setLoading(true);
@@ -166,6 +168,8 @@ const CustomerReportsPage = () => {
                     params.set(paramKey, value);
                 }
             });
+            params.set('page', page);
+            params.set('page_size', pageSize);
             const response = await api.get(`/customers/reports.php?${params.toString()}`, { skipGlobalError: true });
             if (!response.data?.success) {
                 showGlobalError(response.data?.message || 'Failed to load customer reports.');
@@ -173,22 +177,24 @@ const CustomerReportsPage = () => {
             }
             setReports(response.data.data?.reports || []);
             setOptions(response.data.data?.options || options);
+            const nextPageMeta = response.data.data?.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+            setPageMeta(nextPageMeta);
+            if (page > nextPageMeta.total_pages) setPage(nextPageMeta.total_pages);
         } catch (error) {
             showGlobalError(error.response?.data?.message || 'Failed to load customer reports.');
         } finally {
             setLoading(false);
         }
-    }, [filters]);
+    }, [filters, page, pageSize]);
 
     useEffect(() => { fetchReports(); }, [fetchReports]);
 
-    const pagination = usePagination(reports, 10, [filters]);
-
     const updateFilter = (name, value) => {
         setFilters(current => ({ ...current, [name]: value }));
+        setPage(1);
     };
 
-    const exportRows = reports.map(row => ({
+    const toExportRows = (items) => items.map(row => ({
         Username: row.username || '-',
         'Mobile No': row.primary_mobile_no || '-',
         Location: row.location || '-',
@@ -206,17 +212,44 @@ const CustomerReportsPage = () => {
         'Amount Pending': row.amount_pending ?? '-'
     }));
 
-    const exportColumns = Object.keys(exportRows[0] || {
+    const exportColumns = Object.keys(toExportRows(reports)[0] || {
         Username: '', 'Mobile No': '', Location: '', 'Vehicle No': '', 'Device Type': '',
         'IMEI No': '', 'SIM No 1': '', 'SIM No 2': '', Validity: '', 'Installation Person': '',
         'Installation Date': '', 'Lead Closure': '', Payment: '', 'Amount Paid': '', 'Amount Pending': ''
     }).map(header => ({ header, key: header }));
 
-    const handleExportExcel = () => {
-        exportToExcel(exportRows, 'Customer_Reports', 'Customer Reports', { columns: exportColumns });
+    const fetchAllReportRows = async () => {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+            if (value !== '') {
+                const paramKey = key === 'installationPerson' ? 'installation_person' : key === 'dateFrom' ? 'date_from' : key === 'dateTo' ? 'date_to' : key === 'deviceType' ? 'device_type' : key === 'leadClosure' ? 'lead_closure' : key;
+                params.set(paramKey, value);
+            }
+        });
+        const response = await api.get(`/customers/reports.php?${params.toString()}`, { skipGlobalError: true });
+        if (!response.data?.success) {
+            throw new Error(response.data?.message || 'Failed to load customer report export data.');
+        }
+        return response.data.data?.reports || [];
     };
 
-    const handleExportPDF = () => {
+    const handleExportExcel = async () => {
+        try {
+            const exportRows = toExportRows(await fetchAllReportRows());
+            exportToExcel(exportRows, 'Customer_Reports', 'Customer Reports', { columns: exportColumns });
+        } catch (error) {
+            showGlobalError(error.response?.data?.message || error.message || 'Failed to export customer reports.');
+        }
+    };
+
+    const handleExportPDF = async () => {
+        let exportRows;
+        try {
+            exportRows = toExportRows(await fetchAllReportRows());
+        } catch (error) {
+            showGlobalError(error.response?.data?.message || error.message || 'Failed to export customer reports.');
+            return;
+        }
         const pdfRows = exportRows.map((row) => ({
             ...row,
             'Amount Paid': formatReportAmount(row['Amount Paid']),
@@ -316,7 +349,7 @@ const CustomerReportsPage = () => {
                     
                     <div className="table-filter-actions">
                         <button className="btn btn-primary table-filter-btn" onClick={fetchReports}><Search size={16} /> Search</button>
-                        <button className="btn btn-secondary table-filter-btn" onClick={() => setFilters(emptyFilters())}><RotateCcw size={16} /> Reset</button>
+                        <button className="btn btn-secondary table-filter-btn" onClick={() => { setFilters(emptyFilters()); setPage(1); }}><RotateCcw size={16} /> Reset</button>
                     </div>
                 </div>
 
@@ -340,10 +373,10 @@ const CustomerReportsPage = () => {
                         <tbody>
                             {loading ? (
                                 <tr><td colSpan="11" className="text-center">Loading customer reports...</td></tr>
-                            ) : pagination.paginatedItems.length === 0 ? (
+                            ) : reports.length === 0 ? (
                                 <tr><td colSpan="11" className="text-center empty-state">No customer reports found.</td></tr>
                             ) : (
-                                pagination.paginatedItems.map((row) => (
+                                reports.map((row) => (
                                     <tr key={row.id}>
                                         <td>{row.username || '-'}</td>
                                         <td>{row.primary_mobile_no || '-'}</td>
@@ -363,11 +396,11 @@ const CustomerReportsPage = () => {
                     </table>
                 </div>
                 <Pagination
-                    currentPage={pagination.page}
-                    pageSize={pagination.pageSize}
-                    totalItems={pagination.totalItems}
-                    onPageChange={pagination.setPage}
-                    onPageSizeChange={pagination.setPageSize}
+                    currentPage={page}
+                    pageSize={pageSize}
+                    totalItems={pageMeta.total}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
                     itemName="entries"
                 />
             </div>

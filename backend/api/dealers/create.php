@@ -28,6 +28,11 @@ if (!empty($validation['errors'])) {
 }
 
 $validData = $validation['data'];
+$status = strtolower(trim((string) ($data['status'] ?? 'active')));
+if (!in_array($status, ['active', 'inactive'], true)) {
+    sendResponse(false, 'Dealer status must be Active or Inactive.', [], [], 400);
+}
+$validData['status'] = $status;
 
 $db = new Database();
 $conn = $db->getConnection();
@@ -43,8 +48,8 @@ if (!empty($dbErrors)) {
 }
 
 $conn->begin_transaction();
-$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, software, threshold_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-$stmt->bind_param("sssssssds", $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $validData['software'], $validData['threshold_amount'], $validData['notes']);
+$stmt = $conn->prepare("INSERT INTO dealers (dealer_name, mobile_no, alternate_mobile_no, location, enrolled_date, installation_status, status, software, threshold_amount, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+$stmt->bind_param("ssssssssds", $validData['dealer_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $validData['installation_status'], $status, $validData['software'], $validData['threshold_amount'], $validData['notes']);
 
 if ($stmt->execute()) {
     $dealerId = $conn->insert_id;

@@ -23,13 +23,18 @@ import {
     RotateCw,
     ChevronLeft,
     ChevronRight,
-    X
+    X,
+    Users,
+    UserCheck,
+    UserX,
+    CarFront
 } from 'lucide-react';
 
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate } from '../../utils/date';
 import { useNavigate } from 'react-router-dom';
+import SimStatusSummaryCards from '../../components/SimStatusSummaryCards/SimStatusSummaryCards';
 
 import './Dashboard.css';
 
@@ -96,11 +101,13 @@ const getDefaultDateRange = () => {
 const Dashboard = () => {
     const { user, hasPermission } = useAuth();
     const canViewDashboard = hasPermission('dashboard.view');
+    const canViewRenewals = hasPermission('customer_renewals.view');
     const navigate = useNavigate();
 
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [statsError, setStatsError] = useState('');
 
     // =====================================================
     // Global Filters
@@ -163,6 +170,7 @@ const Dashboard = () => {
         } else {
             setLoading(true);
         }
+        setStatsError('');
 
         try {
             const params = {
@@ -192,12 +200,15 @@ const Dashboard = () => {
                         response.data.data.available_financial_years
                     );
                 }
+            } else {
+                setStatsError(response.data.message || 'Failed to load dashboard data.');
             }
         } catch (error) {
             console.error(
                 'Failed to fetch dashboard stats',
                 error
             );
+            setStatsError(error.response?.data?.message || 'Failed to load dashboard data.');
         } finally {
             if (isRefresh) {
                 const remainingFeedbackTime =
@@ -230,6 +241,23 @@ const Dashboard = () => {
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [canViewDashboard]);
+
+    useEffect(() => {
+        if (!canViewDashboard) return undefined;
+
+        const refreshVisibleDashboard = () => {
+            if (document.visibilityState === 'visible') {
+                fetchStats(financialYear, dateRange, true);
+            }
+        };
+        const interval = window.setInterval(refreshVisibleDashboard, 60000);
+        document.addEventListener('visibilitychange', refreshVisibleDashboard);
+
+        return () => {
+            window.clearInterval(interval);
+            document.removeEventListener('visibilitychange', refreshVisibleDashboard);
+        };
+    }, [canViewDashboard, financialYear, dateRange]);
 
 
     // =====================================================
@@ -660,7 +688,10 @@ const Dashboard = () => {
                 className="page-container text-center text-danger"
                 style={{ padding: '3rem' }}
             >
-                Failed to load dashboard data.
+                <p>{statsError || 'Failed to load dashboard data.'}</p>
+                <button type="button" className="btn btn-outline" onClick={() => fetchStats()}>
+                    Retry
+                </button>
             </div>
         );
     }
@@ -787,6 +818,11 @@ const Dashboard = () => {
             </div>
             )}
 
+            {canViewDashboard && statsError && stats && (
+                <div className="alert alert-danger" role="alert">
+                    Dashboard refresh failed: {statsError}
+                </div>
+            )}
 
             {/* =================================================
                 No Permission State
@@ -1258,61 +1294,64 @@ const Dashboard = () => {
                 </div>
 
 
-                {/* Total Dealers */}
-
                 <div className="metric-card">
-
-                    <div
-                        className="metric-icon"
-                        style={{
-                            backgroundColor: '#dbeafe',
-                            color: '#1d4ed8'
-                        }}
-                    >
-                        <Package size={24} />
+                    <div className="metric-icon" style={{ backgroundColor: '#dcfce7', color: '#166534' }}>
+                        <UserCheck size={24} />
                     </div>
-
                     <div className="metric-content">
-
-                        <p className="metric-title">
-                            Total Dealers
-                        </p>
-
-                        <h3 className="metric-value">
-                            {metrics.total_dealers}
-                        </h3>
-
+                        <p className="metric-title">Active Dealers</p>
+                        <h3 className="metric-value">{metrics.active_dealers ?? 0}</h3>
                     </div>
-
                 </div>
 
-
-                {/* Total Technicians */}
+                <div className="metric-card">
+                    <div className="metric-icon" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>
+                        <UserX size={24} />
+                    </div>
+                    <div className="metric-content">
+                        <p className="metric-title">Inactive Dealers</p>
+                        <h3 className="metric-value">{metrics.inactive_dealers ?? 0}</h3>
+                    </div>
+                </div>
 
                 <div className="metric-card">
-
-                    <div
-                        className="metric-icon"
-                        style={{
-                            backgroundColor: '#f3e8ff',
-                            color: '#7c3aed'
-                        }}
-                    >
-                        <Package size={24} />
+                    <div className="metric-icon" style={{ backgroundColor: '#ede9fe', color: '#6d28d9' }}>
+                        <UserCheck size={24} />
                     </div>
-
                     <div className="metric-content">
-
-                        <p className="metric-title">
-                            Total Technicians
-                        </p>
-
-                        <h3 className="metric-value">
-                            {metrics.total_technicians}
-                        </h3>
-
+                        <p className="metric-title">Active Technicians</p>
+                        <h3 className="metric-value">{metrics.active_technicians ?? 0}</h3>
                     </div>
+                </div>
 
+                <div className="metric-card">
+                    <div className="metric-icon" style={{ backgroundColor: '#ffe4e6', color: '#be123c' }}>
+                        <UserX size={24} />
+                    </div>
+                    <div className="metric-content">
+                        <p className="metric-title">Inactive Technicians</p>
+                        <h3 className="metric-value">{metrics.inactive_technicians ?? 0}</h3>
+                    </div>
+                </div>
+
+                <div className="metric-card">
+                    <div className="metric-icon" style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>
+                        <Users size={24} />
+                    </div>
+                    <div className="metric-content">
+                        <p className="metric-title">Total Customers</p>
+                        <h3 className="metric-value">{metrics.total_customers ?? 0}</h3>
+                    </div>
+                </div>
+
+                <div className="metric-card">
+                    <div className="metric-icon" style={{ backgroundColor: '#cffafe', color: '#0e7490' }}>
+                        <CarFront size={24} />
+                    </div>
+                    <div className="metric-content">
+                        <p className="metric-title">Total Vehicles</p>
+                        <h3 className="metric-value">{metrics.total_vehicles ?? 0}</h3>
+                    </div>
                 </div>
 
 
@@ -1356,6 +1395,18 @@ const Dashboard = () => {
                 </div>
 
             </div>
+
+            <section className="dashboard-sim-status" aria-label="Customer SIM status summary">
+                <h3>Customer SIM Status</h3>
+                <SimStatusSummaryCards
+                    counts={metrics}
+                    loading={loading}
+                    error={statsError}
+                    onSelectStatus={canViewRenewals
+                        ? (status) => navigate(`/customer-management/renewals?status=${encodeURIComponent(status)}`)
+                        : undefined}
+                />
+            </section>
 
 
             {/* =================================================

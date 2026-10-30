@@ -30,6 +30,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
         location: dealer?.location || '',
         enrolled_date: dealer?.enrolled_date || '',
         installation_status: dealer?.installation_status || 'Onsite',
+        status: dealer?.status || 'active',
         threshold_amount: dealer?.threshold_amount ?? '',
         notes: dealer?.notes || '',
         software: initialSoftware
@@ -201,6 +202,14 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
                 <div className="form-group">
                     <label className="form-label">Enrolled Date *</label>
                     <DateInput className="form-control" value={formData.enrolled_date} onChange={(value) => setFormData((prev) => ({ ...prev, enrolled_date: value }))} required />
+                </div>
+
+                <div className="form-group">
+                    <label className="form-label">Status *</label>
+                    <select className="form-control" value={formData.status} onChange={(event) => setFormData((prev) => ({ ...prev, status: event.target.value }))} required>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
                 </div>
 
                 <div className="form-group" style={{ position: 'relative' }}>

@@ -36,9 +36,9 @@ $summarySql = "
     SELECT
         COUNT(CASE WHEN sa.device_id IS NOT NULL THEN 1 END) AS total_device,
         COUNT(CASE WHEN sa.sim_id IS NOT NULL THEN 1 END) AS total_sim,
-        SUM(CASE WHEN sa.device_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = sa.device_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS used_device,
+        SUM(CASE WHEN sa.device_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id OR BINARY cvd.imei_no = BINARY d.imei_no) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = sa.device_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS used_device,
         SUM(CASE WHEN sa.sim_id IS NOT NULL AND (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = sa.sim_id OR cvd.sim_id_2 = sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = sa.sim_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS used_sim,
-        SUM(CASE WHEN sa.device_id IS NOT NULL AND NOT (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = sa.device_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS available_device,
+        SUM(CASE WHEN sa.device_id IS NOT NULL AND NOT (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = sa.device_id OR BINARY cvd.imei_no = BINARY d.imei_no) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.device_id = sa.device_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS available_device,
         SUM(CASE WHEN sa.sim_id IS NOT NULL AND NOT (EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.sim_id_1 = sa.sim_id OR cvd.sim_id_2 = sa.sim_id) OR EXISTS (SELECT 1 FROM stock_transactions st WHERE st.sim_id = sa.sim_id AND st.from_owner_type = sa.owner_type AND st.from_owner_id = sa.owner_id AND st.transaction_type = 'USE')) THEN 1 ELSE 0 END) AS available_sim
     FROM stock_allocations sa
     LEFT JOIN devices d ON d.id = sa.device_id
@@ -68,7 +68,8 @@ $deviceSql = "
     FROM stock_allocations sa
     JOIN devices d ON d.id = sa.device_id
     JOIN device_types dm ON dm.id = d.device_model_id
-    LEFT JOIN customer_vehicle_details cvd ON cvd.device_id = d.id
+    LEFT JOIN customer_vehicle_details cvd
+        ON cvd.device_id = d.id OR BINARY cvd.imei_no = BINARY d.imei_no
     LEFT JOIN customers c ON c.id = cvd.customer_id
     WHERE sa.owner_type = ? AND sa.owner_id = ?
     ORDER BY d.purchase_date DESC, d.imei_no ASC
@@ -93,7 +94,9 @@ while ($row = $deviceResult->fetch_assoc()) {
         'allocation_date' => $row['allocation_date'],
         'notes' => $row['allocation_notes'] ?? $row['notes'] ?? '',
         'model_name' => $row['model_name'],
-        'status' => $row['status'],
+        'status' => !empty($row['customer_vehicle_id']) || in_array(strtoupper((string) ($row['usage_type'] ?? '')), ['ET', 'TECHNICIAN', 'DEALER'], true)
+            ? 'used'
+            : strtolower((string) ($row['status'] ?? 'available')),
         'software' => $row['software'],
         'total_amount' => $totalAmount,
         'amount_paid' => $amountPaid,

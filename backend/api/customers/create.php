@@ -359,25 +359,22 @@ $stmt->close();
 
 /*
 |--------------------------------------------------------------------------
-| Check Customer Uniqueness
-| 1. Same Username + Same Mobile -> EXISTING_CUSTOMER_SAME_MOBILE
-| 2. Same Username + Different Mobile -> USERNAME_EXISTS_DIFFERENT_MOBILE
-| 3. Different Username + Same Mobile -> Allowed (New customer)
-| 4. Different Username + Different Mobile -> Allowed (New customer)
+| Check Customer Uniqueness Within the Selected Platform
 |--------------------------------------------------------------------------
 */
 
-// Check 1: Same Username + Same Mobile No
+// Same username and mobile on another platform is a separate customer profile.
 $stmt = $conn->prepare(
     "SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no, email, location, pincode, status
      FROM customers
-     WHERE LOWER(TRIM(username)) = LOWER(?)
+     WHERE platform_id = ?
+       AND LOWER(TRIM(username)) = LOWER(?)
        AND TRIM(primary_mobile_no) = ?
      ORDER BY id ASC
      LIMIT 1"
 );
 
-$stmt->bind_param('ss', $username, $primaryMobile);
+$stmt->bind_param('iss', $platformId, $username, $primaryMobile);
 $stmt->execute();
 $existingSameMobile = $stmt->get_result()->fetch_assoc();
 $stmt->close();
@@ -399,17 +396,18 @@ if ($existingSameMobile) {
     );
 }
 
-// Check 2: Same Username + Different Mobile No
+// A username can identify only one customer per platform.
 $stmt = $conn->prepare(
     "SELECT id
      FROM customers
-     WHERE LOWER(TRIM(username)) = LOWER(?)
+     WHERE platform_id = ?
+       AND LOWER(TRIM(username)) = LOWER(?)
        AND TRIM(primary_mobile_no) != ?
      ORDER BY id ASC
      LIMIT 1"
 );
 
-$stmt->bind_param('ss', $username, $primaryMobile);
+$stmt->bind_param('iss', $platformId, $username, $primaryMobile);
 $stmt->execute();
 $existingDiffMobile = $stmt->get_result()->fetch_assoc();
 $stmt->close();

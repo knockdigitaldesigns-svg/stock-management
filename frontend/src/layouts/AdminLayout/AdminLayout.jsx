@@ -176,7 +176,7 @@ const canViewCustomerVerification =
     );
 
 const canViewMyCustomerVerifications =
-    hasPermission('customers.add') || hasPermission('customers.edit');
+    hasPermission('customers.add') || hasPermission('customers.edit') || hasPermission('courier.add');
 
 const showCustomerManagement =
     canViewCustomerDetails ||

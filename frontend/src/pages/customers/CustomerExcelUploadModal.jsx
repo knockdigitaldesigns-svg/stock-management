@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Download, AlertCircle, CheckCircle, Upload } from 'lucide-react';
+import { Download, CheckCircle, Upload } from 'lucide-react';
 import api from '../../services/api';
 import useModalScrollLock from '../../hooks/useModalScrollLock';
+import BulkUploadValidationErrors from '../../components/BulkUploadValidationErrors/BulkUploadValidationErrors';
+import { normalizeBulkUploadErrors } from '../../utils/bulkUploadErrors';
 
 export const CUSTOMER_COLUMNS = [
     { key: 'platform', header: 'Platform', required: true },
@@ -38,43 +40,8 @@ export const CUSTOMER_COLUMNS = [
     { key: 'payment_status', header: 'Payment Status', required: false }
 ];
 
-const normalizeHeader = (str) =>
-    String(str || '')
-        .toLowerCase()
-        .trim()
-        .replace(/[\s_\-.]+/g, '');
-
 const normalizeImportErrors = (payload, fallback) => {
-    let response = payload;
-    if (typeof response === 'string') {
-        try {
-            response = JSON.parse(response);
-        } catch {
-            return response.trim() ? response.trim().split('\n') : [fallback];
-        }
-    }
-
-    if (Array.isArray(response)) {
-        return response.map(String).filter(Boolean);
-    }
-
-    const errors = response?.data?.validation_errors ?? response?.data?.errors ?? response?.validation_errors ?? response?.errors;
-    if (Array.isArray(errors)) {
-        return errors.map(String).filter(Boolean);
-    }
-    if (typeof errors === 'string' && errors.trim()) {
-        return errors.split('\n').map((error) => error.trim()).filter(Boolean);
-    }
-
-    const message = response?.message || response?.error;
-    if (Array.isArray(message)) {
-        return message.map(String).filter(Boolean);
-    }
-    if (typeof message === 'string' && message.trim()) {
-        return message.split('\n').map((error) => error.trim()).filter(Boolean);
-    }
-
-    return [fallback];
+    return normalizeBulkUploadErrors(payload, fallback);
 };
 
 const formatImportSummary = (summary) => [
@@ -279,19 +246,7 @@ const CustomerExcelUploadModal = ({ onClose, onSuccess }) => {
                         </div>
                     ) : null}
 
-                    {errors.length > 0 && (
-                        <div className="alert alert-danger" style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', fontWeight: 'bold' }}>
-                                <AlertCircle size={18} />
-                                <span>Validation Errors:</span>
-                            </div>
-                            <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem' }}>
-                                {errors.map((err, index) => (
-                                    <li key={index} style={{ marginBottom: '3px' }}>{err}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
+                    <BulkUploadValidationErrors errors={errors} />
 
                     <div style={{ marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from 'react';
 import { ArrowLeftRight, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
-import usePagination from '../../hooks/usePagination';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
@@ -27,6 +26,9 @@ const StockTransferPage = () => {
     const [transfers, setTransfers]       = useState([]);
     const [loading, setLoading]           = useState(true);
     const [filters, setFilters]           = useState(emptyFilters());
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
 
     // --------------------------------------------------
     // MODAL STATE
@@ -106,25 +108,34 @@ const StockTransferPage = () => {
             if (filters.toOwner)       params.append('to_owner',        filters.toOwner);
             if (filters.dateFrom)      params.append('date_from',       filters.dateFrom);
             if (filters.dateTo)        params.append('date_to',         filters.dateTo);
+            params.append('page', page);
+            params.append('page_size', pageSize);
 
             const res = await api.get(`/stock_transfer/list.php?${params.toString()}`, { skipGlobalError: true });
             if (res.data?.success) {
                 setTransfers(res.data.data?.transfers || []);
+                const nextPagination = res.data.data?.pagination || { total: 0, page, page_size: pageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (page > nextPagination.total_pages) setPage(nextPagination.total_pages);
             }
         } catch (err) {
             console.error('Failed to fetch transfers', err);
         } finally {
             setLoading(false);
         }
-    }, [filters]);
+    }, [filters, page, pageSize]);
 
     useEffect(() => { fetchTransfers(); }, [fetchTransfers]);
 
-    // --------------------------------------------------
-    // PAGINATION
-    // --------------------------------------------------
-    const { page, setPage, pageSize, setPageSize, totalItems, paginatedItems } =
-        usePagination(transfers, 10, [filters]);
+    const updateFilters = (updater) => {
+        setFilters((current) => (typeof updater === 'function' ? updater(current) : updater));
+        setPage(1);
+    };
+
+    const updatePageSize = (nextPageSize) => {
+        setPageSize(nextPageSize);
+        setPage(1);
+    };
 
     // --------------------------------------------------
     // SEARCH ASSET
@@ -300,7 +311,7 @@ const StockTransferPage = () => {
                                 className="form-control filter-input"
                                 placeholder="Original owner..."
                                 value={filters.fromOwner}
-                                onChange={e => setFilters(f => ({ ...f, fromOwner: e.target.value }))}
+                                onChange={e => updateFilters(f => ({ ...f, fromOwner: e.target.value }))}
                             />
                         </div>
 
@@ -312,7 +323,7 @@ const StockTransferPage = () => {
                                     className="form-control filter-input has-icon table-filter-search"
                                     placeholder="Search..."
                                     value={filters.search}
-                                    onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+                                    onChange={e => updateFilters(f => ({ ...f, search: e.target.value }))}
                                 />
                             </div>
                         </div>
@@ -322,7 +333,7 @@ const StockTransferPage = () => {
                             <select
                                 className="form-control filter-input"
                                 value={filters.fromOwnerType}
-                                onChange={e => setFilters(f => ({ ...f, fromOwnerType: e.target.value }))}
+                                onChange={e => updateFilters(f => ({ ...f, fromOwnerType: e.target.value }))}
                             >
                                 <option value="">All</option>
                                 <option value="technician">Technician</option>
@@ -336,7 +347,7 @@ const StockTransferPage = () => {
                                 className="form-control filter-input"
                                 placeholder="Transferred to..."
                                 value={filters.toOwner}
-                                onChange={e => setFilters(f => ({ ...f, toOwner: e.target.value }))}
+                                onChange={e => updateFilters(f => ({ ...f, toOwner: e.target.value }))}
                             />
                         </div>
 
@@ -351,7 +362,7 @@ const StockTransferPage = () => {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    setFilters(f => ({ ...f, dateFrom: e.target.value }));
+                                    updateFilters(f => ({ ...f, dateFrom: e.target.value }));
                                 }}
                             />
                         </div>
@@ -367,7 +378,7 @@ const StockTransferPage = () => {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    setFilters(f => ({ ...f, dateTo: e.target.value }));
+                                    updateFilters(f => ({ ...f, dateTo: e.target.value }));
                                 }}
                             />
                         </div>
@@ -379,7 +390,7 @@ const StockTransferPage = () => {
                         </button>
                         <button
                             className="btn btn-secondary table-filter-btn"
-                            onClick={() => setFilters(emptyFilters())}
+                            onClick={() => updateFilters(emptyFilters())}
                         >
                             <RotateCcw size={16} /> Reset
                         </button>
@@ -407,14 +418,14 @@ const StockTransferPage = () => {
                                 <tr>
                                     <td colSpan="8" className="text-center">Loading transfer records...</td>
                                 </tr>
-                            ) : paginatedItems.length === 0 ? (
+                            ) : transfers.length === 0 ? (
                                 <tr>
                                     <td colSpan="8" className="text-center empty-state">
                                         No stock transfer records found.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedItems.map((row, idx) => (
+                                transfers.map((row, idx) => (
                                     <tr key={row.id}>
                                         {/* <td>{(page - 1) * pageSize + idx + 1}</td> */}
                                         <td className="truncate-cell" title={row.from_owner_name}>{row.from_owner_name || '-'}</td>
@@ -453,9 +464,9 @@ const StockTransferPage = () => {
                 <Pagination
                     currentPage={page}
                     pageSize={pageSize}
-                    totalItems={totalItems}
+                    totalItems={pagination.total}
                     onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
+                    onPageSizeChange={updatePageSize}
                     itemName="transfer records"
                 />
             </div>

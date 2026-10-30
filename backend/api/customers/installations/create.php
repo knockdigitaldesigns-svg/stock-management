@@ -257,6 +257,38 @@ try {
     $assertNotUsedByAnotherCustomer($conn, 'device_id', (int) $vehicle['device_id'], 'Device');
     $assertNotUsedByAnotherCustomer($conn, 'sim_id_1', (int) $vehicle['sim_id_1'], 'SIM');
 
+    $installationWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
+    $checkStmt = $conn->prepare(
+        "SELECT
+            id,
+            installation_person_type,
+            installation_person_id,
+            lead_closure_id,
+            installation_date
+         FROM customer_installations
+         WHERE {$installationWhere}
+         LIMIT 1
+         FOR UPDATE"
+    );
+
+    if (!$checkStmt) {
+        throw new Exception('Failed to prepare existing installation check.');
+    }
+
+    $checkTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
+    $checkStmt->bind_param('i', $checkTargetId);
+
+    if (!$checkStmt->execute()) {
+        $checkStmt->close();
+        throw new Exception('Failed to check existing installation.');
+    }
+
+    $existingInstallation = $checkStmt->get_result()->fetch_assoc() ?: null;
+    $checkStmt->close();
+    $installationOwnerUnchanged = $existingInstallation
+        && (string) $existingInstallation['installation_person_type'] === $persistedInstallationPersonType
+        && (int) ($existingInstallation['installation_person_id'] ?? 0) === $installationPersonId;
+
     $resolveOwner = static function ($conn, string $assetColumn, int $assetId): ?array {
         $stmt = $conn->prepare(
             "SELECT owner_type, owner_id
@@ -297,18 +329,31 @@ try {
 
     $deviceOwner = $resolveOwner($conn, 'device_id', (int) $vehicle['device_id']);
     $simOwner = $resolveOwner($conn, 'sim_id', (int) $vehicle['sim_id_1']);
-    if (($deviceOwner && !empty($deviceOwner['invalid'])) || ($simOwner && !empty($simOwner['invalid']))) {
+    if (
+        !$installationOwnerUnchanged &&
+        $installationPersonType !== 'Direct' &&
+        (($deviceOwner && !empty($deviceOwner['invalid'])) || ($simOwner && !empty($simOwner['invalid'])))
+    ) {
         throw new Exception(
             ($deviceOwner && !empty($deviceOwner['invalid']))
                 ? 'The current Device owner relationship is invalid.'
                 : 'The current SIM owner relationship is invalid.'
         );
     }
-    if ($deviceOwner && $simOwner && ($deviceOwner['type'] !== $simOwner['type'] || $deviceOwner['id'] !== $simOwner['id'])) {
+    if (
+        !$installationOwnerUnchanged &&
+        $deviceOwner &&
+        $simOwner &&
+        empty($deviceOwner['invalid']) &&
+        empty($simOwner['invalid']) &&
+        ($deviceOwner['type'] !== $simOwner['type'] || $deviceOwner['id'] !== $simOwner['id'])
+    ) {
         throw new Exception('Device and SIM are allocated to different persons. Please use Stock Transfer to move them to the same person before installation.');
     }
 
-    $currentOwner = $deviceOwner ?? $simOwner;
+    $currentOwner = $installationOwnerUnchanged
+        ? null
+        : ((!empty($deviceOwner['invalid']) ? null : $deviceOwner) ?? (!empty($simOwner['invalid']) ? null : $simOwner));
     $expectedType = $currentOwner && $currentOwner['type'] === 'technician'
         ? 'Technician'
         : 'Dealer';
@@ -323,7 +368,12 @@ try {
             return strcasecmp(trim((string) $status), 'Offsite') === 0 ? 'Offsite Dealer' : 'Onsite Dealer';
         })()
         : 'Technician';
-    if ($currentOwner && $installationPersonType !== 'Direct' && ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))) {
+    if (
+        !$installationOwnerUnchanged &&
+        $currentOwner &&
+        $installationPersonType !== 'Direct' &&
+        ($installationPersonId !== $currentOwner['id'] || !in_array($installationPersonType, [$expectedType, $expectedPersonType], true))
+    ) {
         throw new Exception('Installation person must match the current Device or SIM owner.');
     }
 
@@ -582,61 +632,6 @@ try {
     }
 
     $leadClosureStmt->close();
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | 4. Existing installation check
-    |--------------------------------------------------------------------------
-    |
-    | One installation record per vehicle.
-    |--------------------------------------------------------------------------
-    */
-
-    $installationWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
-    $checkStmt = $conn->prepare(
-        "SELECT
-            id,
-            installation_person_type,
-            installation_person_id,
-            lead_closure_id,
-            installation_date
-         FROM customer_installations
-         WHERE {$installationWhere}
-         LIMIT 1
-         FOR UPDATE"
-    );
-
-    if (!$checkStmt) {
-        throw new Exception(
-            'Failed to prepare existing installation check.'
-        );
-    }
-
-    $checkTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
-    $checkStmt->bind_param('i', $checkTargetId);
-
-    if (!$checkStmt->execute()) {
-        $checkStmt->close();
-
-        throw new Exception(
-            'Failed to check existing installation.'
-        );
-    }
-
-    $existingResult =
-        $checkStmt->get_result();
-
-    $existingInstallation = null;
-
-    if (
-        $existingResult->num_rows > 0
-    ) {
-        $existingInstallation =
-            $existingResult->fetch_assoc();
-    }
-
-    $checkStmt->close();
 
 
     /*

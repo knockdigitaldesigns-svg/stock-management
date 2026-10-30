@@ -75,19 +75,81 @@ $sql = "
     ) report_rows
 ";
 
+$where = [];
+$params = [];
+$types = '';
 if ($statusFilter !== '') {
-    $sql .= ' WHERE LOWER(report_rows.status) = ? OR LOWER(COALESCE(report_rows.lifecycle_status, \'\')) = ?';
+    $where[] = "(LOWER(report_rows.status) = ? OR LOWER(COALESCE(report_rows.lifecycle_status, '')) = ?)";
+    $params[] = $statusFilter;
+    $params[] = $statusFilter;
+    $types .= 'ss';
 }
-$sql .= ' ORDER BY report_rows.purchase_date DESC, report_rows.id DESC';
+if (($search = trim((string) ($_GET['search'] ?? ''))) !== '') {
+    $where[] = '(report_rows.sim_no LIKE ? OR report_rows.sim_type LIKE ? OR report_rows.notes LIKE ?)';
+    $like = '%' . $search . '%';
+    array_push($params, $like, $like, $like);
+    $types .= 'sss';
+}
+$simType = trim((string) ($_GET['sim_type'] ?? ''));
+if ($simType !== '') {
+    $where[] = 'LOWER(report_rows.sim_type) = ?';
+    $params[] = strtolower($simType);
+    $types .= 's';
+}
+$dateFrom = trim((string) ($_GET['date_from'] ?? ''));
+if ($dateFrom !== '') {
+    $where[] = 'report_rows.purchase_date >= ?';
+    $params[] = $dateFrom;
+    $types .= 's';
+}
+$dateTo = trim((string) ($_GET['date_to'] ?? ''));
+if ($dateTo !== '') {
+    $where[] = 'report_rows.purchase_date <= ?';
+    $params[] = $dateTo;
+    $types .= 's';
+}
+$whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pagination = null;
+if ($paginated) {
+    $countStmt = $conn->prepare('SELECT COUNT(*) AS total FROM (' . $sql . ') report_rows' . $whereSql);
+    if (!$countStmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare SIM report count query.', [], [], 500);
+    }
+    if ($params) $countStmt->bind_param($types, ...$params);
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to count SIM report rows.', [], [], 500);
+    }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $pagination = [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ];
+    $countStmt->close();
+}
+$sql = 'SELECT report_rows.* FROM (' . $sql . ') report_rows' . $whereSql . ' ORDER BY report_rows.purchase_date DESC, report_rows.id DESC';
+$paramsForList = $params;
+$typesForList = $types;
+if ($paginated) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $paramsForList[] = $pageSize;
+    $paramsForList[] = ($page - 1) * $pageSize;
+    $typesForList .= 'ii';
+}
 
 $stmt = $conn->prepare($sql);
 if (!$stmt) {
     $conn->close();
     sendResponse(false, 'Failed to prepare SIM report query.', [], [], 500);
 }
-if ($statusFilter !== '') {
-    $stmt->bind_param('ss', $statusFilter, $statusFilter);
-}
+if ($paramsForList) $stmt->bind_param($typesForList, ...$paramsForList);
 if (!$stmt->execute()) {
     $stmt->close();
     $conn->close();
@@ -95,7 +157,9 @@ if (!$stmt->execute()) {
 }
 
 $sims = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-sendResponse(true, "SIMs fetched", ["sims" => $sims]);
 $stmt->close();
 $conn->close();
+$responseData = ["sims" => $sims];
+if ($paginated) $responseData['pagination'] = $pagination;
+sendResponse(true, "SIMs fetched", $responseData);
 ?>

@@ -29,7 +29,10 @@ if (!$conn) {
 $stmt = $conn->prepare(
     "SELECT d.id, d.imei_no, d.device_model_id,
             CASE
-                WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = d.id)
+                WHEN EXISTS (
+                    SELECT 1 FROM customer_vehicle_details cvd
+                    WHERE cvd.device_id = d.id OR BINARY cvd.imei_no = BINARY d.imei_no
+                )
                     OR EXISTS (
                         SELECT 1 FROM stock_transactions st
                         WHERE st.device_id = d.id
@@ -92,14 +95,14 @@ $assignmentStmt = $conn->prepare(
     'SELECT
         EXISTS (
             SELECT 1 FROM customer_vehicle_details
-            WHERE device_id = ? AND (? = 0 OR customer_id <> ?)
+            WHERE (device_id = ? OR imei_no = ?) AND (? = 0 OR customer_id <> ?)
         ) AS assigned_to_another_customer,
         EXISTS (
             SELECT 1 FROM customer_vehicle_details
-            WHERE device_id = ? AND customer_id = ? AND ? > 0 AND id = ?
+            WHERE (device_id = ? OR imei_no = ?) AND customer_id = ? AND ? > 0 AND id = ?
         ) AS assigned_to_current_customer'
 );
-$assignmentStmt->bind_param('iiiiiii', $deviceId, $customerId, $customerId, $deviceId, $customerId, $vehicleId, $vehicleId);
+$assignmentStmt->bind_param('isiiisiii', $deviceId, $imei, $customerId, $customerId, $deviceId, $imei, $customerId, $vehicleId, $vehicleId);
 $assignmentStmt->execute();
 $assignment = $assignmentStmt->get_result()->fetch_assoc() ?: [];
 $assignmentStmt->close();

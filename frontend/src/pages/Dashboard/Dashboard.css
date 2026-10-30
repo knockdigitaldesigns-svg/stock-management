@@ -44,6 +44,17 @@
     margin: 0;
 }
 
+.dashboard-sim-status {
+    margin-bottom: 1.75rem;
+}
+
+.dashboard-sim-status > h3 {
+    margin: 0 0 0.9rem;
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
 .dashboard-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

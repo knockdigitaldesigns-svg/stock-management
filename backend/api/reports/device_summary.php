@@ -25,7 +25,9 @@ $sql = "
         SELECT
             CASE
                 WHEN EXISTS (
-                    SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = d.id
+                    SELECT 1 FROM customer_vehicle_details cvd
+                    WHERE cvd.device_id = d.id
+                       OR BINARY cvd.imei_no = BINARY d.imei_no
                 ) OR EXISTS (
                     SELECT 1
                     FROM stock_transactions st

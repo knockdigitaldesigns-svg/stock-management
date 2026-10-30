@@ -33,18 +33,20 @@ if (!$conn) {
 
 try {
     if ($existingCustomerId === 0 && is_array($step1)) {
+        $platformId = max(0, (int) ($step1['platform_id'] ?? 0));
         $username = trim((string) ($step1['username'] ?? ''));
         $primaryMobile = trim((string) ($step1['primary_mobile_no'] ?? ''));
-        if ($username !== '' && $primaryMobile !== '') {
+        if ($platformId > 0 && $username !== '' && $primaryMobile !== '') {
             $stmt = $conn->prepare(
                 'SELECT id, platform_id, username, primary_mobile_no,
                         secondary_mobile_no, email, location, pincode, status
                  FROM customers
-                 WHERE LOWER(TRIM(username)) = LOWER(?)
+                 WHERE platform_id = ?
+                   AND LOWER(TRIM(username)) = LOWER(?)
                    AND TRIM(primary_mobile_no) = ?
                  ORDER BY id ASC LIMIT 1'
             );
-            $stmt->bind_param('ss', $username, $primaryMobile);
+            $stmt->bind_param('iss', $platformId, $username, $primaryMobile);
             $stmt->execute();
             $existing = $stmt->get_result()->fetch_assoc();
             $stmt->close();
@@ -57,11 +59,12 @@ try {
             }
             $stmt = $conn->prepare(
                 'SELECT id FROM customers
-                 WHERE LOWER(TRIM(username)) = LOWER(?)
+                 WHERE platform_id = ?
+                   AND LOWER(TRIM(username)) = LOWER(?)
                    AND TRIM(primary_mobile_no) <> ?
                  ORDER BY id ASC LIMIT 1'
             );
-            $stmt->bind_param('ss', $username, $primaryMobile);
+            $stmt->bind_param('iss', $platformId, $username, $primaryMobile);
             $stmt->execute();
             $differentMobile = $stmt->get_result()->fetch_assoc();
             $stmt->close();
@@ -71,6 +74,17 @@ try {
         }
     }
     $conn->begin_transaction();
+    $userLock = $conn->prepare('SELECT id FROM users WHERE id = ? FOR UPDATE');
+    if (!$userLock) {
+        throw new RuntimeException('Unable to lock the current user while saving the draft.');
+    }
+    $userLock->bind_param('i', $userId);
+    if (!$userLock->execute()) {
+        $userLock->close();
+        throw new RuntimeException('Unable to lock the current user while saving the draft.');
+    }
+    $userLock->close();
+
     $wasRejectedSubmission = false;
     if ($submissionId > 0) {
         $stmt = $conn->prepare(
@@ -107,6 +121,36 @@ try {
         );
         $stmt->bind_param('sii', $submissionJson, $submissionId, $userId);
     } else {
+        $duplicateStmt = $conn->prepare(
+            "SELECT id, status
+             FROM customer_payment_verification_submissions
+             WHERE submitter_user_id = ?
+               AND existing_customer_id <=> NULLIF(?, 0)
+               AND status IN ('Draft', 'Pending Verification', 'Applying')
+               AND BINARY submission_data = BINARY ?
+             ORDER BY id DESC
+             LIMIT 1
+             FOR UPDATE"
+        );
+        if (!$duplicateStmt) {
+            throw new RuntimeException('Unable to check for a repeated customer draft.');
+        }
+        $duplicateStmt->bind_param('iis', $userId, $existingCustomerId, $submissionJson);
+        if (!$duplicateStmt->execute()) {
+            $duplicateStmt->close();
+            throw new RuntimeException('Unable to check for a repeated customer draft.');
+        }
+        $duplicateDraft = $duplicateStmt->get_result()->fetch_assoc();
+        $duplicateStmt->close();
+        if ($duplicateDraft) {
+            $submissionId = (int) $duplicateDraft['id'];
+            $conn->commit();
+            $conn->close();
+            sendResponse(true, 'Matching customer submission already exists.', [
+                'submission_id' => $submissionId,
+                'status' => $duplicateDraft['status']
+            ]);
+        }
         $stmt = $conn->prepare(
             "INSERT INTO customer_payment_verification_submissions
                 (submitter_user_id, existing_customer_id, status, submission_data)

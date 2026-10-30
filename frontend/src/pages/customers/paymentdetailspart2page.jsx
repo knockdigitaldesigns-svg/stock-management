@@ -9,12 +9,14 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { normalizeCurrency } from '../../utils/paymentValidation';
 import {
     buildCustomerSubmission,
     commitCustomerSubmission,
     ensureCustomerSubmissionData,
     saveCustomerDraft
 } from '../../utils/customerSubmission';
+import { isInstallationPersonRequired } from '../../utils/installationValidation';
 
 const initialForm = {
     deviceCharge: '',
@@ -28,24 +30,6 @@ const initialForm = {
     cashToTechnician: false,
     cashToDealer: false,
     cashToEt: false
-};
-
-const normalizeCurrency = (value) => {
-    if (
-        value === '' ||
-        value === null ||
-        value === undefined
-    ) {
-        return 0;
-    }
-
-    const parsed = Number(
-        String(value).replace(/[^0-9.]/g, '')
-    );
-
-    return Number.isFinite(parsed)
-        ? parsed
-        : 0;
 };
 
 const PaymentDetailsPart2Page = () => {
@@ -562,7 +546,7 @@ const PaymentDetailsPart2Page = () => {
             if (
                 !isEditMode && (
                     !step3.installation_person_type ||
-                    (step3.installation_person_type !== 'Direct' && !step3.installation_person_id) ||
+                        (isInstallationPersonRequired(step3.installation_person_type) && !step3.installation_person_id) ||
                     !step3.lead_closure_id ||
                     !step3.installation_date
                 )

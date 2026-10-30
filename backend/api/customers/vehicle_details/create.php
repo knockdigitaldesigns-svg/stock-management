@@ -131,9 +131,11 @@ if (!$conn) {
 $conn->begin_transaction();
 
 try {
+    $courierReservedDeviceIds = [];
+    $courierReservedSimIds = [];
     if ($verificationSubmissionId > 0) {
         $draftStmt = $conn->prepare(
-            'SELECT submitter_user_id, reviewer_user_id, status
+            'SELECT submitter_user_id, reviewer_user_id, status, submission_data
              FROM customer_payment_verification_submissions
              WHERE id = ? FOR UPDATE'
         );
@@ -146,6 +148,48 @@ try {
         $isApplyingDraft = $draft && (int) ($draft['reviewer_user_id'] ?? 0) === $currentUserId && $draft['status'] === 'Applying';
         if (!$draft || (!$isOwnerDraft && !$isApplyingDraft)) {
             throw new RuntimeException('This customer draft is not available for commit.');
+        }
+        if ($isApplyingDraft) {
+            $verificationData = json_decode((string) $draft['submission_data'], true);
+            if (is_array($verificationData) && ($verificationData['source'] ?? '') === 'courier') {
+                $requestIds = array_values(array_unique(array_filter(
+                    array_map('intval', is_array($verificationData['courier_request_ids'] ?? null)
+                        ? $verificationData['courier_request_ids']
+                        : []),
+                    static function (int $requestId): bool {
+                        return $requestId > 0;
+                    }
+                )));
+                if ($requestIds) {
+                    $requestIdList = implode(',', $requestIds);
+                    $courierStmt = $conn->prepare(
+                        "SELECT id, device_id, sim_id, approval_status, new_customer_data
+                         FROM courier_requests WHERE id IN ({$requestIdList}) FOR UPDATE"
+                    );
+                    if (!$courierStmt || !$courierStmt->execute()) {
+                        throw new RuntimeException('Unable to verify courier stock reservations.');
+                    }
+                    $courierRows = $courierStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                    $courierStmt->close();
+                    if (count($courierRows) !== count($requestIds)) {
+                        throw new RuntimeException('A linked courier reservation could not be found.');
+                    }
+                    foreach ($courierRows as $courierRow) {
+                        $linkedWorkflow = json_decode((string) $courierRow['new_customer_data'], true);
+                        if ($courierRow['approval_status'] !== 'Approved'
+                            || !is_array($linkedWorkflow)
+                            || (int) ($linkedWorkflow['_verification']['submission_id'] ?? 0) !== $verificationSubmissionId) {
+                            throw new RuntimeException('Courier stock is not reserved for this verification request.');
+                        }
+                        if ((int) ($courierRow['device_id'] ?? 0) > 0) {
+                            $courierReservedDeviceIds[] = (int) $courierRow['device_id'];
+                        }
+                        if ((int) ($courierRow['sim_id'] ?? 0) > 0) {
+                            $courierReservedSimIds[] = (int) $courierRow['sim_id'];
+                        }
+                    }
+                }
+            }
         }
         $existingSubmissionVehicleStmt = $conn->prepare(
             'SELECT id FROM customer_vehicle_details
@@ -311,7 +355,11 @@ try {
     $stmt = $conn->prepare(
         "SELECT d.id, d.device_model_id,
                 CASE
-                    WHEN EXISTS (SELECT 1 FROM customer_vehicle_details cvd WHERE cvd.device_id = d.id)
+                    WHEN EXISTS (
+                        SELECT 1 FROM customer_vehicle_details cvd
+                        WHERE cvd.device_id = d.id
+                           OR BINARY cvd.imei_no = BINARY d.imei_no
+                    )
                         OR EXISTS (
                             SELECT 1 FROM stock_transactions st
                             WHERE st.device_id = d.id
@@ -360,9 +408,18 @@ try {
     $deviceStatus = strtolower(trim((string) $device['status']));
     $deviceOwnerType = strtolower(trim((string) ($device['owner_type'] ?? '')));
     $deviceOwnerId = (int) ($device['owner_id'] ?? 0);
-    $assertNoOtherCustomerAssignment = static function ($assetColumn, $assetId, $message) use ($conn, $existingVehicleId) {
-        $stmt = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$assetColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
-        $stmt->bind_param('ii', $assetId, $existingVehicleId);
+    $assertNoOtherCustomerAssignment = static function ($assetColumn, $assetId, $message, $assetNumber = null) use ($conn, $existingVehicleId) {
+        if ($assetColumn === 'device_id' && $assetNumber !== null) {
+            $stmt = $conn->prepare(
+                'SELECT id FROM customer_vehicle_details
+                 WHERE (device_id = ? OR BINARY imei_no = BINARY ?)
+                   AND id <> ? LIMIT 1 FOR UPDATE'
+            );
+            $stmt->bind_param('isi', $assetId, $assetNumber, $existingVehicleId);
+        } else {
+            $stmt = $conn->prepare("SELECT id FROM customer_vehicle_details WHERE {$assetColumn} = ? AND id <> ? LIMIT 1 FOR UPDATE");
+            $stmt->bind_param('ii', $assetId, $existingVehicleId);
+        }
         $stmt->execute();
         $assignedToAnotherCustomer = $stmt->get_result()->num_rows > 0;
         $stmt->close();
@@ -370,11 +427,13 @@ try {
             throw new Exception($message);
         }
     };
-    $sameExistingDevice = (int) ($existingRow['device_id'] ?? 0) === $deviceId;
+    $sameExistingDevice = (int) ($existingRow['device_id'] ?? 0) === $deviceId
+        || (trim((string) ($existingRow['imei_no'] ?? '')) !== ''
+            && trim((string) $existingRow['imei_no']) === $imeiNo);
     if ($deviceStatus === 'used' && !$sameExistingDevice) {
         throw new Exception('IMEI is already used and cannot be assigned again.');
     }
-    $assertNoOtherCustomerAssignment('device_id', $deviceId, 'IMEI is already assigned to another customer.');
+    $assertNoOtherCustomerAssignment('device_id', $deviceId, 'IMEI is already assigned to another customer.', $imeiNo);
 
     /*
     |--------------------------------------------------------------------------
@@ -413,7 +472,9 @@ try {
         $deviceOwnerEligible = true;
     }
 
-    if ($sameExistingDevice || $deviceStatus === 'available') {
+    if ($sameExistingDevice
+        || $deviceStatus === 'available'
+        || ($deviceStatus === 'reserved' && in_array($deviceId, $courierReservedDeviceIds, true))) {
         // OK
     } elseif ($deviceStatus === 'allocated' && $deviceOwnerEligible) {
         // OK, preserve owner relationship
@@ -506,7 +567,9 @@ try {
         $sim1OwnerEligible = true;
     }
 
-    if ($sameExistingSim1 || $sim1Status === 'available') {
+    if ($sameExistingSim1
+        || $sim1Status === 'available'
+        || ($sim1Status === 'reserved' && in_array($simId1, $courierReservedSimIds, true))) {
         // OK
     } elseif ($sim1Status === 'allocated' && $sim1OwnerEligible) {
         // OK
@@ -604,7 +667,9 @@ try {
             $sim2OwnerEligible = true;
         }
 
-        if ($sameExistingSim2 || $sim2Status === 'available') {
+        if ($sameExistingSim2
+            || $sim2Status === 'available'
+            || ($sim2Status === 'reserved' && in_array($simId2, $courierReservedSimIds, true))) {
             // OK
         } elseif ($sim2Status === 'allocated' && $sim2OwnerEligible) {
             // OK
