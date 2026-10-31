@@ -24,15 +24,36 @@ if (!$conn) {
     );
 }
 
-$result = $conn->query(
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$countResult = $conn->query('SELECT COUNT(*) AS total FROM sale_amounts');
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count sale amounts.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$stmt = $conn->prepare(
     'SELECT
         id,
         sale_amount,
         status,
         created_at
      FROM sale_amounts
-     ORDER BY sale_amount ASC'
+     ORDER BY sale_amount ASC, id ASC
+     LIMIT ? OFFSET ?'
 );
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare sale amount query.', [], [], 500);
+}
+$offset = ($page - 1) * $pageSize;
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch sale amounts.', [], [], 500);
+}
+$result = $stmt->get_result();
 
 $saleAmounts = [];
 
@@ -41,12 +62,19 @@ while ($row = $result->fetch_assoc()) {
 }
 
 $conn->close();
+$stmt->close();
 
 sendResponse(
     true,
     'Sale amounts fetched successfully.',
     [
-        'sale_amounts' => $saleAmounts
+        'sale_amounts' => $saleAmounts,
+        'pagination' => [
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total_pages' => max(1, (int) ceil($total / $pageSize))
+        ]
     ]
 );
 ?>

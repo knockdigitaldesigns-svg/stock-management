@@ -27,8 +27,26 @@ if (!$conn) {
     sendResponse(false, 'Database connection failed', [], [], 500);
 }
 
-$stmt = $conn->prepare('SELECT id, permission_key, permission_name, module, action FROM permissions ORDER BY module ASC, permission_name ASC');
-$stmt->execute();
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$countResult = $conn->query('SELECT COUNT(*) AS total FROM permissions');
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count permissions.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$offset = ($page - 1) * $pageSize;
+$stmt = $conn->prepare('SELECT id, permission_key, permission_name, module, action FROM permissions ORDER BY module ASC, permission_name ASC, id ASC LIMIT ? OFFSET ?');
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare permission query.', [], [], 500);
+}
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch permissions.', [], [], 500);
+}
 $result = $stmt->get_result();
 $permissions = [];
 while ($row = $result->fetch_assoc()) {
@@ -37,5 +55,13 @@ while ($row = $result->fetch_assoc()) {
 $stmt->close();
 $conn->close();
 
-sendResponse(true, 'Permissions fetched successfully', ['permissions' => $permissions]);
+sendResponse(true, 'Permissions fetched successfully', [
+    'permissions' => $permissions,
+    'pagination' => [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ]
+]);
 ?>

@@ -32,7 +32,15 @@ if (!$conn) {
     );
 }
 
-$result = $conn->query(
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$countResult = $conn->query('SELECT COUNT(*) AS total FROM device_types');
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count device types.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$stmt = $conn->prepare(
     'SELECT
         id,
         device_type,
@@ -40,8 +48,21 @@ $result = $conn->query(
         created_at,
         updated_at
      FROM device_types
-     ORDER BY device_type ASC'
+     ORDER BY device_type ASC, id ASC
+     LIMIT ? OFFSET ?'
 );
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare device type query.', [], [], 500);
+}
+$offset = ($page - 1) * $pageSize;
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch device types.', [], [], 500);
+}
+$result = $stmt->get_result();
 
 $deviceTypes = [];
 
@@ -50,11 +71,18 @@ while ($result && ($row = $result->fetch_assoc())) {
 }
 
 $conn->close();
+$stmt->close();
 
 sendResponse(
     true,
     'Device types fetched successfully',
     [
-        'device_types' => $deviceTypes
+        'device_types' => $deviceTypes,
+        'pagination' => [
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total_pages' => max(1, (int) ceil($total / $pageSize))
+        ]
     ]
 );

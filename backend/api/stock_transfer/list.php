@@ -62,7 +62,7 @@ if ($dateTo !== '') {
 }
 
 $whereSQL = implode(' AND ', $where);
-$paginated = isset($_GET['page']) || isset($_GET['page_size']);
+$paginated = true;
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 

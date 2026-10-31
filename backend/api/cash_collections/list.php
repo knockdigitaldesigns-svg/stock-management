@@ -20,6 +20,51 @@ if (!in_array($recipientType, ['Technician', 'Dealer'], true) || $recipientId <=
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
 
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$offset = ($page - 1) * $pageSize;
+$countStmt = $conn->prepare(
+    'SELECT COUNT(*) AS total
+     FROM customer_cash_collections ccc
+     INNER JOIN customers c ON c.id = ccc.customer_id
+     INNER JOIN customer_installations ci ON ci.id = ccc.installation_id
+     WHERE ccc.recipient_type = ? AND ccc.recipient_id = ?'
+);
+if (!$countStmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare cash collection count query.', [], [], 500);
+}
+$countStmt->bind_param('si', $recipientType, $recipientId);
+if (!$countStmt->execute()) {
+    $countStmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to count cash collections.', [], [], 500);
+}
+$total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+$countStmt->close();
+
+$summaryStmt = $conn->prepare(
+    'SELECT COALESCE(SUM(ccc.amount_collected), 0) AS total_collected,
+            COALESCE(SUM(ccc.amount_remitted), 0) AS total_settled,
+            COALESCE(SUM(ccc.pending_amount), 0) AS total_pending
+     FROM customer_cash_collections ccc
+     INNER JOIN customers c ON c.id = ccc.customer_id
+     INNER JOIN customer_installations ci ON ci.id = ccc.installation_id
+     WHERE ccc.recipient_type = ? AND ccc.recipient_id = ?'
+);
+if (!$summaryStmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare cash collection summary query.', [], [], 500);
+}
+$summaryStmt->bind_param('si', $recipientType, $recipientId);
+if (!$summaryStmt->execute()) {
+    $summaryStmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to summarize cash collections.', [], [], 500);
+}
+$summary = $summaryStmt->get_result()->fetch_assoc() ?: [];
+$summaryStmt->close();
+
 $stmt = $conn->prepare(
     'SELECT ccc.*, c.username, c.primary_mobile_no, c.location,
             ci.installation_person_type, ci.installation_date,
@@ -35,10 +80,19 @@ $stmt = $conn->prepare(
      )
      LEFT JOIN device_types dt ON dt.id = cv.device_model_id
      WHERE ccc.recipient_type = ? AND ccc.recipient_id = ?
-     ORDER BY ci.installation_date DESC, ccc.id DESC'
+     ORDER BY ci.installation_date DESC, ccc.id DESC
+     LIMIT ? OFFSET ?'
 );
-$stmt->bind_param('si', $recipientType, $recipientId);
-$stmt->execute();
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare cash collection query.', [], [], 500);
+}
+$stmt->bind_param('siii', $recipientType, $recipientId, $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch cash collections.', [], [], 500);
+}
 $result = $stmt->get_result();
 $collections = [];
 while ($row = $result->fetch_assoc()) {
@@ -85,21 +139,19 @@ if ($settlementHistory) {
     }
 }
 $settlementHistory = array_values($settlementHistory);
-$totalCollected = 0.0;
-$totalSettled = 0.0;
-$totalPending = 0.0;
-foreach ($collections as $collection) {
-    $totalCollected += (float) $collection['amount_collected'];
-    $totalSettled += (float) $collection['amount_remitted'];
-    $totalPending += (float) $collection['pending_amount'];
-}
 $conn->close();
 sendResponse(true, 'Customer cash collections fetched successfully.', [
     'collections' => $collections,
     'summary' => [
-        'total_collected' => round($totalCollected, 2),
-        'total_settled' => round($totalSettled, 2),
-        'total_pending' => round($totalPending, 2)
+        'total_collected' => (float) $summary['total_collected'],
+        'total_settled' => (float) $summary['total_settled'],
+        'total_pending' => (float) $summary['total_pending']
+    ],
+    'pagination' => [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
     ],
     'settlement_history' => $settlementHistory
 ]);

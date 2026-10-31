@@ -10,6 +10,19 @@ requirePermission('sim_lifecycle.view');
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
 
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$offset = ($page - 1) * $pageSize;
+$countResult = $conn->query("SELECT COUNT(*) AS total
+        FROM stock_allocations sa
+        INNER JOIN sims s ON s.id = sa.sim_id
+        INNER JOIN dealers d ON d.id = sa.owner_id
+        WHERE sa.owner_type = 'dealer'");
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count dealer SIM activation records.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
 $sql = "SELECT sa.id AS allocation_id, sa.owner_id, d.dealer_name, s.id AS sim_id, s.sim_no, s.sim_type,
                COALESCE(sa.sim_given_date, sa.allocation_date) AS given_date,
                sa.sim_activation_date AS activation_date, sa.sim_expiry_date AS expiry_date,
@@ -22,8 +35,20 @@ $sql = "SELECT sa.id AS allocation_id, sa.owner_id, d.dealer_name, s.id AS sim_i
         INNER JOIN dealers d ON d.id = sa.owner_id
         LEFT JOIN sim_validities sv ON sv.id = COALESCE(sa.sim_validity_id, s.sim_validity_id)
         WHERE sa.owner_type = 'dealer'
-        ORDER BY d.dealer_name ASC, s.sim_no ASC";
-$result = $conn->query($sql);
+        ORDER BY d.dealer_name ASC, s.sim_no ASC, sa.id ASC
+        LIMIT ? OFFSET ?";
+$stmt = $conn->prepare($sql);
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare dealer SIM activation query.', [], [], 500);
+}
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch dealer SIM activation records.', [], [], 500);
+}
+$result = $stmt->get_result();
 $rows = [];
 while ($result && ($row = $result->fetch_assoc())) {
     $row['allocation_id'] = (int) $row['allocation_id'];
@@ -34,5 +59,14 @@ while ($result && ($row = $result->fetch_assoc())) {
     $rows[] = $row;
 }
 $conn->close();
-sendResponse(true, 'Dealer SIM activation records fetched.', ['records' => $rows]);
+$stmt->close();
+sendResponse(true, 'Dealer SIM activation records fetched.', [
+    'records' => $rows,
+    'pagination' => [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ]
+]);
 ?>

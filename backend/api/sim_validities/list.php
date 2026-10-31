@@ -36,7 +36,15 @@ if (!$conn) {
 /*
  * Master Settings needs BOTH Active and Inactive records.
  */
-$result = $conn->query(
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$countResult = $conn->query('SELECT COUNT(*) AS total FROM sim_validities');
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count SIM validities.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$stmt = $conn->prepare(
     "SELECT
         id,
         months,
@@ -44,8 +52,21 @@ $result = $conn->query(
         created_at,
         updated_at
      FROM sim_validities
-     ORDER BY months ASC"
+     ORDER BY months ASC, id ASC
+     LIMIT ? OFFSET ?"
 );
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare SIM validity query.', [], [], 500);
+}
+$offset = ($page - 1) * $pageSize;
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch SIM validities.', [], [], 500);
+}
+$result = $stmt->get_result();
 
 $validities = [];
 
@@ -58,11 +79,18 @@ while ($result && ($row = $result->fetch_assoc())) {
 }
 
 $conn->close();
+$stmt->close();
 
 sendResponse(
     true,
     'SIM validities fetched successfully',
     [
-        'validities' => $validities
+        'validities' => $validities,
+        'pagination' => [
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total_pages' => max(1, (int) ceil($total / $pageSize))
+        ]
     ]
 );
