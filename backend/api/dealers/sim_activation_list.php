@@ -67,7 +67,7 @@ $expireStmt->close();
 $renewalDateSelect = "sa.sim_expiry_date AS renewal_date";
 
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-$limit = isset($_GET['limit']) ? max(1, (int)$_GET['limit']) : 10;
+$limit = min(100, max(1, (int) ($_GET['page_size'] ?? $_GET['limit'] ?? 10)));
 $offset = ($page - 1) * $limit;
 
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
@@ -250,10 +250,20 @@ $countQuery = "SELECT COUNT(*) as total FROM stock_allocations sa
                JOIN dealers d ON sa.owner_id = d.id 
                $whereSql";
 $countStmt = $conn->prepare($countQuery);
-if ($types !== '') {
-    $countStmt->bind_param($types, ...$params);
+if (!$countStmt) {
+   $error = $conn->error;
+   $conn->close();
+   sendResponse(false, 'Failed to prepare dealer SIM activation count query: ' . $error, [], [], 500);
 }
-$countStmt->execute();
+if ($types !== '') {
+   $countStmt->bind_param($types, ...$params);
+}
+if (!$countStmt->execute()) {
+   $error = $countStmt->error;
+   $countStmt->close();
+   $conn->close();
+   sendResponse(false, 'Failed to count dealer SIM activation records: ' . $error, [], [], 500);
+}
 $totalRecords = $countStmt->get_result()->fetch_assoc()['total'];
 $countStmt->close();
 
@@ -364,17 +374,27 @@ $query = "SELECT
           ORDER BY sa.id DESC";
 
 if (!$export_all) {
-    $query .= " LIMIT ?, ?";
-    $params[] = $offset;
+    $query .= " LIMIT ? OFFSET ?";
     $params[] = $limit;
+    $params[] = $offset;
     $types .= 'ii';
 }
 
 $stmt = $conn->prepare($query);
+if (!$stmt) {
+    $error = $conn->error;
+    $conn->close();
+    sendResponse(false, 'Failed to prepare dealer SIM activation query: ' . $error, [], [], 500);
+}
 if ($types !== '') {
     $stmt->bind_param($types, ...$params);
 }
-$stmt->execute();
+if (!$stmt->execute()) {
+    $error = $stmt->error;
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch dealer SIM activation records: ' . $error, [], [], 500);
+}
 $result = $stmt->get_result();
 
 $sims = [];
@@ -398,7 +418,10 @@ sendResponse(true, 'Data fetched successfully', [
         'current_page' => $page,
         'per_page' => $limit,
         'total_records' => $totalRecords,
-        'total_pages' => $totalPages
+        'total_pages' => $totalPages,
+        'page' => $page,
+        'page_size' => $limit,
+        'total' => (int) $totalRecords
     ]
 ]);
 ?>

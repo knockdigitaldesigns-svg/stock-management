@@ -110,7 +110,7 @@ $lookups = [
 ];
 
 $page = max(1, (int) ($_GET['page'] ?? 1));
-$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 25)));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 $where = [];
 $params = [];
 $types = '';

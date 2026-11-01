@@ -51,7 +51,6 @@ $effectiveStatusSql = "LOWER(CASE
     ELSE LOWER(COALESCE(d.status, 'available'))
 END)";
 if (($status = strtolower(trim((string)($_GET['status'] ?? '')))) !== '') { $where[] = "$effectiveStatusSql = ?"; $params[] = $status; $types .= 's'; }
-$paginated = isset($_GET['page']) || isset($_GET['page_size']);
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 $sql = "
@@ -81,23 +80,27 @@ $sql = "
 ";
 if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
 $sql .= ' ORDER BY d.created_at DESC, d.id DESC';
-if ($paginated) {
-    $countSql = 'SELECT COUNT(*) AS total FROM devices d JOIN device_types dm ON d.device_model_id = dm.id LEFT JOIN stock_allocations sa ON sa.device_id = d.id AND sa.id = (SELECT MAX(id) FROM stock_allocations WHERE device_id = d.id) WHERE ' . implode(' AND ', $where);
-    $countStmt = $conn->prepare($countSql);
-    if (!$countStmt) { $conn->close(); sendResponse(false, 'Failed to prepare device count query.', [], [], 500); }
-    if ($params) $countStmt->bind_param($types, ...$params);
-    if (!$countStmt->execute()) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to count devices.', [], [], 500); }
-    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
-    $countStmt->close();
-    $sql .= ' LIMIT ? OFFSET ?';
-    $params[] = $pageSize;
-    $params[] = ($page - 1) * $pageSize;
-    $types .= 'ii';
-}
+$countSql = 'SELECT COUNT(*) AS total FROM devices d JOIN device_types dm ON d.device_model_id = dm.id LEFT JOIN stock_allocations sa ON sa.device_id = d.id AND sa.id = (SELECT MAX(id) FROM stock_allocations WHERE device_id = d.id) WHERE ' . implode(' AND ', $where);
+$countStmt = $conn->prepare($countSql);
+if (!$countStmt) { $conn->close(); sendResponse(false, 'Failed to prepare device count query.', [], [], 500); }
+if ($params && !$countStmt->bind_param($types, ...$params)) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to bind device count query parameters.', [], [], 500); }
+if (!$countStmt->execute()) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to count devices.', [], [], 500); }
+$countResult = $countStmt->get_result();
+if (!$countResult) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to retrieve device count.', [], [], 500); }
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$countStmt->close();
+
+$sql .= ' LIMIT ? OFFSET ?';
+$params[] = $pageSize;
+$params[] = ($page - 1) * $pageSize;
+$types .= 'ii';
+
 $stmt = $conn->prepare($sql);
-if ($params) $stmt->bind_param($types, ...$params);
-$stmt->execute();
+if (!$stmt) { $conn->close(); sendResponse(false, 'Failed to prepare device query.', [], [], 500); }
+if (!$stmt->bind_param($types, ...$params)) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to bind device query parameters.', [], [], 500); }
+if (!$stmt->execute()) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to fetch devices.', [], [], 500); }
 $result = $stmt->get_result();
+if (!$result) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to retrieve devices.', [], [], 500); }
 
 $devices = [];
 if ($result) {
@@ -112,12 +115,12 @@ if ($result) {
 
 sendResponse(true, "Devices fetched successfully", [
     "devices" => $devices,
-    ...($paginated ? ['pagination' => [
+    'pagination' => [
         'total' => $total,
         'page' => $page,
         'page_size' => $pageSize,
         'total_pages' => max(1, (int) ceil($total / $pageSize))
-    ]] : [])
+    ]
 ]);
 
 $stmt->close();

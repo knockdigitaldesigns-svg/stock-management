@@ -23,8 +23,27 @@ if (!$conn) {
     sendResponse(false, 'Database connection failed', [], [], 500);
 }
 
-$sql = "SELECT id, sim_type FROM sim_types ORDER BY id ASC";
-$result = $conn->query($sql);
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$countResult = $conn->query('SELECT COUNT(*) AS total FROM sim_types');
+if (!$countResult) {
+    $conn->close();
+    sendResponse(false, 'Failed to count SIM types.', [], [], 500);
+}
+$total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
+$stmt = $conn->prepare('SELECT id, sim_type FROM sim_types ORDER BY id ASC LIMIT ? OFFSET ?');
+if (!$stmt) {
+    $conn->close();
+    sendResponse(false, 'Failed to prepare SIM type query.', [], [], 500);
+}
+$offset = ($page - 1) * $pageSize;
+$stmt->bind_param('ii', $pageSize, $offset);
+if (!$stmt->execute()) {
+    $stmt->close();
+    $conn->close();
+    sendResponse(false, 'Failed to fetch SIM types.', [], [], 500);
+}
+$result = $stmt->get_result();
 $simTypes = [];
 
 if ($result) {
@@ -36,5 +55,14 @@ if ($result) {
     }
 }
 $conn->close();
+$stmt->close();
 
-sendResponse(true, 'SIM types fetched successfully', ['sim_types' => $simTypes]);
+sendResponse(true, 'SIM types fetched successfully', [
+    'sim_types' => $simTypes,
+    'pagination' => [
+        'total' => $total,
+        'page' => $page,
+        'page_size' => $pageSize,
+        'total_pages' => max(1, (int) ceil($total / $pageSize))
+    ]
+]);

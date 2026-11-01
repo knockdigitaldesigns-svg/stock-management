@@ -90,13 +90,28 @@ try {
         $types .= 's';
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Main query
-    |--------------------------------------------------------------------------
-    | No LIMIT/OFFSET is used: this endpoint returns all matching active SIMs
-    | in one response. If the query fails, details are written to the PHP log.
-    */
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+    $offset = ($page - 1) * $pageSize;
+    $whereSql = ' WHERE ' . implode(' AND ', $where);
+    $countSql = 'SELECT COUNT(*) AS total FROM sims s' . $whereSql;
+    $countStmt = $conn->prepare($countSql);
+    if (!$countStmt) {
+        sendResponse(false, 'Failed to prepare SIM count query.', [], [], 500);
+    }
+    $countParams = array_slice($params, 5);
+    $countTypes = substr($types, 5);
+    if ($countParams && !$countStmt->bind_param($countTypes, ...$countParams)) {
+        $countStmt->close();
+        sendResponse(false, 'Failed to bind SIM count query parameters.', [], [], 500);
+    }
+    if (!$countStmt->execute()) {
+        $countStmt->close();
+        sendResponse(false, 'Failed to count SIMs.', [], [], 500);
+    }
+    $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $countStmt->close();
+
     $sqlBase = '
         SELECT
             s.id,
@@ -193,94 +208,41 @@ try {
            AND sa.owner_type = "technician"
     ';
 
-    // Build the WHERE clause on the SQL string actually used below.
-    $whereSql = ' WHERE ' . implode(' AND ', $where);
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Internal batch fetching (single API response; no frontend pagination)
-    |--------------------------------------------------------------------------
-    */
-    $batchSize = 300;
-    $lastId = 0;
+    $sql = $sqlBase . $whereSql . ' ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?';
+    $params[] = $pageSize;
+    $params[] = $offset;
+    $types .= 'ii';
     $sims = [];
-    $batchNumber = 0;
     $queryStartedAt = microtime(true);
-
-    while (true) {
-        $batchNumber++;
-
-        // s.deleted_at IS NULL is always the first WHERE condition.
-        $batchSql = $sqlBase . $whereSql . ' AND s.id > ? ORDER BY s.id ASC LIMIT ?';
-        $batchParams = $params;
-        $batchParams[] = $lastId;
-        $batchParams[] = $batchSize;
-        $batchTypes = $types . 'ii';
-
-        $stmt = $conn->prepare($batchSql);
-        $stmt->bind_param($batchTypes, ...$batchParams);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        $batchCount = 0;
-        $previousLastId = $lastId;
-        while ($row = $result->fetch_assoc()) {
-            $batchCount++;
-            $rowId = (int) ($row['id'] ?? 0);
-            if ($rowId > $lastId) {
-                $lastId = $rowId;
-            }
-
-            $row['status'] = strtolower(trim((string) ($row['status'] ?? 'available')));
-
-            if ($row['status'] === 'active') {
-                $row['status'] = 'available';
-            } elseif ($row['status'] === 'deactive' || $row['status'] === 'expired') {
-                $row['status'] = 'used';
-            } elseif ($row['status'] === 'safe custody') {
-                $row['status'] = 'allocated';
-            }
-
-            $sims[] = $row;
-        }
-
-        $result->free();
-        // $stmt->close();
-
-        error_log(
-            '[SIM_LIST] batch=' . $batchNumber .
-            ' rows=' . $batchCount .
-            ' last_id=' . $lastId .
-            ' elapsed_seconds=' . round(microtime(true) - $queryStartedAt, 3)
-        );
-
-        if ($batchCount < $batchSize) {
-            break;
-        }
-
-        // Never keep appending the same batch if the cursor cannot advance.
-        if ($lastId <= $previousLastId) {
-            throw new RuntimeException('SIM batch cursor did not advance; stopping to prevent duplicate rows and memory exhaustion.');
-        }
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        sendResponse(false, 'Failed to prepare SIM query.', [], [], 500);
     }
-
-    // Preserve the original newest-created-first response ordering.
-    usort($sims, static function (array $a, array $b): int {
-        $dateCompare = strcmp(
-            (string) ($b['_sort_created_at'] ?? ''),
-            (string) ($a['_sort_created_at'] ?? '')
-        );
-        if ($dateCompare !== 0) {
-            return $dateCompare;
-        }
-        return ((int) $b['id']) <=> ((int) $a['id']);
-    });
-
-    foreach ($sims as &$simRow) {
-        unset($simRow['_sort_created_at']);
+    if (!$stmt->bind_param($types, ...$params) || !$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        sendResponse(false, 'Failed to fetch SIMs: ' . $error, [], [], 500);
     }
-    unset($simRow);
+    $result = $stmt->get_result();
+    if (!$result) {
+        $stmt->close();
+        sendResponse(false, 'Failed to retrieve SIMs.', [], [], 500);
+    }
+    while ($row = $result->fetch_assoc()) {
+        $row['status'] = strtolower(trim((string) ($row['status'] ?? 'available')));
+
+        if ($row['status'] === 'active') {
+            $row['status'] = 'available';
+        } elseif ($row['status'] === 'deactive' || $row['status'] === 'expired') {
+            $row['status'] = 'used';
+        } elseif ($row['status'] === 'safe custody') {
+            $row['status'] = 'allocated';
+        }
+
+        unset($row['_sort_created_at']);
+        $sims[] = $row;
+    }
+    $result->free();
 
     $resultCount = count($sims);
     $queryDurationSeconds = round(microtime(true) - $queryStartedAt, 3);
@@ -288,19 +250,19 @@ try {
     $memoryPeakMb = round(memory_get_peak_usage(true) / 1048576, 2);
     $memoryUsedMb = round(memory_get_usage(true) / 1048576, 2);
 
-    error_log(
-        '[SIM_LIST] Success. rows=' . $resultCount .
-        ' query_seconds=' . $queryDurationSeconds .
-        ' total_seconds=' . $totalDurationSeconds .
-        ' memory_used_mb=' . $memoryUsedMb .
-        ' memory_peak_mb=' . $memoryPeakMb
-    );
+    error_log('[SIM_LIST] Success. rows=' . $resultCount . ' query_seconds=' . $queryDurationSeconds);
 
     $stmt->close();
     $conn->close();
 
     $responseData = [
         'sims' => $sims,
+        'pagination' => [
+            'total' => $total,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total_pages' => max(1, (int) ceil($total / $pageSize))
+        ],
     ];
 
     // Safe temporary diagnostics, only when explicitly requested.
@@ -311,9 +273,9 @@ try {
             'total_seconds' => $totalDurationSeconds,
             'memory_used_mb' => $memoryUsedMb,
             'memory_peak_mb' => $memoryPeakMb,
-            'pagination_enabled' => false,
-            'internal_batch_size' => $batchSize,
-            'internal_batch_count' => $batchNumber,
+            'pagination_enabled' => true,
+            'internal_batch_size' => $pageSize,
+            'internal_batch_count' => 1,
         ];
     }
 
