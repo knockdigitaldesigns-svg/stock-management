@@ -55,6 +55,69 @@ $dealerPaymentStatusSql = "CASE
     ELSE 'Not Paid'
 END";
 
+if (isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1') {
+    $result = $conn->query("
+        SELECT
+            d.id,
+            d.dealer_name,
+            d.status,
+            d.installation_status,
+            d.software,
+            d.threshold_amount,
+            $dealerPendingAmountSql AS pending_amount,
+            (
+                SELECT GROUP_CONCAT(ds.software ORDER BY ds.id SEPARATOR '||')
+                FROM dealer_software ds
+                WHERE ds.dealer_id = d.id
+            ) AS assigned_software
+        FROM dealers d
+        LEFT JOIN (
+            SELECT owner_id, SUM(total_amount) AS total_amount,
+                   SUM(amount_paid) AS amount_paid,
+                   SUM(GREATEST(0, total_amount - amount_paid)) AS pending_amount
+            FROM stock_allocations
+            WHERE owner_type = 'dealer' AND (device_id IS NOT NULL OR sim_id IS NOT NULL)
+            GROUP BY owner_id
+        ) allocation_summary ON allocation_summary.owner_id = d.id
+        LEFT JOIN (
+            SELECT sa.owner_id, SUM(rh.payment_amount) AS total_amount,
+                   SUM(rh.amount_paid + COALESCE(rp.amount_paid, 0)) AS amount_paid,
+                   SUM(GREATEST(0, rh.amount_pending - COALESCE(rp.amount_paid, 0))) AS pending_amount
+            FROM stock_allocations sa
+            INNER JOIN renewal_history rh ON rh.allocation_id = sa.id
+                AND rh.action_type IN ('Renew SIM', 'Reactivate SIM', 'Safe Custody')
+            LEFT JOIN (
+                SELECT source_history_id, SUM(amount_paid) AS amount_paid
+                FROM renewal_history
+                WHERE action_type = 'Renewal Payment' AND source_balance_updated = 0
+                GROUP BY source_history_id
+            ) rp ON rp.source_history_id = rh.id
+            WHERE sa.owner_type = 'dealer' AND sa.sim_id IS NOT NULL
+            GROUP BY sa.owner_id
+        ) renewal_summary ON renewal_summary.owner_id = d.id
+        WHERE LOWER(TRIM(COALESCE(d.status, ''))) = 'active'
+        ORDER BY d.dealer_name ASC, d.id ASC
+    ");
+    if (!$result) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch active dealer allocation options.', [], [], 500);
+    }
+
+    $dealers = [];
+    while ($row = $result->fetch_assoc()) {
+        $assignedSoftware = trim((string) ($row['assigned_software'] ?? ''));
+        $row['software_list'] = $assignedSoftware !== ''
+            ? array_values(array_filter(array_map('trim', explode('||', $assignedSoftware))))
+            : array_values(array_filter(array_map('trim', explode(',', (string) ($row['software'] ?? '')))));
+        unset($row['assigned_software']);
+        $dealers[] = $row;
+    }
+
+    $result->free();
+    $conn->close();
+    sendResponse(true, 'Active dealer allocation options fetched successfully.', ['dealers' => $dealers]);
+}
+
 $whereConditions = [];
 $params = [];
 $types = '';

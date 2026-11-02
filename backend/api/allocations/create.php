@@ -128,11 +128,14 @@ try {
     
     // Validate Owner
     if ($owner_type === 'dealer') {
-        $checkOwner = $conn->prepare("SELECT id, installation_status FROM dealers WHERE id = ?");
+        $checkOwner = $conn->prepare("SELECT id, status, installation_status FROM dealers WHERE id = ?");
         $checkOwner->bind_param("i", $owner_id);
         $checkOwner->execute();
         $ownerResult = $checkOwner->get_result()->fetch_assoc();
         if (!$ownerResult) throw new Exception("Dealer not found");
+        if (strtolower(trim((string) $ownerResult['status'])) !== 'active') {
+            throw new Exception("Inactive dealers cannot receive stock allocations.");
+        }
 
         if ($ownerResult['installation_status'] === 'Not Willing') {
             if ($total_amount_raw === null || trim((string) $total_amount_raw) === '' || ($amount_paid > 0 && $payment_mode_raw === '')) {
@@ -158,10 +161,14 @@ try {
             }
         }
     } else if ($owner_type === 'technician') {
-        $checkOwner = $conn->prepare("SELECT id FROM technicians WHERE id = ?");
+        $checkOwner = $conn->prepare("SELECT id, status FROM technicians WHERE id = ?");
         $checkOwner->bind_param("i", $owner_id);
         $checkOwner->execute();
-        if ($checkOwner->get_result()->num_rows === 0) throw new Exception("Technician not found");
+        $ownerResult = $checkOwner->get_result()->fetch_assoc();
+        if (!$ownerResult) throw new Exception("Technician not found");
+        if (strtolower(trim((string) $ownerResult['status'])) !== 'active') {
+            throw new Exception("Inactive technicians cannot receive stock allocations.");
+        }
         $checkOwner->close();
     } else {
         throw new Exception("Invalid owner type");
@@ -184,13 +191,28 @@ try {
             $server_total_amount += $device_amount;
 
             // 1. Check exists & available (using FOR UPDATE to lock row)
-            $checkDev = $conn->prepare("SELECT status FROM devices WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+            $checkDev = $conn->prepare("
+                SELECT
+                    status,
+                    EXISTS (SELECT 1 FROM stock_allocations WHERE device_id = devices.id) AS has_allocation,
+                    EXISTS (
+                        SELECT 1
+                        FROM customer_vehicle_details
+                        WHERE device_id = devices.id
+                           OR BINARY imei_no = BINARY devices.imei_no
+                    ) AS is_assigned
+                FROM devices
+                WHERE id = ? AND deleted_at IS NULL
+                FOR UPDATE
+            ");
             $checkDev->bind_param("i", $device_id);
             $checkDev->execute();
             $devResult = $checkDev->get_result()->fetch_assoc();
             
             if (!$devResult) throw new Exception("Device ID $device_id not found");
-            if ($devResult['status'] !== 'available') throw new Exception("Device ID $device_id is already {$devResult['status']}");
+            if ($devResult['status'] !== 'available' || (int) $devResult['has_allocation'] === 1 || (int) $devResult['is_assigned'] === 1) {
+                throw new Exception("Device ID $device_id is already allocated or unavailable.");
+            }
             $checkDev->close();
 
             // 2. Insert Allocation
@@ -229,13 +251,29 @@ try {
             $server_total_amount += $sim_amount;
 
             // 1. Check exists & available (using FOR UPDATE to lock row)
-            $checkSim = $conn->prepare("SELECT id, sim_validity_id, status FROM sims WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+            $checkSim = $conn->prepare("
+                SELECT
+                    id,
+                    sim_validity_id,
+                    status,
+                    EXISTS (SELECT 1 FROM stock_allocations WHERE sim_id = sims.id) AS has_allocation,
+                    EXISTS (
+                        SELECT 1
+                        FROM customer_vehicle_details
+                        WHERE sim_id_1 = sims.id OR sim_id_2 = sims.id
+                    ) AS is_assigned
+                FROM sims
+                WHERE id = ? AND deleted_at IS NULL
+                FOR UPDATE
+            ");
             $checkSim->bind_param("i", $sim_id);
             $checkSim->execute();
             $simResult = $checkSim->get_result()->fetch_assoc();
             
             if (!$simResult) throw new Exception("SIM ID $sim_id not found");
-            if ($simResult['status'] !== 'available') throw new Exception("SIM ID $sim_id is already {$simResult['status']}");
+            if ($simResult['status'] !== 'available' || (int) $simResult['has_allocation'] === 1 || (int) $simResult['is_assigned'] === 1) {
+                throw new Exception("SIM ID $sim_id is already allocated or unavailable.");
+            }
             $checkSim->close();
 
             // 2. Insert Allocation

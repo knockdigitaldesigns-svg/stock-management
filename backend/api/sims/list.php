@@ -42,6 +42,7 @@ try {
     | Filters
     |--------------------------------------------------------------------------
     */
+    $forAllocation = isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1';
     $where = ['s.deleted_at IS NULL'];
     $customerId = max(0, (int) ($_GET['customer_id'] ?? 0));
     $vehicleId = max(0, (int) ($_GET['vehicle_id'] ?? 0));
@@ -93,6 +94,15 @@ try {
     $page = max(1, (int) ($_GET['page'] ?? 1));
     $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
     $offset = ($page - 1) * $pageSize;
+    if ($forAllocation) {
+        $where[] = "LOWER(TRIM(COALESCE(s.status, ''))) = 'available'";
+        $where[] = 'NOT EXISTS (SELECT 1 FROM stock_allocations allocation_check WHERE allocation_check.sim_id = s.id)';
+        $where[] = 'NOT EXISTS (
+            SELECT 1
+            FROM customer_vehicle_details assigned_check
+            WHERE assigned_check.sim_id_1 = s.id OR assigned_check.sim_id_2 = s.id
+        )';
+    }
     $whereSql = ' WHERE ' . implode(' AND ', $where);
     $countSql = 'SELECT COUNT(*) AS total FROM sims s' . $whereSql;
     $countStmt = $conn->prepare($countSql);
@@ -208,10 +218,13 @@ try {
            AND sa.owner_type = "technician"
     ';
 
-    $sql = $sqlBase . $whereSql . ' ORDER BY s.created_at DESC, s.id DESC LIMIT ? OFFSET ?';
-    $params[] = $pageSize;
-    $params[] = $offset;
-    $types .= 'ii';
+    $sql = $sqlBase . $whereSql . ' ORDER BY s.created_at DESC, s.id DESC';
+    if (!$forAllocation) {
+        $sql .= ' LIMIT ? OFFSET ?';
+        $params[] = $pageSize;
+        $params[] = $offset;
+        $types .= 'ii';
+    }
     $sims = [];
     $queryStartedAt = microtime(true);
     $stmt = $conn->prepare($sql);
@@ -260,8 +273,8 @@ try {
         'pagination' => [
             'total' => $total,
             'page' => $page,
-            'page_size' => $pageSize,
-            'total_pages' => max(1, (int) ceil($total / $pageSize))
+            'page_size' => $forAllocation ? $total : $pageSize,
+            'total_pages' => $forAllocation ? 1 : max(1, (int) ceil($total / $pageSize))
         ],
     ];
 
