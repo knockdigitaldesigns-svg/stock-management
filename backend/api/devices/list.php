@@ -18,6 +18,7 @@ if (!$conn) {
     sendResponse(false, "Database connection failed", [], [], 500);
 }
 
+$forAllocation = isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1';
 $where = ['d.deleted_at IS NULL'];
 $params = [];
 $types = '';
@@ -50,6 +51,11 @@ $effectiveStatusSql = "LOWER(CASE
     WHEN LOWER(COALESCE(d.status, '')) IN ('deactive', 'expired') THEN 'used'
     ELSE LOWER(COALESCE(d.status, 'available'))
 END)";
+if ($forAllocation) {
+    $where[] = "LOWER(COALESCE(d.status, '')) = 'available'";
+    $where[] = "$effectiveStatusSql = 'available'";
+    $where[] = 'NOT EXISTS (SELECT 1 FROM stock_allocations allocation_check WHERE allocation_check.device_id = d.id)';
+}
 if (($status = strtolower(trim((string)($_GET['status'] ?? '')))) !== '') { $where[] = "$effectiveStatusSql = ?"; $params[] = $status; $types .= 's'; }
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
@@ -90,14 +96,16 @@ if (!$countResult) { $countStmt->close(); $conn->close(); sendResponse(false, 'F
 $total = (int) ($countResult->fetch_assoc()['total'] ?? 0);
 $countStmt->close();
 
-$sql .= ' LIMIT ? OFFSET ?';
-$params[] = $pageSize;
-$params[] = ($page - 1) * $pageSize;
-$types .= 'ii';
+if (!$forAllocation) {
+    $sql .= ' LIMIT ? OFFSET ?';
+    $params[] = $pageSize;
+    $params[] = ($page - 1) * $pageSize;
+    $types .= 'ii';
+}
 
 $stmt = $conn->prepare($sql);
 if (!$stmt) { $conn->close(); sendResponse(false, 'Failed to prepare device query.', [], [], 500); }
-if (!$stmt->bind_param($types, ...$params)) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to bind device query parameters.', [], [], 500); }
+if ($params && !$stmt->bind_param($types, ...$params)) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to bind device query parameters.', [], [], 500); }
 if (!$stmt->execute()) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to fetch devices.', [], [], 500); }
 $result = $stmt->get_result();
 if (!$result) { $stmt->close(); $conn->close(); sendResponse(false, 'Failed to retrieve devices.', [], [], 500); }
@@ -118,8 +126,8 @@ sendResponse(true, "Devices fetched successfully", [
     'pagination' => [
         'total' => $total,
         'page' => $page,
-        'page_size' => $pageSize,
-        'total_pages' => max(1, (int) ceil($total / $pageSize))
+        'page_size' => $forAllocation ? $total : $pageSize,
+        'total_pages' => $forAllocation ? 1 : max(1, (int) ceil($total / $pageSize))
     ]
 ]);
 

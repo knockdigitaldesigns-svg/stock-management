@@ -21,7 +21,12 @@ const getDealerAssignedSoftware = (dealer) => {
 
 const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) => {
     const safeOwnersList = Array.isArray(ownersList) ? ownersList : [];
-    const ownerOptions = safeOwnersList.map((owner) => ({
+    const [activeOwners, setActiveOwners] = useState([]);
+    const [ownerLoading, setOwnerLoading] = useState(ownerType === 'dealer');
+    const [ownerError, setOwnerError] = useState('');
+    const [stockError, setStockError] = useState('');
+    const allocationOwners = ownerType === 'dealer' || ownerType === 'technician' ? activeOwners : safeOwnersList;
+    const ownerOptions = allocationOwners.map((owner) => ({
         value: owner.id,
         label: `${owner.dealer_name || owner.technician_name || 'Unknown'}${owner.installation_status ? ` - ${owner.installation_status}` : ''}`
     }));
@@ -58,7 +63,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         showGlobalError(msg);
     };
 
-    const selectedDealer = ownerType === 'dealer' ? safeOwnersList.find(d => Number(d.id) === Number(selectedOwner)) : null;
+    const selectedDealer = ownerType === 'dealer' ? allocationOwners.find(d => Number(d.id) === Number(selectedOwner)) : null;
     const assignedSoftware = getDealerAssignedSoftware(selectedDealer);
     const availableSoftwareOptions = (ownerType === 'dealer' && assignedSoftware.length > 0)
         ? assignedSoftware.map(s => ({ value: s, label: s }))
@@ -90,8 +95,45 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
     );
 
     useEffect(() => {
+        let isCurrent = true;
+        const fetchActiveOwners = async () => {
+            setOwnerLoading(true);
+            setOwnerError('');
+            try {
+                const isDealer = ownerType === 'dealer';
+                const response = await api.get(isDealer
+                    ? '/dealers/list.php?for_allocation=1'
+                    : '/technicians/list.php?for_allocation=1');
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || `Failed to load active ${ownerType}s.`);
+                }
+
+                const owners = response.data?.data?.[isDealer ? 'dealers' : 'technicians'];
+                if (!Array.isArray(owners)) {
+                    throw new Error(`The active ${ownerType} list returned an invalid response.`);
+                }
+                if (isCurrent) {
+                    setActiveOwners(owners.filter((owner) => String(owner.status || '').trim().toLowerCase() === 'active'));
+                }
+            } catch (err) {
+                if (isCurrent) {
+                    setActiveOwners([]);
+                    setOwnerError(err.response?.data?.message || err.message || `Failed to load active ${ownerType}s.`);
+                }
+            } finally {
+                if (isCurrent) setOwnerLoading(false);
+            }
+        };
+
+        fetchActiveOwners();
+        return () => {
+            isCurrent = false;
+        };
+    }, [ownerType]);
+
+    useEffect(() => {
         if (ownerType === 'dealer' && selectedOwner) {
-            const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
+            const dealer = allocationOwners.find(d => Number(d.id) === Number(selectedOwner));
             const assigned = getDealerAssignedSoftware(dealer);
             if (assigned.length > 0) {
                 if (software && !assigned.includes(software)) {
@@ -99,34 +141,63 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                 }
             }
         }
-    }, [selectedOwner, ownerType, safeOwnersList]);
+    }, [selectedOwner, ownerType, allocationOwners, software]);
 
     useEffect(() => {
+        let isCurrent = true;
         const fetchStock = async () => {
             setStockLoading(true);
+            setStockError('');
+            setAvailableDevices([]);
+            setAvailableSims([]);
             try {
                 const requests = allocationType === 'device'
-                    ? [api.get('/devices/list.php')]
+                    ? [api.get('/devices/list.php', { params: { for_allocation: 1 } })]
                     : allocationType === 'sim'
-                        ? [api.get('/sims/list.php')]
-                        : [api.get('/devices/list.php'), api.get('/sims/list.php')];
+                        ? [api.get('/sims/list.php', { params: { for_allocation: 1 } })]
+                        : [
+                            api.get('/devices/list.php', { params: { for_allocation: 1 } }),
+                            api.get('/sims/list.php', { params: { for_allocation: 1 } })
+                        ];
                 const responses = await Promise.all(requests);
-                const format = (dataArray, type) => dataArray
-                    .filter(item => item.status === 'available')
-                    .map(item => ({
+                const getAvailableOptions = (response, key, type) => {
+                    if (!response.data?.success) {
+                        throw new Error(response.data?.message || `Failed to load available ${type}s.`);
+                    }
+                    const records = response.data?.data?.[key];
+                    if (!Array.isArray(records)) {
+                        throw new Error(`The available ${type} list returned an invalid response.`);
+                    }
+                    return records
+                        .filter((item) => String(item.status || '').trim().toLowerCase() === 'available')
+                        .map((item) => ({
                             value: item.id,
-                            label: type === 'device' ? `${item.imei_no} (${item.model_name})` : item.sim_no
-                    }));
-                if (allocationType !== 'sim') setAvailableDevices(format(responses[0].data.data.devices || [], 'device'));
-                if (allocationType !== 'device') setAvailableSims(format(responses[allocationType === 'both' ? 1 : 0].data.data.sims || [], 'sim'));
+                            label: type === 'device'
+                                ? `${item.imei_no} (${item.model_name})`
+                                : `${item.sim_no}${item.sim_type ? ` (${item.sim_type})` : ''}`
+                        }));
+                };
+                if (!isCurrent) return;
+                if (allocationType !== 'sim') setAvailableDevices(getAvailableOptions(responses[0], 'devices', 'device'));
+                if (allocationType !== 'device') {
+                    const simResponse = responses[allocationType === 'both' ? 1 : 0];
+                    setAvailableSims(getAvailableOptions(simResponse, 'sims', 'SIM'));
+                }
             } catch (err) {
-                console.error('Failed to fetch stock', err);
+                if (isCurrent) {
+                    setAvailableDevices([]);
+                    setAvailableSims([]);
+                    setStockError(err.response?.data?.message || err.message || 'Failed to load available stock.');
+                }
             } finally {
-                setStockLoading(false);
+                if (isCurrent) setStockLoading(false);
             }
         };
 
         fetchStock();
+        return () => {
+            isCurrent = false;
+        };
     }, [allocationType]);
 
     useEffect(() => {
@@ -227,7 +298,7 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
             return triggerError('Amount Paid cannot exceed Total Amount.');
         }
         if (ownerType === 'dealer') {
-            const dealer = safeOwnersList.find(d => Number(d.id) === Number(selectedOwner));
+            const dealer = allocationOwners.find(d => Number(d.id) === Number(selectedOwner));
             if (paymentAmountIsPositive && !paymentMode) {
                 return triggerError('Payment Mode is required when Amount Paid is greater than zero.');
             }
@@ -317,6 +388,8 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
         <Modal isOpen={true} onClose={onClose} title="Allocate Stock" maxWidth="820px" footer={footer}>
             <form id="allocate-stock-form" onSubmit={submitAllocation}>
                 {error && <div className="alert alert-danger">{error}</div>}
+                {ownerError && <div className="alert alert-danger" role="alert">{ownerError}</div>}
+                {stockError && <div className="alert alert-danger" role="alert">{stockError}</div>}
 
                 {ownerType === 'dealer' && dealerRequiresPayment && (
                     <div className="card" style={{ marginBottom: '1rem', padding: '1rem', border: '1px solid #f0b429', backgroundColor: '#fff8e1' }}>
@@ -332,7 +405,16 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                             options={ownerOptions}
                             value={selectedOwner}
                             onChange={setSelectedOwner}
-                            placeholder={safeOwnersList.length ? 'Search dealer/technician...' : 'No owners available'}
+                            disabled={ownerLoading || Boolean(ownerError)}
+                            placeholder={ownerLoading
+                                ? `Loading ${ownerType}s...`
+                                : ownerError
+                                    ? `Unable to load ${ownerType}s`
+                                    : ownerOptions.length
+                                        ? `Search ${ownerType}...`
+                                        : ownerType === 'dealer' || ownerType === 'technician'
+                                            ? `No active ${ownerType}s available`
+                                            : 'No owners available'}
                         />
                     </div>
 
@@ -380,7 +462,13 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                                 </div>
                                 <div className="form-group" style={{ marginBottom: 0 }}>
                                     <label className="form-label">Device Model *</label>
-                                    <SearchableDropdown options={availableDevices} value={item.item_id} onChange={(value) => handleItemChange('device', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search IMEI / model...'} />
+                                    <SearchableDropdown
+                                        options={availableDevices}
+                                        value={item.item_id}
+                                        onChange={(value) => handleItemChange('device', item.id, 'item_id', value)}
+                                        disabled={stockLoading || Boolean(stockError) || availableDevices.length === 0}
+                                        placeholder={stockLoading ? 'Loading devices...' : stockError ? 'Unable to load devices' : availableDevices.length ? 'Search IMEI / model...' : 'No available devices'}
+                                    />
                                 </div>
                                 <div className="form-group" style={{ marginBottom: 0 }}>
                                     <label className="form-label">Device Amount</label>
@@ -420,7 +508,13 @@ const AddStockAllocationModal = ({ onClose, onSuccess, ownerType, ownersList }) 
                                 </div>
                                 <div className="form-group" style={{ marginBottom: 0 }}>
                                     <label className="form-label">SIM No *</label>
-                                    <SearchableDropdown options={availableSims} value={item.item_id} onChange={(value) => handleItemChange('sim', item.id, 'item_id', value)} placeholder={stockLoading ? 'Loading...' : 'Search SIM...'} />
+                                    <SearchableDropdown
+                                        options={availableSims}
+                                        value={item.item_id}
+                                        onChange={(value) => handleItemChange('sim', item.id, 'item_id', value)}
+                                        disabled={stockLoading || Boolean(stockError) || availableSims.length === 0}
+                                        placeholder={stockLoading ? 'Loading SIMs...' : stockError ? 'Unable to load SIMs' : availableSims.length ? 'Search SIM...' : 'No available SIMs'}
+                                    />
                                 </div>
                                 <div className="form-group" style={{ marginBottom: 0 }}>
                                     <label className="form-label">SIM Amount</label>

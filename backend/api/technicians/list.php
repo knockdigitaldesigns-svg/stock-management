@@ -32,6 +32,27 @@ if (isset($_GET['for_lookup']) && $_GET['for_lookup'] === '1') {
     sendResponse(true, 'Technician lookup options fetched successfully.', ['technicians' => $technicians]);
 }
 
+if (isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1') {
+    $result = $conn->query("
+        SELECT id, technician_name, status
+        FROM technicians
+        WHERE LOWER(TRIM(COALESCE(status, ''))) = 'active'
+        ORDER BY technician_name ASC, id ASC
+    ");
+    if (!$result) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch active technician allocation options.', [], [], 500);
+    }
+
+    $technicians = [];
+    while ($row = $result->fetch_assoc()) {
+        $technicians[] = $row;
+    }
+    $result->free();
+    $conn->close();
+    sendResponse(true, 'Active technician allocation options fetched successfully.', ['technicians' => $technicians]);
+}
+
 $where = [];
 $params = [];
 $types = '';
