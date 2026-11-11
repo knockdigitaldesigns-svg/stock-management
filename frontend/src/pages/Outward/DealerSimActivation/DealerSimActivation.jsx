@@ -130,7 +130,7 @@ const DealerSimActivation = () => {
     const fetchMasters = async () => {
         try {
             const [dealersRes, simTypesRes, simValiditiesRes] = await Promise.all([
-                api.get('/dealers/list.php'),
+                api.get('/dealers/list.php?for_lookup=1'),
                 api.get('/sim_types/list.php'),
                 api.get('/sim_validities/list.php')
             ]);

@@ -32,7 +32,7 @@ $effectiveStatusSql = "LOWER(CASE
     WHEN EXISTS (
         SELECT 1 FROM customer_vehicle_details cvd_status
         WHERE cvd_status.device_id = d.id
-           OR BINARY cvd_status.imei_no = BINARY d.imei_no
+           
     )
       OR EXISTS (
         SELECT 1 FROM stock_transactions st_status
