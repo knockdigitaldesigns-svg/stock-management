@@ -10,12 +10,16 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { normalizeCurrency } from '../../utils/paymentValidation';
+import { PAYMENT_MODES } from '../../constants/paymentModes';
+import DateInput from '../../components/DateInput';
+import { formatDate, getTodayDate } from '../../utils/date';
 import {
     buildCustomerSubmission,
     ensureCustomerSubmissionData,
     saveCustomerDraft
 } from '../../utils/customerSubmission';
 import { isInstallationPersonRequired } from '../../utils/installationValidation';
+import './CustomerInstallments.css';
 
 const initialForm = {
     deviceCharge: '',
@@ -30,6 +34,9 @@ const initialForm = {
     cashToDealer: false,
     cashToEt: false
 };
+
+const createPaymentRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const PaymentDetailsPart2Page = () => {
     const navigate = useNavigate();
@@ -57,6 +64,25 @@ const PaymentDetailsPart2Page = () => {
 
     const [showPendingModal, setShowPendingModal] =
         useState(false);
+    const [paymentId, setPaymentId] = useState(null);
+    const [paymentSummary, setPaymentSummary] = useState({
+        totalAmount: 0,
+        amountPaid: 0,
+        amountPending: 0,
+        paymentStatus: 'Pending'
+    });
+    const [paymentTransactions, setPaymentTransactions] = useState([]);
+    const [pendingInstallmentRequests, setPendingInstallmentRequests] = useState([]);
+    const [paymentCanReceiveInstallments, setPaymentCanReceiveInstallments] = useState(false);
+    const [installmentSaving, setInstallmentSaving] = useState(false);
+    const [installment, setInstallment] = useState({
+        amount: '',
+        paymentMode: '',
+        transactionId: '',
+        paymentDate: getTodayDate(),
+        notes: '',
+        requestKey: createPaymentRequestKey()
+    });
 
     const storageKey = customerId
         ? `customer_creation_${customerId}`
@@ -91,6 +117,29 @@ const PaymentDetailsPart2Page = () => {
         }
     };
 
+    const applyPaymentHistory = (data) => {
+        const paymentPart2 = data?.payment_part2 || {};
+        const currentPaymentId = Number(paymentPart2.payment_id || data?.payment?.id || 0);
+        const totalAmount = normalizeCurrency(paymentPart2.total_amount);
+        const amountPaid = normalizeCurrency(paymentPart2.amount_paid);
+        const amountPending = normalizeCurrency(paymentPart2.amount_pending);
+
+        setPaymentId(currentPaymentId || null);
+        setPaymentTransactions(data?.payment_transactions || []);
+        setPendingInstallmentRequests(data?.payment_installment_requests || []);
+        setPaymentCanReceiveInstallments(
+            data?.customer?.verification_status === 'Approved'
+        );
+        setPaymentSummary({
+            totalAmount,
+            amountPaid,
+            amountPending,
+            paymentStatus: paymentPart2.payment_status || 'Pending'
+        });
+
+        return { totalAmount, amountPaid, amountPending };
+    };
+
     const loadSavedPaymentPart2 = async () => {
         if (!customerId) {
             return;
@@ -107,7 +156,8 @@ const PaymentDetailsPart2Page = () => {
 
             if (stored.payment_part2) {
                 const savedPart2 = stored.payment_part2;
-                setIsEditMode(Number(stored.existing_customer_id || 0) > 0);
+                const existingCustomerId = Number(stored.existing_customer_id || 0);
+                setIsEditMode(existingCustomerId > 0);
                 setTotalSaleAmount(normalizeCurrency(
                     stored.step4?.totalSaleAmount || savedPart2.total_sale_amount
                 ));
@@ -125,6 +175,16 @@ const PaymentDetailsPart2Page = () => {
                     cashToDealer: Boolean(savedPart2.cash_to_dealer),
                     cashToEt: Boolean(savedPart2.cash_to_et)
                 });
+                if (existingCustomerId > 0) {
+                    const response = await api.get(
+                        `/customers/details.php?customer_id=${encodeURIComponent(customerId)}`
+                    );
+                    if (!response.data?.success) {
+                        throw new Error('Failed to load customer payment history.');
+                    }
+                    const { amountPaid } = applyPaymentHistory(response.data.data);
+                    setForm((previous) => ({ ...previous, amountPaid: String(amountPaid) }));
+                }
                 return;
             }
 
@@ -161,6 +221,7 @@ const PaymentDetailsPart2Page = () => {
 
             const paymentPart2 =
                 response.data?.data?.payment_part2 || {};
+            const { amountPaid: savedAmountPaid } = applyPaymentHistory(response.data.data);
 
             const cashCollection =
                 response.data?.data?.cash_collection || {};
@@ -215,9 +276,7 @@ const PaymentDetailsPart2Page = () => {
                         ),
 
                 amountPaid:
-                    formatValue(
-                        paymentPart2.amount_paid
-                    ),
+                    formatValue(savedAmountPaid),
 
                 deviceCharge:
                     formatValue(
@@ -358,6 +417,104 @@ const PaymentDetailsPart2Page = () => {
         setSuccess('');
     };
 
+    const handleInstallmentChange = (event) => {
+        const { name, value } = event.target;
+        setInstallment((previous) => ({
+            ...previous,
+            [name]: name === 'amount'
+                ? value.replace(/[^0-9.]/g, '').slice(0, 12)
+                : value
+        }));
+        setError('');
+        setSuccess('');
+    };
+
+    const handleRecordInstallment = async (event) => {
+        event.preventDefault();
+        const amount = normalizeCurrency(installment.amount);
+        const paymentMode = installment.paymentMode;
+        const transactionId = installment.transactionId.trim();
+
+        if (!paymentCanReceiveInstallments || !paymentId) {
+            triggerError('Installments can only be recorded for an approved customer payment.');
+            return;
+        }
+        if (amount <= 0) {
+            triggerError('Payment amount must be greater than zero.');
+            return;
+        }
+        if (amount > paymentSummary.amountPending) {
+            triggerError(`Payment amount cannot exceed the remaining balance of ₹${paymentSummary.amountPending.toLocaleString('en-IN')}.`);
+            return;
+        }
+        if (!paymentMode) {
+            triggerError('Select a payment method.');
+            return;
+        }
+        if (!installment.paymentDate) {
+            triggerError('Enter the payment date.');
+            return;
+        }
+        if (paymentMode !== 'Cash' && !/^[0-9]{6}$/.test(transactionId)) {
+            triggerError('Transaction ID must contain exactly 6 digits.');
+            return;
+        }
+        if (transactionId && !/^[0-9]{6}$/.test(transactionId)) {
+            triggerError('Transaction ID must contain exactly 6 digits.');
+            return;
+        }
+
+        setInstallmentSaving(true);
+        setError('');
+        setSuccess('');
+        try {
+            const response = await api.post('/customers/payments/record_installment.php', {
+                customer_id: Number(customerId),
+                payment_id: paymentId,
+                amount,
+                payment_mode: paymentMode,
+                transaction_id: transactionId,
+                payment_date: installment.paymentDate,
+                notes: installment.notes.trim(),
+                request_key: installment.requestKey
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to record customer payment.');
+            }
+
+            const result = response.data.data;
+            setPendingInstallmentRequests((previous) => [
+                ...previous.filter((request) => Number(request.id) !== Number(result.submission_id)),
+                {
+                    id: result.submission_id,
+                    amount,
+                    payment_mode: paymentMode,
+                    transaction_id: transactionId || null,
+                    payment_date: installment.paymentDate,
+                    status: result.status
+                }
+            ]);
+            setInstallment({
+                amount: '',
+                paymentMode: '',
+                transactionId: '',
+                paymentDate: getTodayDate(),
+                notes: '',
+                requestKey: createPaymentRequestKey()
+            });
+            setSuccess(response.data.message || 'Installment submitted for Admin verification.');
+        } catch (err) {
+            console.error('Customer installment payment error:', err);
+            triggerError(
+                err.response?.data?.message ||
+                err.message ||
+                'Failed to record customer payment.'
+            );
+        } finally {
+            setInstallmentSaving(false);
+        }
+    };
+
     const calculateChargeSummary = () => {
         const totalAmount =
             normalizeCurrency(form.deviceCharge) +
@@ -432,6 +589,7 @@ const PaymentDetailsPart2Page = () => {
 
     const isAmountPaidDisabled =
         saving ||
+        (paymentId && paymentTransactions.length > 0) ||
         totalSaleAmountMismatch ||
         totalSaleAmount <= 0;
 
@@ -1246,6 +1404,202 @@ const PaymentDetailsPart2Page = () => {
                 )}
 
             </div>
+
+            {isEditMode && paymentId && (
+                <div className="customer-installments">
+                    <div className="customer-installments__header">
+                        <span className="customer-installments__icon"><ReceiptText size={20} /></span>
+                        <div>
+                            <h3>Payment Installments</h3>
+                            <p>Record an installment and submit it for Admin approval.</p>
+                        </div>
+                    </div>
+
+                    <div className="customer-installments__summary">
+                        <div className="customer-installments__metric">
+                            <span className="customer-installments__metric-label">Total Amount</span>
+                            <strong className="customer-installments__metric-value">₹{paymentSummary.totalAmount.toLocaleString('en-IN')}</strong>
+                        </div>
+                        <div className="customer-installments__metric">
+                            <span className="customer-installments__metric-label">Amount Paid</span>
+                            <strong className="customer-installments__metric-value">₹{paymentSummary.amountPaid.toLocaleString('en-IN')}</strong>
+                        </div>
+                        <div className="customer-installments__metric customer-installments__metric--pending">
+                            <span className="customer-installments__metric-label">Pending Amount</span>
+                            <strong className="customer-installments__metric-value">₹{paymentSummary.amountPending.toLocaleString('en-IN')}</strong>
+                        </div>
+                        <div className="customer-installments__metric">
+                            <span className="customer-installments__metric-label">Payment Status</span>
+                            <span className="customer-installments__status">{paymentSummary.paymentStatus}</span>
+                        </div>
+                    </div>
+
+                    {paymentCanReceiveInstallments && paymentSummary.amountPending > 0 && (
+                        <form onSubmit={handleRecordInstallment}>
+                            <div className="customer-installments__form">
+                                <h4 className="customer-installments__form-title">Add a payment</h4>
+                                <div className="customer-installments__fields">
+                                <label className="customer-installments__field" htmlFor="installment-amount">
+                                    <span>Payment Amount</span>
+                                    <input
+                                        id="installment-amount"
+                                        className="form-control"
+                                        type="text"
+                                        inputMode="decimal"
+                                        name="amount"
+                                        value={installment.amount}
+                                        onChange={handleInstallmentChange}
+                                        placeholder="Enter payment amount"
+                                        disabled={installmentSaving}
+                                        required
+                                    />
+                                </label>
+                                <label className="customer-installments__field" htmlFor="installment-mode">
+                                    <span>Payment Method</span>
+                                    <select
+                                        id="installment-mode"
+                                        className="form-control"
+                                        name="paymentMode"
+                                        value={installment.paymentMode}
+                                        onChange={handleInstallmentChange}
+                                        disabled={installmentSaving}
+                                        required
+                                    >
+                                        <option value="">Select Payment Method</option>
+                                        {PAYMENT_MODES.map((mode) => (
+                                            <option key={mode} value={mode}>{mode}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="customer-installments__field" htmlFor="installment-transaction-id">
+                                    <span>Transaction ID / UTR</span>
+                                    <input
+                                        id="installment-transaction-id"
+                                        className="form-control"
+                                        type="text"
+                                        name="transactionId"
+                                        value={installment.transactionId}
+                                        onChange={handleInstallmentChange}
+                                        placeholder={installment.paymentMode === 'Cash' ? 'Optional for cash' : 'Enter 6-digit transaction ID'}
+                                        maxLength={6}
+                                        disabled={installmentSaving}
+                                        required={Boolean(installment.paymentMode && installment.paymentMode !== 'Cash')}
+                                    />
+                                </label>
+                                <label className="customer-installments__field" htmlFor="installment-date">
+                                    <span>Payment Date</span>
+                                    <DateInput
+                                        id="installment-date"
+                                        className="form-control"
+                                        value={installment.paymentDate}
+                                        disabled={installmentSaving}
+                                        required
+                                        onChange={(value) => setInstallment((previous) => ({
+                                            ...previous,
+                                            paymentDate: value
+                                        }))}
+                                    />
+                                </label>
+                                <label className="customer-installments__field customer-installments__field--wide" htmlFor="installment-notes">
+                                    <span>Payment Notes <small>(Optional)</small></span>
+                                    <textarea
+                                        id="installment-notes"
+                                        className="form-control"
+                                        name="notes"
+                                        value={installment.notes}
+                                        onChange={handleInstallmentChange}
+                                        rows={2}
+                                        disabled={installmentSaving}
+                                    />
+                                </label>
+                                </div>
+                            <div className="customer-installments__form-actions">
+                                <button
+                                    type="submit"
+                                    className="customer-installments__submit"
+                                    disabled={
+                                        installmentSaving ||
+                                        normalizeCurrency(installment.amount) <= 0 ||
+                                        normalizeCurrency(installment.amount) > paymentSummary.amountPending
+                                    }
+                                >
+                                    {installmentSaving ? 'Submitting...' : 'Submit Installment for Approval'}
+                                </button>
+                            </div>
+                            </div>
+                        </form>
+                    )}
+
+                    {pendingInstallmentRequests.length > 0 && (
+                        <div className="customer-installments__history">
+                            <h4>Awaiting Admin Approval</h4>
+                            <div className="customer-installments__table-wrap">
+                            <table className="customer-installments__table">
+                                <thead>
+                                    <tr>
+                                        <th>Payment Date</th>
+                                        <th>Amount</th>
+                                        <th>Method</th>
+                                        <th>Transaction ID / UTR</th>
+                                        <th>Verification Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pendingInstallmentRequests.map((request) => (
+                                        <tr key={request.id}>
+                                            <td>{formatDate(request.payment_date)}</td>
+                                            <td>₹{Number(request.amount || 0).toLocaleString('en-IN')}</td>
+                                            <td>{request.payment_mode || '—'}</td>
+                                            <td>{request.transaction_id || '—'}</td>
+                                            <td><span className="customer-installments__badge">{request.status}</span></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            </div>
+                            <p className="customer-installments__notice customer-installments__notice--pending">
+                                Payment totals and transaction history change only after Admin approval.
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="customer-installments__history">
+                        <h4>Payment History</h4>
+                        <div className="customer-installments__table-wrap">
+                        <table className="customer-installments__table">
+                            <thead>
+                                <tr>
+                                    <th>Payment Date</th>
+                                    <th>Payment Amount</th>
+                                    <th>Payment Method</th>
+                                    <th>Transaction ID / UTR</th>
+                                    <th>Status</th>
+                                    <th>Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {paymentTransactions.length > 0 ? paymentTransactions.map((transaction) => (
+                                    <tr key={transaction.id}>
+                                        <td>{formatDate(transaction.payment_date) || '—'}</td>
+                                        <td>₹{Number(transaction.amount || 0).toLocaleString('en-IN')}</td>
+                                        <td>{transaction.payment_mode || '—'}</td>
+                                        <td>{transaction.transaction_id || '—'}</td>
+                                        <td>{transaction.payment_status || '—'}</td>
+                                        <td>{transaction.notes || '—'}</td>
+                                    </tr>
+                                )) : (
+                                    <tr>
+                                        <td colSpan="6" className="customer-installments__empty">
+                                            No payment transactions recorded yet.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Pending Payment Confirmation Modal */}
             {showPendingModal && (

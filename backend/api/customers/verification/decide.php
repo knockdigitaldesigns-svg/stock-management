@@ -100,7 +100,9 @@ try {
         if ($oldStatus !== 'Pending Verification' && $oldStatus !== 'Applying') {
             throw new RuntimeException('Only a pending submission can be approved.');
         }
-        if ($oldStatus === 'Pending Verification' && (int) ($row['existing_customer_id'] ?? 0) > 0) {
+        if ($oldStatus === 'Pending Verification'
+            && (int) ($row['existing_customer_id'] ?? 0) > 0
+            && ($submissionData['source'] ?? '') !== 'customer_vehicle_addition') {
             $customerId = (int) $row['existing_customer_id'];
             $customerStmt = $conn->prepare(
                 'SELECT id, platform_id, username, primary_mobile_no, secondary_mobile_no,
@@ -143,14 +145,16 @@ try {
                     throw new RuntimeException('Courier assets have already been committed and this verification cannot be rejected safely. Resume approval instead.');
                 }
             }
-            rejectCustomerPaymentVerificationApplication(
-                $conn,
-                $submissionId,
-                (int) ($row['existing_customer_id'] ?? 0),
-                (int) ($row['linked_customer_id'] ?? 0),
-                (int) ($row['linked_vehicle_id'] ?? 0),
-                $submissionData
-            );
+            if (($submissionData['source'] ?? '') !== 'payment_installment') {
+                rejectCustomerPaymentVerificationApplication(
+                    $conn,
+                    $submissionId,
+                    (int) ($row['existing_customer_id'] ?? 0),
+                    (int) ($row['linked_customer_id'] ?? 0),
+                    (int) ($row['linked_vehicle_id'] ?? 0),
+                    $submissionData
+                );
+            }
         } elseif ($oldStatus !== 'Pending Verification') {
             throw new RuntimeException('Only a pending or safely reversible approval can be rejected.');
         }
@@ -266,6 +270,23 @@ try {
         throw new RuntimeException('Unable to save verification decision.');
     }
     $stmt->close();
+    if (($submissionData['source'] ?? '') === 'payment_installment') {
+        $installmentStatus = $newStatus;
+        $installmentStmt = $conn->prepare(
+            'UPDATE customer_payment_installment_requests
+             SET status = ?, rejection_reason = ?, reviewed_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE verification_submission_id = ?'
+        );
+        if (!$installmentStmt) {
+            throw new RuntimeException('Unable to prepare installment verification status update.');
+        }
+        $installmentStmt->bind_param('ssii', $installmentStatus, $storedReason, $reviewerId, $submissionId);
+        if (!$installmentStmt->execute() || $installmentStmt->affected_rows !== 1) {
+            $installmentStmt->close();
+            throw new RuntimeException('Unable to update installment verification status.');
+        }
+        $installmentStmt->close();
+    }
     insertCustomerPaymentVerificationHistory($conn, $submissionId, $oldStatus, $newStatus, $storedReason, $reviewerId);
     $conn->commit();
     $conn->close();

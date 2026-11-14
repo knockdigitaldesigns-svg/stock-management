@@ -39,6 +39,56 @@ if (isset($_GET['for_lookup']) && $_GET['for_lookup'] === '1') {
     sendResponse(true, 'Dealer lookup options fetched successfully.', ['dealers' => $dealers]);
 }
 
+if (isset($_GET['for_installation_statuses']) && $_GET['for_installation_statuses'] === '1') {
+    $result = $conn->query("
+        SELECT DISTINCT TRIM(installation_status) AS installation_status
+        FROM dealers
+        WHERE installation_status IS NOT NULL AND TRIM(installation_status) <> ''
+        ORDER BY installation_status ASC
+    ");
+    if (!$result) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch dealer installation statuses.', [], [], 500);
+    }
+
+    $statuses = [];
+    while ($row = $result->fetch_assoc()) {
+        $status = trim((string) $row['installation_status']);
+        $key = strtolower($status);
+        if (!isset($statuses[$key])) {
+            $statuses[$key] = $status;
+        }
+    }
+
+    $result->free();
+    $conn->close();
+    sendResponse(true, 'Dealer installation statuses fetched successfully.', [
+        'installation_statuses' => array_values($statuses)
+    ]);
+}
+
+if (isset($_GET['for_installation']) && $_GET['for_installation'] === '1') {
+    $result = $conn->query("
+        SELECT id, dealer_name, installation_status
+        FROM dealers
+        WHERE LOWER(TRIM(installation_status)) IN ('onsite', 'offsite')
+        ORDER BY dealer_name ASC, id ASC
+    ");
+    if (!$result) {
+        $conn->close();
+        sendResponse(false, 'Failed to fetch installation dealer options.', [], [], 500);
+    }
+
+    $dealers = [];
+    while ($row = $result->fetch_assoc()) {
+        $dealers[] = $row;
+    }
+
+    $result->free();
+    $conn->close();
+    sendResponse(true, 'Installation dealer options fetched successfully.', ['dealers' => $dealers]);
+}
+
 try {
     ensureRenewalHistoryPaymentActionType($conn);
 } catch (Throwable $error) {

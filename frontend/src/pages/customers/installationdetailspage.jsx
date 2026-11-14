@@ -117,7 +117,7 @@ const InstallationDetailsPage = () => {
                 leadClosuresResponse
             ] = await Promise.all([
                 api.get('/technicians/list.php'),
-                api.get('/dealers/list.php'),
+                api.get('/dealers/list.php?for_installation=1'),
                 api.get('/lead_closures/list.php')
             ]);
 

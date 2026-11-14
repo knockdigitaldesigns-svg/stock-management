@@ -525,7 +525,9 @@ function rejectCustomerPaymentVerificationApplication(
         $deleteVehicle->close();
     }
 
-    if ($customerId > 0 && $existingCustomerId > 0) {
+    if ($customerId > 0
+        && $existingCustomerId > 0
+        && ($submissionData['source'] ?? '') !== 'customer_vehicle_addition') {
         restoreCustomerVerificationSnapshot($conn, $customerId, $submissionData);
         return;
     }

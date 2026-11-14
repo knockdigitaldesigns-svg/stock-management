@@ -395,8 +395,29 @@ $row['display_data'] = [
     'vehicle' => $displayVehicles,
     'installation' => $displayInstallations,
     'payment_part1' => $displayPaymentPart1,
-    'payment_part2' => $displayPaymentPart2
+    'payment_part2' => $displayPaymentPart2,
+    'installment_request' => ($snapshot['source'] ?? '') === 'payment_installment'
+        ? [
+            'Installment Amount' => $snapshot['payment_installment']['amount'] ?? null,
+            'Payment Method' => $snapshot['payment_installment']['payment_mode'] ?? null,
+            'Transaction ID / UTR' => $snapshot['payment_installment']['transaction_id'] ?? null,
+            'Payment Date' => $snapshot['payment_installment']['payment_date'] ?? null,
+            'Notes' => $snapshot['payment_installment']['notes'] ?? null,
+            'Current Total Amount' => $snapshot['payment_installment']['current_total_amount'] ?? null,
+            'Current Amount Paid' => $snapshot['payment_installment']['current_amount_paid'] ?? null,
+            'Current Amount Pending' => $snapshot['payment_installment']['current_amount_pending'] ?? null,
+            'Current Payment Status' => $snapshot['payment_installment']['current_payment_status'] ?? null
+        ]
+        : null
 ];
+$row['submission_type'] = 'Customer Payment';
+if (($snapshot['source'] ?? '') === 'courier') {
+    $row['submission_type'] = 'Courier Request';
+} elseif (($snapshot['source'] ?? '') === 'payment_installment') {
+    $row['submission_type'] = 'Payment Installment';
+} elseif (($snapshot['source'] ?? '') === 'customer_vehicle_addition') {
+    $row['submission_type'] = 'Additional Customer Vehicle';
+}
 $row['is_own_submission'] = $reviewerId > 0
     && (int) $row['submitter_user_id'] === $reviewerId;
 $isSuperAdminReviewer = isSuperAdminUser($reviewerId);

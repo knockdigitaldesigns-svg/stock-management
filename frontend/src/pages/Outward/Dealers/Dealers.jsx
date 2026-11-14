@@ -39,6 +39,7 @@ const Dealers = () => {
         deviceModels: [],
         simTypes: [],
         simValidities: [],
+        installationStatuses: [],
         dealers: []
     });
 
@@ -83,12 +84,13 @@ const Dealers = () => {
 
     const fetchFilterMasters = async () => {
         try {
-            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes, dealersRes] = await Promise.all([
+            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes, dealersRes, installationStatusesRes] = await Promise.all([
                 api.get('/platforms/list.php'),
                 api.get('/device_types/list.php'),
                 api.get('/sim_validities/list.php'),
                 api.get('/sim_types/list.php'),
-                api.get('/dealers/list.php?for_lookup=1')
+                api.get('/dealers/list.php?for_lookup=1'),
+                api.get('/dealers/list.php?for_installation_statuses=1')
             ]);
 
             const rawPlatforms = platformsRes.data?.data?.platforms || [];
@@ -116,6 +118,7 @@ const Dealers = () => {
                 deviceModels,
                 simValidities,
                 simTypes,
+                installationStatuses: installationStatusesRes.data?.data?.installation_statuses || [],
                 dealers
             });
         } catch (err) {
@@ -199,6 +202,7 @@ const Dealers = () => {
                     deviceModelOptions={masterData.deviceModels}
                     simTypeOptions={masterData.simTypes}
                     simValidityOptions={masterData.simValidities}
+                    installationStatusOptions={masterData.installationStatuses}
                     dealerOptions={masterData.dealers}
                     dealerDropdownResetKey={dealerDropdownResetKey}
                     showDealer

@@ -426,7 +426,7 @@ const PaymentDetailsPart1Page = () => {
              */
             if (!goToPart2) {
                 const submission = buildCustomerSubmission(persistedSession);
-                if (existingCustomerId > 0) {
+                if (existingCustomerId > 0 && stored.source !== 'customer_vehicle_addition') {
                     const committed = await commitCustomerSubmission(submission, draftId);
                     await api.post('/customers/verification/finish.php', {
                         submission_id: draftId,

@@ -43,6 +43,7 @@ try {
             c.location,
             c.pincode,
             c.status,
+            c.verification_status,
             c.created_at,
             c.updated_at
          FROM customers c
@@ -643,6 +644,7 @@ $installationStmt = $conn->prepare(
     ];
 
     $paymentPart2 = [
+        'payment_id' => $payment ? $selectedPaymentId : null,
         'device_charge' => $payment ? (float) $payment['device_charge'] : 0,
         'software_charge' => $payment ? (float) $payment['software_charge'] : 0,
         'technician_charge' => $payment ? (float) $payment['technician_charge'] : 0,
@@ -654,7 +656,56 @@ $installationStmt = $conn->prepare(
         'payment_status' => $payment ? ($payment['payment_status'] ?? 'Pending') : 'Pending'
     ];
 
+    $paymentTransactions = [];
+    $paymentInstallmentRequests = [];
+    if ($selectedPaymentId > 0) {
+        $transactionsStmt = $conn->prepare(
+            'SELECT id, amount, payment_mode, transaction_id, payment_date, payment_status, notes, created_at
+             FROM customer_payment_transactions
+             WHERE payment_id = ?
+             ORDER BY payment_date ASC, id ASC'
+        );
+        if (!$transactionsStmt) {
+            throw new Exception('Failed to prepare customer payment history query.');
+        }
+        $transactionsStmt->bind_param('i', $selectedPaymentId);
+        if (!$transactionsStmt->execute()) {
+            $transactionsStmt->close();
+            throw new Exception('Failed to load customer payment history.');
+        }
+        $transactionsResult = $transactionsStmt->get_result();
+        while ($transaction = $transactionsResult->fetch_assoc()) {
+            $transaction['amount'] = (float) $transaction['amount'];
+            $paymentTransactions[] = $transaction;
+        }
+        $transactionsStmt->close();
+
+        $installmentRequestsStmt = $conn->prepare(
+            "SELECT verification_submission_id AS id, amount, payment_mode, transaction_id,
+                    payment_date, status
+             FROM customer_payment_installment_requests
+             WHERE customer_payment_id = ? AND status IN ('Pending Verification', 'Applying')
+             ORDER BY created_at ASC, id ASC"
+        );
+        if (!$installmentRequestsStmt) {
+            throw new Exception('Failed to prepare pending installment requests query.');
+        }
+        $installmentRequestsStmt->bind_param('i', $selectedPaymentId);
+        if (!$installmentRequestsStmt->execute()) {
+            $installmentRequestsStmt->close();
+            throw new Exception('Failed to load pending installment requests.');
+        }
+        $installmentRequestsResult = $installmentRequestsStmt->get_result();
+        while ($installmentRequest = $installmentRequestsResult->fetch_assoc()) {
+            $installmentRequest['id'] = (int) $installmentRequest['id'];
+            $installmentRequest['amount'] = (float) $installmentRequest['amount'];
+            $paymentInstallmentRequests[] = $installmentRequest;
+        }
+        $installmentRequestsStmt->close();
+    }
+
     $payment = [
+        'id' => $selectedPaymentId ?: null,
         'total_sale_amount' => $paymentPart1['total_sale_amount'],
         'transaction_id' => $paymentPart1['transaction_id'],
         'payment_mode' => $paymentPart1['payment_mode'],
@@ -681,8 +732,10 @@ $installationStmt = $conn->prepare(
             'installation' => $installation,
             'payment' => $payment,
             'payment_part1' => $paymentPart1,
-            'payment_part2' => $paymentPart2
-            , 'cash_collection' => $cashCollection
+            'payment_part2' => $paymentPart2,
+            'payment_transactions' => $paymentTransactions,
+            'payment_installment_requests' => $paymentInstallmentRequests,
+            'cash_collection' => $cashCollection
         ]
     );
 } catch (Throwable $e) {

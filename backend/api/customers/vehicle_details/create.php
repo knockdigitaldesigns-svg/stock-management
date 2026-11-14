@@ -330,16 +330,23 @@ try {
     | VEHICLE NUMBER DUPLICATE (Excluding current customer)
     |--------------------------------------------------------------------------
     */
-    $stmt = $conn->prepare(
-        'SELECT id FROM customer_vehicle_details
-         WHERE UPPER(TRIM(vehicle_no)) = UPPER(TRIM(?))
-           AND customer_id != ?
-         LIMIT 1'
-    );
+    $vehicleNumberSql = $appendVehicle
+        ? 'SELECT id FROM customer_vehicle_details
+           WHERE UPPER(TRIM(vehicle_no)) = UPPER(TRIM(?))
+           LIMIT 1'
+        : 'SELECT id FROM customer_vehicle_details
+           WHERE UPPER(TRIM(vehicle_no)) = UPPER(TRIM(?))
+             AND customer_id != ?
+           LIMIT 1';
+    $stmt = $conn->prepare($vehicleNumberSql);
     if (!$stmt) {
         throw new Exception('Failed to check vehicle number.');
     }
-    $stmt->bind_param('si', $vehicleNo, $customerId);
+    if ($appendVehicle) {
+        $stmt->bind_param('s', $vehicleNo);
+    } else {
+        $stmt->bind_param('si', $vehicleNo, $customerId);
+    }
     $stmt->execute();
     if ($stmt->get_result()->num_rows > 0) {
         $stmt->close();
