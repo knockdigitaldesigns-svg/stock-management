@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight, LifeBuoy, RefreshCw, Save, ShieldQuestion } from 'lucide-react';
 import api from '../../services/api';
+import { formatDate, formatDateTime } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import TableFilterBar from '../../components/TableFilterBar/TableFilterBar';
@@ -132,7 +133,7 @@ const SupportPage = () => {
         {error && <div className="alert alert-danger">{error}</div>}
         <div className="customer-step-card card"><div className="customer-stepper"><div className={`customer-step ${step >= 1 ? 'active' : ''}`}><div className="step-circle">1</div><span>Customer Verification</span></div><div className={`step-line ${step >= 2 ? 'active-line' : ''}`} /><div className={`customer-step ${step >= 2 ? 'active' : ''}`}><div className="step-circle">2</div><span>Questions &amp; Answers</span></div>{canCreateTicket && <><div className={`step-line ${step >= 3 ? 'active-line' : ''}`} /><div className={`customer-step ${step >= 3 ? 'active' : ''}`}><div className="step-circle">3</div><span>Raise Ticket</span></div></>}</div></div>
 
-        {step === 1 && <div className="card"><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Customer Verification</h3></div><form onSubmit={verifyCustomer}><div className="customer-vehicle-grid">{[['mobile_no', 'Mobile No *'], ['vehicle_no', 'Vehicle No'], ['imei_no', 'IMEI No'], ['username', 'Username']].map(([name, label]) => <div className="form-group" key={name}><label className="form-label">{label}</label><input className="form-control" value={verification[name]} onChange={(event) => setVerification({ ...verification, [name]: event.target.value })} required={name === 'mobile_no'} /></div>)}</div><div className="customer-form-actions"><button className="btn btn-primary" disabled={verifying}>{verifying ? 'Verifying...' : 'Verify'}</button></div></form>{customer && <div className="card" style={{ marginTop: 20, background: '#f8fafc' }}><div className="alert alert-success"><CheckCircle2 size={16} /> Customer verified successfully.</div><div className="details-grid">{[['Username', customer.username], ['Mobile No', customer.mobile_no], ['IMEI No', customer.imei_no], ['Vehicle No', customer.vehicle_no], ['Expiry / Renewal Date', customer.expiry_date || '-'], ['Platform', customer.platform || '-']].map(([label, value]) => <div key={label}><strong>{label}:</strong> {value || '-'}</div>)}</div><div className="customer-form-actions"><button className="btn btn-primary" type="button" onClick={continueToQuestions}>Next</button></div></div>}</div>}
+        {step === 1 && <div className="card"><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Customer Verification</h3></div><form onSubmit={verifyCustomer}><div className="customer-vehicle-grid">{[['mobile_no', 'Mobile No *'], ['vehicle_no', 'Vehicle No'], ['imei_no', 'IMEI No'], ['username', 'Username']].map(([name, label]) => <div className="form-group" key={name}><label className="form-label">{label}</label><input className="form-control" value={verification[name]} onChange={(event) => setVerification({ ...verification, [name]: event.target.value })} required={name === 'mobile_no'} /></div>)}</div><div className="customer-form-actions"><button className="btn btn-primary" disabled={verifying}>{verifying ? 'Verifying...' : 'Verify'}</button></div></form>{customer && <div className="card" style={{ marginTop: 20, background: '#f8fafc' }}><div className="alert alert-success"><CheckCircle2 size={16} /> Customer verified successfully.</div><div className="details-grid">{[['Username', customer.username], ['Mobile No', customer.mobile_no], ['IMEI No', customer.imei_no], ['Vehicle No', customer.vehicle_no], ['Expiry / Renewal Date', formatDate(customer.expiry_date)], ['Platform', customer.platform || '-']].map(([label, value]) => <div key={label}><strong>{label}:</strong> {value || '-'}</div>)}</div><div className="customer-form-actions"><button className="btn btn-primary" type="button" onClick={continueToQuestions}>Next</button></div></div>}</div>}
 
         {step === 2 && <div className="card"><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Questions &amp; Answers</h3></div>{questions.length > 0 ? questions.map((question) => <div key={question.id} className="card" style={{ marginBottom: 10, padding: 14 }}><button type="button" className="btn btn-outline" style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => setExpandedQuestion(expandedQuestion === question.id ? null : question.id)}>{question.question}{expandedQuestion === question.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>{expandedQuestion === question.id && <p style={{ margin: '12px 4px 0' }}>{question.answer}</p>}</div>) : <p>No support questions have been added yet.</p>}{canCreateTicket && <><p style={{ marginTop: 24, fontWeight: 600 }}>Still issue not clear?</p><button className="btn btn-primary" type="button" onClick={continueToTicket}>Next</button></>}</div>}
 
@@ -141,13 +142,65 @@ const SupportPage = () => {
         <div className="card" style={{ marginTop: 20 }}>
             <div className="customer-section-title"><LifeBuoy size={20} /><h3>Support Task Queue</h3></div>
             <TableFilterBar filters={queueFilters} onChange={(nextFilters) => { setQueueFilters(nextFilters); setPage(1); }} onReset={() => { setQueueFilters({ search: '', date_from: '', date_to: '', status: '' }); setPage(1); }} items={tickets} dateKeys={['created_at']} showStatus statusOptions={statuses} searchPlaceholder="Search tickets..." />
-            <div className="table-container"><table><thead><tr><th>Ticket ID</th><th>Customer</th><th>Mobile No</th><th>Issue</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{tickets.length === 0 ? <tr><td colSpan="9" className="text-center">No support tickets found.</td></tr> : tickets.map((ticket) => <tr key={ticket.id}><td>{ticket.ticket_id}</td><td>{ticket.username}</td><td>{ticket.mobile_no}</td><td className="truncate-cell" title={ticket.issue}>{ticket.issue}</td><td>{ticket.priority}</td><td>{ticket.assigned_to || '-'}</td><td><span className={`badge ${ticket.status === 'Closed' ? 'badge-success' : ticket.status === 'In Progress' ? 'badge-warning' : 'badge-info'}`}>{ticket.status}</span></td><td>{ticket.created_at}</td><td><button className="icon-btn view" type="button" title="Update ticket" onClick={() => openTicket(ticket)}><Save size={16} /></button></td></tr>)}</tbody></table></div>
+            <div className="table-container"><table><thead><tr><th>Ticket ID</th><th>Customer</th><th>Mobile No</th><th>Issue</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{tickets.length === 0 ? <tr><td colSpan="9" className="text-center">No support tickets found.</td></tr> : tickets.map((ticket) => <tr key={ticket.id}><td>{ticket.ticket_id}</td><td>{ticket.username}</td><td>{ticket.mobile_no}</td><td className="truncate-cell" title={ticket.issue}>{ticket.issue}</td><td>{ticket.priority}</td><td>{ticket.assigned_to || '-'}</td><td><span className={`badge ${ticket.status === 'Closed' ? 'badge-success' : ticket.status === 'In Progress' ? 'badge-warning' : 'badge-info'}`}>{ticket.status}</span></td><td>{formatDate(ticket.created_at)}</td><td><button className="icon-btn view" type="button" title="Update ticket" onClick={() => openTicket(ticket)}><Save size={16} /></button></td></tr>)}</tbody></table></div>
             <Pagination currentPage={page} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} itemName="tickets" />
         </div>
 
         {isSuperAdmin && <div className="card" style={{ marginTop: 20 }}><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Manage Support Questions</h3></div><form onSubmit={saveQuestion}><div className="form-group"><label className="form-label">Question</label><input className="form-control" value={questionForm.question} onChange={(event) => setQuestionForm({ ...questionForm, question: event.target.value })} required /></div><div className="form-group"><label className="form-label">Answer</label><textarea className="form-control" rows="3" value={questionForm.answer} onChange={(event) => setQuestionForm({ ...questionForm, answer: event.target.value })} required /></div><button className="btn btn-primary" disabled={saving}>{questionForm.id ? 'Update Question' : 'Add Question'}</button></form><div className="table-container" style={{ marginTop: 16 }}><table><thead><tr><th>Question</th><th>Answer</th><th>Actions</th></tr></thead><tbody>{questions.map((question) => <tr key={question.id}><td>{question.question}</td><td>{question.answer}</td><td><button className="btn btn-outline" type="button" onClick={() => setQuestionForm({ ...question, is_active: Boolean(Number(question.is_active)) })}>Edit</button> <button className="btn btn-danger" type="button" onClick={() => deleteQuestion(question.id)}>Delete</button></td></tr>)}</tbody></table></div></div>}
 
-        {selectedTicket && <div className="modal-overlay" onClick={() => setSelectedTicket(null)}><div className="modal-shell" onClick={(event) => event.stopPropagation()}><div className="modal-header"><h3>{selectedTicket.ticket_id}</h3><button className="close-btn" type="button" onClick={() => setSelectedTicket(null)}>&times;</button></div><form className="modal-body" onSubmit={updateTicket}><div className="details-grid" style={{ marginBottom: 16 }}><div><strong>Customer:</strong> {selectedTicket.username || '-'}</div><div><strong>Mobile No:</strong> {selectedTicket.mobile_no || '-'}</div><div><strong>IMEI No:</strong> {selectedTicket.imei_no || '-'}</div><div><strong>Vehicle No:</strong> {selectedTicket.vehicle_no || '-'}</div><div><strong>Platform:</strong> {selectedTicket.platform_name || '-'}</div><div><strong>Priority:</strong> {selectedTicket.priority || '-'}</div><div><strong>Assigned Employee:</strong> {selectedTicket.assigned_to || '-'}</div><div><strong>Created By:</strong> {selectedTicket.created_by || '-'}</div><div><strong>Created At:</strong> {selectedTicket.created_at || '-'}</div><div><strong>Updated At:</strong> {selectedTicket.updated_at || '-'}</div><div><strong>Closed By:</strong> {selectedTicket.closed_by || '-'}</div><div><strong>Closed At:</strong> {selectedTicket.closed_at || '-'}</div></div><div className="form-group"><label className="form-label">Issue</label><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflowY: 'auto', padding: 12, border: '1px solid var(--border-color)', borderRadius: 6 }}>{selectedTicket.issue || '-'}</div></div><div className="form-group"><label className="form-label">Assigned Employee</label><select className="form-control" value={selectedTicket.assigned_to_user_id || ''} onChange={(event) => setSelectedTicket({ ...selectedTicket, assigned_to_user_id: event.target.value ? Number(event.target.value) : 0 })}><option value="">Unassigned</option>{users.map((user) => <option key={user.user_id} value={user.user_id}>{user.employee_name} ({user.username})</option>)}</select></div><div className="form-group"><label className="form-label">Status</label><select className="form-control" value={selectedTicket.status} onChange={(event) => setSelectedTicket({ ...selectedTicket, status: event.target.value })}>{statuses.map((item) => <option key={item}>{item}</option>)}</select></div><div className="form-group"><label className="form-label">Resolution / Closing Notes {selectedTicket.status === 'Closed' ? '*' : ''}</label><textarea className="form-control" rows="4" value={resolution} onChange={(event) => setResolution(event.target.value)} /></div><div className="modal-footer"><button className="btn btn-outline" type="button" onClick={() => setSelectedTicket(null)}>Close</button><button className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button></div></form></div></div>}
+        {selectedTicket && (
+            <div className="modal-overlay" onClick={() => setSelectedTicket(null)}>
+                <div className="modal-shell" onClick={(event) => event.stopPropagation()}>
+                    <div className="modal-header">
+                        <h3>{selectedTicket.ticket_id}</h3>
+                        <button className="close-btn" type="button" onClick={() => setSelectedTicket(null)}>&times;</button>
+                    </div>
+                    <form className="modal-body" onSubmit={updateTicket}>
+                        <div className="details-grid" style={{ marginBottom: 16 }}>
+                            <div><strong>Customer:</strong> {selectedTicket.username || '-'}</div>
+                            <div><strong>Mobile No:</strong> {selectedTicket.mobile_no || '-'}</div>
+                            <div><strong>IMEI No:</strong> {selectedTicket.imei_no || '-'}</div>
+                            <div><strong>Vehicle No:</strong> {selectedTicket.vehicle_no || '-'}</div>
+                            <div><strong>Platform:</strong> {selectedTicket.platform_name || '-'}</div>
+                            <div><strong>Priority:</strong> {selectedTicket.priority || '-'}</div>
+                            <div><strong>Assigned Employee:</strong> {selectedTicket.assigned_to || '-'}</div>
+                            <div><strong>Created By:</strong> {selectedTicket.created_by || '-'}</div>
+                            <div><strong>Created At:</strong> {formatDateTime(selectedTicket.created_at)}</div>
+                            <div><strong>Updated At:</strong> {formatDateTime(selectedTicket.updated_at)}</div>
+                            <div><strong>Closed By:</strong> {selectedTicket.closed_by || '-'}</div>
+                            <div><strong>Closed At:</strong> {formatDateTime(selectedTicket.closed_at)}</div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Issue</label>
+                            <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 180, overflowY: 'auto', padding: 12, border: '1px solid var(--border-color)', borderRadius: 6 }}>
+                                {selectedTicket.issue || '-'}
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Assigned Employee</label>
+                            <select className="form-control" value={selectedTicket.assigned_to_user_id || ''} onChange={(event) => setSelectedTicket({ ...selectedTicket, assigned_to_user_id: event.target.value ? Number(event.target.value) : 0 })}>
+                                <option value="">Unassigned</option>
+                                {users.map((user) => <option key={user.user_id} value={user.user_id}>{user.employee_name} ({user.username})</option>)}
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Status</label>
+                            <select className="form-control" value={selectedTicket.status} onChange={(event) => setSelectedTicket({ ...selectedTicket, status: event.target.value })}>
+                                {statuses.map((item) => <option key={item}>{item}</option>)}
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Resolution / Closing Notes {selectedTicket.status === 'Closed' ? '*' : ''}</label>
+                            <textarea className="form-control" rows="4" value={resolution} onChange={(event) => setResolution(event.target.value)} />
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-outline" type="button" onClick={() => setSelectedTicket(null)}>Close</button>
+                            <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        )}
     </div>;
 };
 

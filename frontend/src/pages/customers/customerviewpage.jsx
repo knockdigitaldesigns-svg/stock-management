@@ -32,6 +32,8 @@ import {
     mergeVehicleDraft
 } from '../../utils/installationValidation';
 import { normalizeCurrency } from '../../utils/paymentValidation';
+import DateInput from '../../components/DateInput';
+import { formatDate, getTodayDate } from '../../utils/date';
 
 const sectionCardStyle = {
     background: '#fff',
@@ -145,20 +147,24 @@ const hasCompletedPaymentPart2 = (vehicle) => {
 const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, max, step, maxLength, inputMode, id, error, onBlur }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
-        <input
-            id={id}
-            type={type}
-            value={value ?? ''}
-            onChange={(event) => onChange(digitsOnly ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value)}
-            onBlur={onBlur}
-            inputMode={digitsOnly ? 'numeric' : inputMode}
-            maxLength={maxLength ?? (digitsOnly ? 6 : undefined)}
-            pattern={digitsOnly ? '[0-9]{6}' : undefined}
-            min={min}
-            max={max}
-            step={step}
-            style={inputStyle}
-        />
+        {type === 'date' ? (
+            <DateInput id={id} value={value} onChange={onChange} max={max} style={inputStyle} />
+        ) : (
+            <input
+                id={id}
+                type={type}
+                value={value ?? ''}
+                onChange={(event) => onChange(digitsOnly ? event.target.value.replace(/\D/g, '').slice(0, 6) : event.target.value)}
+                onBlur={onBlur}
+                inputMode={digitsOnly ? 'numeric' : inputMode}
+                maxLength={maxLength ?? (digitsOnly ? 6 : undefined)}
+                pattern={digitsOnly ? '[0-9]{6}' : undefined}
+                min={min}
+                max={max}
+                step={step}
+                style={inputStyle}
+            />
+        )}
         {error && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {error}</small>}
     </div>
 );
@@ -203,7 +209,10 @@ const CustomerViewPage = () => {
     const [assetValidationErrors, setAssetValidationErrors] = useState({});
     const [customerChanged, setCustomerChanged] = useState(false);
     const [changedVehicles, setChangedVehicles] = useState({});
+    const [resumedVehicleIds, setResumedVehicleIds] = useState([]);
+    const [resumedSubmissionData, setResumedSubmissionData] = useState(null);
     const [verificationDraftId, setVerificationDraftId] = useState(0);
+    const [verificationRejectionReason, setVerificationRejectionReason] = useState('');
     const [activeEditStep, setActiveEditStep] = useState(() => {
         const requestedStep = Number(new URLSearchParams(location.search).get('step'));
         return requestedStep >= 1 && requestedStep <= 5 ? requestedStep : 1;
@@ -285,41 +294,69 @@ const CustomerViewPage = () => {
                 );
                 return mergeVehicleDraft(vehicle, savedVehicle);
             });
+            const existingVehicleIds = new Set(vehicles.map((vehicle) => Number(vehicle.id)));
+            const resumedOnlyVehicles = resumedVehicles
+                .map((vehicle, index) => ({ vehicle, index }))
+                .filter(({ vehicle }) => {
+                    const vehicleId = Number(vehicle.vehicle_record_id || vehicle.id || 0);
+                    return vehicleId <= 0 || !existingVehicleIds.has(vehicleId);
+                })
+                .map(({ vehicle, index }) => {
+                    const vehicleId = Number(vehicle.vehicle_record_id || vehicle.id || 0);
+                    const merged = mergeVehicleDraft({
+                        id: vehicleId > 0 ? vehicleId : -(index + 1),
+                        ...(vehicleId > 0 ? { vehicle_record_id: vehicleId } : {})
+                    }, vehicle);
+                    return {
+                        ...merged,
+                        id: vehicleId > 0 ? vehicleId : -(index + 1),
+                        vehicle_record_id: vehicleId > 0 ? vehicleId : null
+                    };
+                });
+            const allHydratedVehicles = [...hydratedVehicles, ...resumedOnlyVehicles];
             setCustomerData({
                 customer: data.customer
                     ? {
                         ...data.customer,
                         status: data.customer.status || 'Active',
                         ...(resumedData?.customer || {}),
-                        vehicles: hydratedVehicles
+                        vehicles: allHydratedVehicles
                     }
                     : null,
-                vehicles: hydratedVehicles,
+                vehicles: allHydratedVehicles,
                 installation: data.installation || null,
                 payment_part1: data.payment_part1 || null,
                 payment_part2: data.payment_part2 || null
             });
             setSelectedEditVehicleId((previous) => (
-                hydratedVehicles.some((vehicle) => String(vehicle.id) === String(previous))
+                allHydratedVehicles.some((vehicle) => String(vehicle.id) === String(previous))
                     ? previous
-                    : hydratedVehicles[0]?.id ?? null
+                    : allHydratedVehicles[0]?.id ?? null
             ));
             setSavedPaymentModes(Object.fromEntries(
-                hydratedVehicles.map((vehicle) => [
+                allHydratedVehicles.map((vehicle) => [
                     vehicle.id,
                     Boolean(String(vehicle.vehicle_payment_mode || '').trim())
                 ])
             ));
-            const resumedChanges = Object.fromEntries(resumedVehicles.map((vehicle) => [
-                vehicle.vehicle_record_id || vehicle.id,
-                vehicle.changed || {}
-            ]));
+            const resumedChanges = Object.fromEntries(resumedVehicles.map((vehicle, index) => {
+                const vehicleId = Number(vehicle.vehicle_record_id || vehicle.id || 0);
+                return [
+                    vehicleId || -(index + 1),
+                    {
+                        ...(vehicle.changed || {}),
+                        ...(vehicleId > 0 ? {} : { vehicle: true })
+                    }
+                ];
+            }));
             setCustomerChanged(Boolean(resumedData?.customer_changed));
             setChangedVehicles(resumedChanges);
+            setResumedVehicleIds(resumedVehicles.map((vehicle, index) =>
+                Number(vehicle.vehicle_record_id || vehicle.id || 0) || -(index + 1)
+            ));
+            setResumedSubmissionData(resumedData || null);
             setVerificationDraftId(Number(resumedSubmission?.id || 0));
-            if (resumedSubmission) {
-                sessionStorage.removeItem(resumeKey);
-            }
+            setVerificationRejectionReason(String(resumedSubmission?.rejection_reason || ''));
             return true;
         } catch (err) {
             console.error('Customer view loading error:', err);
@@ -793,7 +830,10 @@ const CustomerViewPage = () => {
             setSuccess('');
 
             const submissionVehicles = vehicles
-                .filter((vehicle) => Object.values(changedVehicles[vehicle.id] || {}).some(Boolean))
+                .filter((vehicle) =>
+                    Object.values(changedVehicles[vehicle.id] || {}).some(Boolean) ||
+                    resumedVehicleIds.includes(Number(vehicle.id))
+                )
                 .map((vehicle) => {
                     const changed = changedVehicles[vehicle.id] || {};
                     const installationValues = [
@@ -817,7 +857,7 @@ const CustomerViewPage = () => {
                     }
                     return {
                         ...vehicle,
-                        vehicle_record_id: Number(vehicle.id),
+                        vehicle_record_id: Number(vehicle.vehicle_record_id || (vehicle.id > 0 ? vehicle.id : 0)),
                         changed,
                         installation: changed.installation && hasCompleteInstallation ? {
                             installation_person_type: vehicle.vehicle_installation_type,
@@ -826,12 +866,12 @@ const CustomerViewPage = () => {
                                 : null,
                             lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
                             installation_date: vehicle.vehicle_installation_date
-                        } : null,
+                        } : vehicle.installation || null,
                         payment_part1: changed.paymentPart1 ? {
                             total_sale_amount: saleAmount,
                             transaction_id: vehicle.vehicle_transaction_id || '',
                             payment_mode: vehicle.vehicle_payment_mode || ''
-                        } : null,
+                        } : vehicle.payment_part1 || null,
                         payment_part2: changed.paymentPart2 ? {
                             total_sale_amount: saleAmount,
                             transaction_id: vehicle.vehicle_transaction_id || '',
@@ -848,7 +888,7 @@ const CustomerViewPage = () => {
                             amount_paid: normalizeCurrency(vehicle.vehicle_amount_paid),
                             amount_pending: getPaymentPart2Summary(vehicle).amountPending,
                             payment_status: vehicle.vehicle_payment_status || 'Not Paid'
-                        } : null
+                        } : vehicle.payment_part2 || null
                     };
                 });
             const submission = {
@@ -868,15 +908,25 @@ const CustomerViewPage = () => {
                 vehicles: submissionVehicles
             };
             const verificationPayment = submissionVehicles.find((vehicle) =>
-                vehicle.payment_part2 &&
-                ['Paid', 'Partially Paid'].includes(vehicle.payment_part2.payment_status)
-            )?.payment_part2;
+                vehicle.payment_part2
+            )?.payment_part2 ||
+                resumedSubmissionData?.payment_part2 ||
+                resumedSubmissionData?.vehicle?.payment_part2 ||
+                resumedSubmissionData?.step5 ||
+                null;
             if (verificationPayment) {
                 submission.payment_part2 = verificationPayment;
             }
+            submission.payment_part1 = submissionVehicles.find((vehicle) =>
+                vehicle.payment_part1
+            )?.payment_part1 ||
+                resumedSubmissionData?.payment_part1 ||
+                resumedSubmissionData?.vehicle?.payment_part1 ||
+                resumedSubmissionData?.step4 ||
+                null;
 
             let savedDraftId = verificationDraftId;
-            if (customerChanged || submissionVehicles.length > 0) {
+            if (customerChanged || submissionVehicles.length > 0 || verificationDraftId > 0) {
                 savedDraftId = await saveCustomerDraft(
                     verificationDraftId,
                     Number(customerId),
@@ -885,7 +935,7 @@ const CustomerViewPage = () => {
                 setVerificationDraftId(savedDraftId);
             }
 
-            if (!advance && navigateToStep === null && verificationPayment) {
+            if (!advance && navigateToStep === null && (verificationPayment || verificationDraftId > 0)) {
                 const response = await api.post('/customers/verification/submit.php', {
                     submission_id: savedDraftId,
                     submission_data: submission
@@ -893,9 +943,10 @@ const CustomerViewPage = () => {
                 if (!response.data?.success) {
                     throw new Error(response.data?.message || 'Failed to submit for Admin verification.');
                 }
+                sessionStorage.removeItem(`customer_edit_verification_${customerId}`);
                 await loadCustomerDetails();
                 setVerificationDraftId(0);
-                setSuccess('Payment details submitted successfully for Admin verification.');
+                setSuccess('Customer details resubmitted successfully for Admin verification.');
             } else if (!advance && navigateToStep === null && savedDraftId > 0) {
                 const committed = await commitCustomerSubmission(submission, savedDraftId);
                 await api.post('/customers/verification/finish.php', {
@@ -1344,6 +1395,12 @@ const CustomerViewPage = () => {
                 </div>
             )}
 
+            {verificationRejectionReason && (
+                <div className="alert alert-warning" style={{ marginBottom: '16px' }}>
+                    <strong>Rejection reason:</strong> {verificationRejectionReason}
+                </div>
+            )}
+
             {loading ? (
                 <div className="card" style={sectionCardStyle}>
                     <p>Loading customer details...</p>
@@ -1524,7 +1581,7 @@ const CustomerViewPage = () => {
                                                 getLabel={(option) => option.lead_closure_name}
                                                 {...fieldPresentation('vehicle_lead_closure_id', activeStepErrors)}
                                             />
-                                            <EditField label="Installation Date" value={vehicle.vehicle_installation_date} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_installation_date', value)} type="date" max={new Date().toISOString().split('T')[0]} {...fieldPresentation('vehicle_installation_date', activeStepErrors)} />
+                                            <EditField label="Installation Date" value={vehicle.vehicle_installation_date} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_installation_date', value)} type="date" max={getTodayDate()} {...fieldPresentation('vehicle_installation_date', activeStepErrors)} />
                                         </>
                                     ) : (
                                         <>
@@ -1532,7 +1589,7 @@ const CustomerViewPage = () => {
                                             <div style={fieldStyle}><strong>Installation Person</strong><span>{renderValue(vehicle.vehicle_installation_person)}</span></div>
                                             <div style={fieldStyle}><strong>Installation Person Type</strong><span>{renderValue(vehicle.vehicle_installation_person_type)}</span></div>
                                             <div style={fieldStyle}><strong>Lead Closure By</strong><span>{renderValue(vehicle.vehicle_lead_closure)}</span></div>
-                                            <div style={fieldStyle}><strong>Installation Date</strong><span>{renderValue(vehicle.vehicle_installation_date)}</span></div>
+                                            <div style={fieldStyle}><strong>Installation Date</strong><span>{formatDate(vehicle.vehicle_installation_date)}</span></div>
                                         </>
                                     )}
                                 </div>

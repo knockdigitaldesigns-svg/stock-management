@@ -563,6 +563,9 @@ CREATE TABLE IF NOT EXISTS customers (
     status ENUM('Active', 'Inactive')
         NOT NULL DEFAULT 'Active',
 
+    verification_status ENUM('Pending', 'Approved', 'Rejected')
+        NOT NULL DEFAULT 'Approved',
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
@@ -571,6 +574,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
     UNIQUE KEY uq_customer_platform_username (platform_id, username),
     INDEX idx_customer_platform (platform_id),
+    INDEX idx_customer_verification_status (verification_status, id),
 
     CONSTRAINT fk_customer_platform
         FOREIGN KEY (platform_id)

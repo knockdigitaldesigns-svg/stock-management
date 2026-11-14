@@ -5,6 +5,7 @@ import SearchableDropdown from '../../components/SearchableDropdown/SearchableDr
 import { softwareDropdownOptions } from '../../constants/software';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { formatDate } from '../../utils/date';
+import DateInput from '../../components/DateInput';
 import { showGlobalError } from '../../context/ErrorContext';
 
 const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
@@ -64,7 +65,7 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
         {allocation && <div style={{ display: 'grid', gap: '1rem' }}>
             <div className="form-group"><label className="form-label">Dealer / Technician</label><SearchableDropdown options={ownerOptions} value={ownerValue} onChange={(value) => { const [ownerType, ownerId] = String(value).split(':'); update('owner_type', ownerType); update('owner_id', ownerId); }} placeholder="Select owner" /></div>
             <div className="form-group"><label className="form-label">Allocation Type</label><select className="form-control" value={form.allocation_type} onChange={(event) => update('allocation_type', event.target.value)}><option value="ET">ET</option><option value="dealer">Dealer</option><option value="technician">Technician</option></select></div>
-            <div className="form-group"><label className="form-label">{isSim ? 'SIM Given Date' : 'Allocation Date'}</label>{isSim ? <input type="date" className="form-control" value={form.allocation_date} readOnly /> : <input type="date" className="form-control" value={form.allocation_date} onChange={(event) => update('allocation_date', event.target.value)} />}</div>
+            <div className="form-group"><label className="form-label">{isSim ? 'SIM Given Date' : 'Allocation Date'}</label><DateInput className="form-control" value={form.allocation_date} readOnly={isSim} onChange={(value) => update('allocation_date', value)} allowFuture /></div>
             <div><strong>{allocation.device_id ? 'Device' : 'SIM'}:</strong> {allocation.imei_no || allocation.sim_no || '-'} {allocation.device_model ? `(${allocation.device_model})` : allocation.sim_type ? `(${allocation.sim_type})` : ''}</div>
             <div className="form-group"><label className="form-label">Software</label><SearchableDropdown options={softwareDropdownOptions} value={form.software} onChange={(value) => update('software', value)} placeholder="Select software" /></div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.75rem' }}><div className="form-group"><label className="form-label">Total Amount</label><input type="number" min="0" step="0.01" className="form-control" value={form.total_amount} readOnly /></div><div className="form-group"><label className="form-label">Amount Paid</label><input type="number" min="0" step="0.01" className="form-control" value={form.amount_paid} onChange={(event) => update('amount_paid', event.target.value)} /></div><div className="form-group"><label className="form-label">Pending Amount</label><input className="form-control" value={pending.toFixed(2)} readOnly /></div><div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={status} readOnly /></div></div>

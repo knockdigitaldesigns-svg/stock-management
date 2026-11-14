@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 
 import api from '../../services/api';
+import DateInput from '../../components/DateInput';
+import { getTodayDate } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { saveCustomerDraft } from '../../utils/customerSubmission';
@@ -1009,18 +1011,12 @@ const InstallationDetailsPage = () => {
                                 Installation Date
                                 <span className="required">*</span>
                             </label>
-                            <input
-                                type="date"
-                                name="installation_date"
+                            <DateInput
                                 value={form.installation_date}
-                                onChange={handleChange}
+                                onChange={(value) => handleChange({ target: { name: 'installation_date', value } })}
                                 className="form-control"
                                 disabled={saving}
-                                max={
-                                    new Date()
-                                        .toISOString()
-                                        .split('T')[0]
-                                }
+                                max={getTodayDate()}
                             />
                             {installationErrors.installation_date && (
                                 <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>

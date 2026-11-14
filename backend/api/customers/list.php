@@ -31,7 +31,7 @@ $location = trim((string) ($_GET['location'] ?? ''));
 $paymentFilter = trim((string) ($_GET['payment_status'] ?? ''));
 $dateFrom = trim((string) ($_GET['date_from'] ?? ''));
 $dateTo = trim((string) ($_GET['date_to'] ?? ''));
-$filters = [];
+$filters = ["c.verification_status = 'Approved'"];
 $filterParams = [];
 $filterTypes = '';
 
@@ -83,7 +83,7 @@ if ($dateTo !== '') {
     $filterTypes .= 's';
 }
 
-$paginated = true;
+$paginated = (string) ($_GET['all'] ?? '') !== '1';
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 $whereClause = $filters ? ' WHERE ' . implode(' AND ', $filters) : '';
@@ -171,6 +171,7 @@ $sql = "
         c.location,
         c.pincode,
         c.status,
+        c.verification_status,
 
         cv.id AS vehicle_id,
         cv.customer_id AS vehicle_customer_id,
@@ -330,6 +331,7 @@ while ($row = $result->fetch_assoc()) {
             'location' => $row['location'],
             'pincode' => $row['pincode'],
             'status' => $row['status'],
+            'verification_status' => $row['verification_status'],
             'installation_person_type' => $row['installation_person_type'],
             'installation_person' => $row['installation_person'],
             'lead_closure' => $row['lead_closure'],
@@ -385,7 +387,7 @@ if ($paginated) {
         'page_size' => $pageSize,
         'total_pages' => max(1, (int) ceil($total / $pageSize))
     ];
-    $locationsResult = $conn->query("SELECT DISTINCT location FROM customers WHERE location IS NOT NULL AND TRIM(location) <> '' ORDER BY location");
+    $locationsResult = $conn->query("SELECT DISTINCT location FROM customers WHERE verification_status = 'Approved' AND location IS NOT NULL AND TRIM(location) <> '' ORDER BY location");
     if (!$locationsResult) {
         $conn->close();
         sendResponse(false, 'Failed to fetch customer location options.', [], [], 500);

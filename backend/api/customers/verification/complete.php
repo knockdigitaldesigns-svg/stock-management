@@ -25,7 +25,7 @@ if (!$conn) {
 try {
     $conn->begin_transaction();
     $stmt = $conn->prepare(
-        'SELECT status, reviewer_user_id, submission_data
+        'SELECT status, reviewer_user_id, existing_customer_id, linked_customer_id, submission_data
          FROM customer_payment_verification_submissions WHERE id = ? FOR UPDATE'
     );
     $stmt->bind_param('i', $submissionId);
@@ -69,6 +69,24 @@ try {
     if ($row['status'] !== 'Applying' || (int) $row['reviewer_user_id'] !== $reviewerId) {
         throw new RuntimeException('This submission is not being applied by the current reviewer.');
     }
+    $existingCustomerId = (int) ($row['existing_customer_id'] ?? 0);
+    $linkedCustomerId = (int) ($row['linked_customer_id'] ?? 0);
+    if (($existingCustomerId > 0 && $existingCustomerId !== $customerId)
+        || ($linkedCustomerId > 0 && $linkedCustomerId !== $customerId)) {
+        throw new RuntimeException('The customer does not match this verification submission.');
+    }
+    $customerStatusStmt = $conn->prepare(
+        "UPDATE customers SET verification_status = 'Approved' WHERE id = ?"
+    );
+    if (!$customerStatusStmt) {
+        throw new RuntimeException('Unable to prepare customer approval status update.');
+    }
+    $customerStatusStmt->bind_param('i', $customerId);
+    if (!$customerStatusStmt->execute() || $customerStatusStmt->affected_rows > 1) {
+        $customerStatusStmt->close();
+        throw new RuntimeException('Unable to update the customer approval status.');
+    }
+    $customerStatusStmt->close();
     $stmt = $conn->prepare(
         "UPDATE customer_payment_verification_submissions
          SET status = 'Approved', linked_customer_id = ?, linked_vehicle_id = NULLIF(?, 0),

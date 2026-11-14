@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const DeviceTypesPage = () => {
     const { hasPermission } = useAuth();
@@ -33,10 +34,9 @@ const DeviceTypesPage = () => {
     const fetchDeviceTypes = async () => {
         setLoading(true);
         try {
-            const response = await api.get('/device_types/list.php');
-            if (response.data.success) setDeviceTypes(response.data.data?.device_types || []);
+            setDeviceTypes(await fetchAllPaginatedRecords('/device_types/list.php', 'device_types'));
         } catch (err) {
-            triggerError(err.response?.data?.message || 'Unable to load device types.');
+            triggerError(err.response?.data?.message || err.message || 'Unable to load device types.');
         } finally {
             setLoading(false);
         }

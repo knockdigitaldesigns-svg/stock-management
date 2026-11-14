@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Truck, Eye, Edit, Trash2, CheckCircle, XCircle, Plus, RefreshCw, AlertCircle } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
@@ -332,22 +333,20 @@ const CourierPage = () => {
                         {/* Date From */}
                         <div className="courier-filter-col">
                             <label className="courier-filter-label">Courier From Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="courier-filter-control"
                                 value={dateFrom}
-                                onChange={(e) => updateFilter(setDateFrom, e.target.value)}
+                                onChange={(value) => updateFilter(setDateFrom, value)}
                             />
                         </div>
 
                         {/* Date To */}
                         <div className="courier-filter-col">
                             <label className="courier-filter-label">Courier To Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="courier-filter-control"
                                 value={dateTo}
-                                onChange={(e) => updateFilter(setDateTo, e.target.value)}
+                                onChange={(value) => updateFilter(setDateTo, value)}
                             />
                         </div>
                     </div>

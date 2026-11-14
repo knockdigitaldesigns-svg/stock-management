@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, RotateCcw, Search } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 import { exportToExcel, exportToPDF } from '../../utils/export';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
@@ -322,22 +323,22 @@ const CustomerReportsPage = () => {
                         <SearchableDropdown label="Location" value={filters.location} options={[{ value: '', label: 'All' }, ...options.locations.map(location => ({ value: location, label: location }))]} onChange={value => updateFilter('location', value)} />
                         <div className="filter-group">
                             <label className="filter-label">From Date</label>
-                            <input type="date" className="form-control filter-input" value={filters.dateFrom} onChange={e => {
-                                if (filters.dateTo && e.target.value > filters.dateTo) {
+                            <DateInput className="form-control filter-input" value={filters.dateFrom} onChange={value => {
+                                if (filters.dateTo && value > filters.dateTo) {
                                     showGlobalError('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter('dateFrom', e.target.value);
+                                updateFilter('dateFrom', value);
                             }} />
                         </div>
                         <div className="filter-group">
                             <label className="filter-label">To Date</label>
-                            <input type="date" className="form-control filter-input" value={filters.dateTo} onChange={e => {
-                                if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                            <DateInput className="form-control filter-input" value={filters.dateTo} onChange={value => {
+                                if (filters.dateFrom && value && value < filters.dateFrom) {
                                     showGlobalError('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter('dateTo', e.target.value);
+                                updateFilter('dateTo', value);
                             }} />
                         </div>
                         <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />

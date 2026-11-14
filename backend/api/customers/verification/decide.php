@@ -15,10 +15,11 @@ $data = json_decode(file_get_contents('php://input'), true);
 $submissionId = (int) ($data['submission_id'] ?? 0);
 $action = strtolower(trim((string) ($data['action'] ?? '')));
 $reason = trim((string) ($data['reason'] ?? ''));
-if ($submissionId <= 0 || !in_array($action, ['approve', 'reject'], true)) {
+$isAutoReject = $action === 'auto_reject';
+if ($submissionId <= 0 || !in_array($action, ['approve', 'reject', 'auto_reject'], true)) {
     sendResponse(false, 'A valid submission and decision are required.', [], [], 400);
 }
-if ($action === 'reject' && $reason === '') {
+if (($action === 'reject' || $isAutoReject) && $reason === '') {
     sendResponse(false, 'A rejection reason is required.', [], [], 400);
 }
 
@@ -57,6 +58,9 @@ try {
         }
     }
     $oldStatus = (string) $row['status'];
+    if ($isAutoReject && $oldStatus !== 'Applying') {
+        throw new RuntimeException('Only an Applying submission can be automatically rejected after an application failure.');
+    }
     $submissionJson = null;
     if ($action === 'approve') {
         if ($oldStatus === 'Approved') {
@@ -227,6 +231,23 @@ try {
                     }
                 }
             }
+        }
+        if (!empty($submissionData['legacy_customer_review'])
+            && (int) ($row['linked_customer_id'] ?? 0) > 0) {
+            $customerStatusStmt = $conn->prepare(
+                "UPDATE customers SET verification_status = 'Rejected'
+                 WHERE id = ? AND verification_submission_id = ?"
+            );
+            if (!$customerStatusStmt) {
+                throw new RuntimeException('Unable to prepare the customer rejection status update.');
+            }
+            $linkedCustomerId = (int) $row['linked_customer_id'];
+            $customerStatusStmt->bind_param('ii', $linkedCustomerId, $submissionId);
+            if (!$customerStatusStmt->execute()) {
+                $customerStatusStmt->close();
+                throw new RuntimeException('Unable to update the customer rejection status.');
+            }
+            $customerStatusStmt->close();
         }
         $newStatus = 'Rejected';
         $storedReason = $reason;

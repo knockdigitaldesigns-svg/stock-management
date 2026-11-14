@@ -33,6 +33,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate } from '../../utils/date';
+import DateInput from '../../components/DateInput';
 import { useNavigate } from 'react-router-dom';
 import SimStatusSummaryCards from '../../components/SimStatusSummaryCards/SimStatusSummaryCards';
 
@@ -49,16 +50,6 @@ const toIsoDate = (d) => {
     if (!d || Number.isNaN(d.getTime())) return '';
 
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-const toDisplayDate = (isoStr) => {
-    if (!isoStr) return '';
-
-    const parts = isoStr.split('-');
-
-    if (parts.length !== 3) return isoStr;
-
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
 };
 
 const parseIsoDate = (isoStr) => {
@@ -763,7 +754,7 @@ const Dashboard = () => {
 
                             <span>
                                 {dateRange.startDate || dateRange.endDate
-                                    ? `${toDisplayDate(dateRange.startDate)} To ${toDisplayDate(dateRange.endDate)}`
+                                    ? `${formatDate(dateRange.startDate)} To ${formatDate(dateRange.endDate)}`
                                     : 'All Time'}
                             </span>
                         </button>
@@ -849,7 +840,7 @@ const Dashboard = () => {
                             margin: 0,
                             fontSize: '0.95rem'
                         }}>
-                            {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                            {formatDate(new Date())}
                         </p>
                     </div>
                 </div>
@@ -979,15 +970,11 @@ const Dashboard = () => {
                                             From Date:
                                         </label>
 
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             className="form-control"
                                             value={tempStartDate}
-                                            onChange={(e) => {
-                                                setTempStartDate(
-                                                    e.target.value
-                                                );
-
+                                            onChange={(value) => {
+                                                setTempStartDate(value);
                                                 setPickerError('');
                                             }}
                                         />
@@ -1001,15 +988,11 @@ const Dashboard = () => {
                                             To Date:
                                         </label>
 
-                                        <input
-                                            type="date"
+                                        <DateInput
                                             className="form-control"
                                             value={tempEndDate}
-                                            onChange={(e) => {
-                                                setTempEndDate(
-                                                    e.target.value
-                                                );
-
+                                            onChange={(value) => {
+                                                setTempEndDate(value);
                                                 setPickerError('');
                                             }}
                                         />

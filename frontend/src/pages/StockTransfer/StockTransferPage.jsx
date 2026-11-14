@@ -2,9 +2,10 @@ import { useState, useCallback, useEffect } from 'react';
 import { ArrowLeftRight, Eye, Edit, Trash2, Search, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
-import { formatDate } from '../../utils/date';
+import { formatDate, getTodayDate } from '../../utils/date';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
 
@@ -44,7 +45,7 @@ const StockTransferPage = () => {
     const [toOwnerType, setToOwnerType]   = useState('');
     const [toOwnerList, setToOwnerList]   = useState([]);
     const [toOwnerId, setToOwnerId]       = useState('');
-    const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [transferDate, setTransferDate] = useState(getTodayDate);
     const [loadingOwners, setLoadingOwners] = useState(false);
 
     // --------------------------------------------------
@@ -274,7 +275,7 @@ const StockTransferPage = () => {
         setToOwnerType('');
         setToOwnerId('');
         setToOwnerList([]);
-        setTransferDate(new Date().toISOString().slice(0, 10));
+        setTransferDate(getTodayDate());
     };
 
     const closeModal = () => { setShowModal(false); };
@@ -353,32 +354,30 @@ const StockTransferPage = () => {
 
                         <div className="filter-group">
                             <label className="filter-label">From Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="form-control filter-input"
                                 value={filters.dateFrom}
-                                onChange={e => {
-                                    if (filters.dateTo && e.target.value > filters.dateTo) {
+                                onChange={value => {
+                                    if (filters.dateTo && value > filters.dateTo) {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    updateFilters(f => ({ ...f, dateFrom: e.target.value }));
+                                    updateFilters(f => ({ ...f, dateFrom: value }));
                                 }}
                             />
                         </div>
 
                         <div className="filter-group">
                             <label className="filter-label">To Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="form-control filter-input"
                                 value={filters.dateTo}
-                                onChange={e => {
-                                    if (filters.dateFrom && e.target.value && e.target.value < filters.dateFrom) {
+                                onChange={value => {
+                                    if (filters.dateFrom && value && value < filters.dateFrom) {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    updateFilters(f => ({ ...f, dateTo: e.target.value }));
+                                    updateFilters(f => ({ ...f, dateTo: value }));
                                 }}
                             />
                         </div>
@@ -645,12 +644,12 @@ const StockTransferPage = () => {
                                     <label style={{ display: 'block', fontWeight: 600, marginBottom: '6px', color: '#374151', fontSize: '13px' }}>
                                         Transfer Date
                                     </label>
-                                    <input
-                                        type="date"
+                                    <DateInput
                                         className="form-control"
                                         value={transferDate}
-                                        onChange={e => setTransferDate(e.target.value)}
+                                        onChange={setTransferDate}
                                         disabled={saving}
+                                        allowFuture
                                     />
                                 </div>
                             </>
@@ -735,12 +734,12 @@ const StockTransferPage = () => {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <div className="form-group">
                             <label className="form-label">Transfer Date *</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="form-control"
                                 value={editTarget.transfer_date || ''}
-                                onChange={e => setEditTarget({ ...editTarget, transfer_date: e.target.value })}
+                                onChange={value => setEditTarget({ ...editTarget, transfer_date: value })}
                                 disabled={saving}
+                                allowFuture
                             />
                         </div>
                         <div className="form-group">

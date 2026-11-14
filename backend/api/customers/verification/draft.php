@@ -37,6 +37,59 @@ try {
         $username = trim((string) ($step1['username'] ?? ''));
         $primaryMobile = trim((string) ($step1['primary_mobile_no'] ?? ''));
         if ($platformId > 0 && $username !== '' && $primaryMobile !== '') {
+            if ($submissionId === 0) {
+                $pendingStmt = $conn->prepare(
+                    "SELECT id FROM customer_payment_verification_submissions
+                     WHERE status IN ('Pending Verification', 'Applying')
+                       AND CAST(COALESCE(
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.customer.platform_id'
+                           )),
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.step1.platform_id'
+                           )),
+                           '0'
+                       ) AS UNSIGNED) = ?
+                       AND LOWER(TRIM(COALESCE(
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.customer.username'
+                           )),
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.step1.username'
+                           )),
+                           ''
+                       ))) = LOWER(?)
+                       AND TRIM(COALESCE(
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.customer.primary_mobile_no'
+                           )),
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               CASE WHEN JSON_VALID(submission_data) THEN submission_data ELSE '{}' END,
+                               '$.step1.primary_mobile_no'
+                           )),
+                           ''
+                       )) = ?
+                     LIMIT 1"
+                );
+                if (!$pendingStmt) {
+                    throw new RuntimeException('Unable to check for an existing customer verification request.');
+                }
+                $pendingStmt->bind_param('iss', $platformId, $username, $primaryMobile);
+                if (!$pendingStmt->execute()) {
+                    $pendingStmt->close();
+                    throw new RuntimeException('Unable to check for an existing customer verification request.');
+                }
+                $pendingRequest = $pendingStmt->get_result()->fetch_assoc();
+                $pendingStmt->close();
+                if ($pendingRequest) {
+                    throw new RuntimeException('CUSTOMER_VERIFICATION_ALREADY_PENDING');
+                }
+            }
             $stmt = $conn->prepare(
                 'SELECT id, platform_id, username, primary_mobile_no,
                         secondary_mobile_no, email, location, pincode, status
@@ -56,6 +109,20 @@ try {
                     'customer_id' => (int) $existing['id'],
                     'customer' => $existing
                 ]));
+            }
+            $stmt = $conn->prepare(
+                'SELECT id FROM customers
+                 WHERE platform_id = ?
+                   AND TRIM(primary_mobile_no) = ?
+                   AND LOWER(TRIM(username)) <> LOWER(?)
+                 ORDER BY id ASC LIMIT 1'
+            );
+            $stmt->bind_param('iss', $platformId, $primaryMobile, $username);
+            $stmt->execute();
+            $differentUsername = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($differentUsername) {
+                throw new RuntimeException('MOBILE_EXISTS_DIFFERENT_USERNAME');
             }
             $stmt = $conn->prepare(
                 'SELECT id FROM customers
@@ -185,6 +252,24 @@ try {
     $message = $error->getMessage();
     if ($message === 'USERNAME_EXISTS_DIFFERENT_MOBILE') {
         sendResponse(false, 'Username already exists with a different mobile number.', ['code' => $message], [], 409);
+    }
+    if ($message === 'MOBILE_EXISTS_DIFFERENT_USERNAME') {
+        sendResponse(
+            false,
+            'This mobile number is already registered with another username in this software. Please use the existing registered username.',
+            ['code' => $message],
+            [],
+            409
+        );
+    }
+    if ($message === 'CUSTOMER_VERIFICATION_ALREADY_PENDING') {
+        sendResponse(
+            false,
+            'This customer already has a request awaiting Admin verification.',
+            ['code' => $message],
+            [],
+            409
+        );
     }
     $duplicate = json_decode($message, true);
     if (is_array($duplicate) && ($duplicate['code'] ?? '') === 'EXISTING_CUSTOMER_SAME_MOBILE') {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     useNavigate,
     useParams
@@ -49,6 +49,12 @@ const CustomerCreatePage = () => {
     const [showValidation, setShowValidation] = useState(false);
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
     const [duplicateCustomerModal, setDuplicateCustomerModal] = useState(null);
+    const [usernameSuggestions, setUsernameSuggestions] = useState([]);
+    const [usernameSuggestionsOpen, setUsernameSuggestionsOpen] = useState(false);
+    const [usernameSuggestionsLoading, setUsernameSuggestionsLoading] = useState(false);
+    const [usernameSuggestionError, setUsernameSuggestionError] = useState('');
+    const usernameFieldRef = useRef(null);
+    const usernameSearchSequence = useRef(0);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -59,6 +65,7 @@ const CustomerCreatePage = () => {
     const canEditCustomer = hasPermission('customers.edit');
 
     const fieldErrors = getCustomerFieldErrors(form, showValidation);
+    const usernameQuery = String(form.username || '').trim();
 
     const storageKey = customerId
         ? `customer_creation_${customerId}`
@@ -240,6 +247,74 @@ const loadCustomer = async () => {
             }
         }
     }, [customerId]);
+
+    useEffect(() => {
+        if (!usernameSuggestionsOpen) {
+            return undefined;
+        }
+        if (!form.platform_id) {
+            setUsernameSuggestions([]);
+            setUsernameSuggestionsLoading(false);
+            setUsernameSuggestionError('');
+            return undefined;
+        }
+        if (!usernameQuery) {
+            setUsernameSuggestions([]);
+            setUsernameSuggestionsLoading(false);
+            setUsernameSuggestionError('');
+            return undefined;
+        }
+
+        const requestId = ++usernameSearchSequence.current;
+        setUsernameSuggestionsLoading(true);
+        setUsernameSuggestionError('');
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await api.get('/customers/username_suggestions.php', {
+                    params: { platform_id: form.platform_id, query: usernameQuery }
+                });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Failed to load username suggestions.');
+                }
+                if (requestId === usernameSearchSequence.current) {
+                    const matches = response.data.data?.usernames || [];
+                    setUsernameSuggestions([...new Set(matches)]);
+                }
+            } catch (suggestionError) {
+                if (requestId === usernameSearchSequence.current) {
+                    setUsernameSuggestions([]);
+                    setUsernameSuggestionError(
+                        suggestionError.response?.data?.message ||
+                        suggestionError.message ||
+                        'Failed to load username suggestions.'
+                    );
+                }
+            } finally {
+                if (requestId === usernameSearchSequence.current) {
+                    setUsernameSuggestionsLoading(false);
+                }
+            }
+        }, 300);
+
+        return () => {
+            window.clearTimeout(timer);
+            usernameSearchSequence.current += 1;
+        };
+    }, [form.platform_id, usernameQuery, usernameSuggestionsOpen]);
+
+    useEffect(() => {
+        const closeSuggestions = (event) => {
+            if (!usernameFieldRef.current?.contains(event.target)) {
+                setUsernameSuggestionsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', closeSuggestions);
+        document.addEventListener('touchstart', closeSuggestions);
+        return () => {
+            document.removeEventListener('mousedown', closeSuggestions);
+            document.removeEventListener('touchstart', closeSuggestions);
+        };
+    }, []);
 
     /*
     |--------------------------------------------------------------------------
@@ -463,6 +538,10 @@ const loadCustomer = async () => {
                 triggerError('Username already exists with a different mobile number.');
                 return;
             }
+            if (code === 'MOBILE_EXISTS_DIFFERENT_USERNAME') {
+                triggerError('This mobile number is already registered with another username in this software. Please use the existing registered username.');
+                return;
+            }
 
             triggerError(
                 err.response?.data?.message ||
@@ -514,7 +593,6 @@ const loadCustomer = async () => {
 
     const handleDuplicateNo = () => {
         setDuplicateCustomerModal(null);
-        triggerError('This username and mobile number already exist.');
     };
 
     /*
@@ -830,9 +908,11 @@ const loadCustomer = async () => {
                                     value={
                                         form.platform_id
                                     }
-                                    onChange={
-                                        handleChange
-                                    }
+                                    onChange={(event) => {
+                                        handleChange(event);
+                                        setUsernameSuggestions([]);
+                                        setUsernameSuggestionError('');
+                                    }}
                                     className="form-control"
                                     disabled={
                                         loadingPlatforms ||
@@ -868,7 +948,7 @@ const loadCustomer = async () => {
 
                             {/* USERNAME */}
 
-                            <div className="form-group">
+                            <div className="form-group" ref={usernameFieldRef}>
 
                                 <label className="form-label">
                                     Username
@@ -877,20 +957,88 @@ const loadCustomer = async () => {
                                     </span>
                                 </label>
 
-                                <input
-                                    type="text"
-                                    name="username"
-                                    value={
-                                        form.username
-                                    }
-                                    onChange={
-                                        handleChange
-                                    }
-                                    className="form-control"
-                                    placeholder="Enter username"
-                                    maxLength={100}
-                                    disabled={saving}
-                                />
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        type="text"
+                                        name="username"
+                                        value={form.username}
+                                        onFocus={() => setUsernameSuggestionsOpen(true)}
+                                        onChange={handleChange}
+                                        className="form-control"
+                                        placeholder="Enter username"
+                                        maxLength={100}
+                                        disabled={saving}
+                                        autoComplete="off"
+                                        aria-autocomplete="list"
+                                        aria-expanded={usernameSuggestionsOpen}
+                                    />
+                                    {usernameSuggestionsOpen && (
+                                        <div
+                                            role="listbox"
+                                            style={{
+                                                position: 'absolute',
+                                                zIndex: 30,
+                                                top: 'calc(100% + 4px)',
+                                                left: 0,
+                                                right: 0,
+                                                maxHeight: '220px',
+                                                overflowY: 'auto',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '8px',
+                                                background: '#fff',
+                                                boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)'
+                                            }}
+                                        >
+                                            {!form.platform_id ? (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    Select a platform to see username suggestions.
+                                                </div>
+                                            ) : !usernameQuery ? (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    Start typing to search usernames.
+                                                </div>
+                                            ) : usernameSuggestionsLoading ? (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    Searching usernames...
+                                                </div>
+                                            ) : usernameSuggestionError ? (
+                                                <div role="alert" style={{ padding: '10px 12px', color: '#b91c1c' }}>
+                                                    {usernameSuggestionError}
+                                                </div>
+                                            ) : usernameSuggestions.length ? (
+                                                usernameSuggestions.map((username) => (
+                                                    <button
+                                                        key={username}
+                                                        type="button"
+                                                        role="option"
+                                                        aria-selected={username === form.username}
+                                                        onClick={() => {
+                                                            setForm((previous) => ({ ...previous, username }));
+                                                            setUsernameSuggestionsOpen(false);
+                                                            setUsernameSuggestions([]);
+                                                        }}
+                                                        style={{
+                                                            display: 'block',
+                                                            width: '100%',
+                                                            padding: '10px 12px',
+                                                            border: 0,
+                                                            background: '#fff',
+                                                            color: '#1e293b',
+                                                            textAlign: 'left',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        {username}
+                                                    </button>
+                                                ))
+                                            ) : (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    No matching usernames found.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                                 {fieldErrors.username && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {fieldErrors.username}</small>}
 
                             </div>
@@ -1095,7 +1243,7 @@ const loadCustomer = async () => {
                 <Modal
                     isOpen
                     onClose={handleDuplicateNo}
-                    title="Customer already exists"
+                    title="Customer Already Exists!"
                     maxWidth="520px"
                     footer={
                         <>
@@ -1113,15 +1261,13 @@ const loadCustomer = async () => {
                                 onClick={handleDuplicateYes}
                                 disabled={saving}
                             >
-                                Yes, Add Vehicle
+                                Yes
                             </button>
                         </>
                     }
                 >
                     <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', color: '#334155' }}>
-                        Customer already exists with the same username and mobile number.
-                        <br />
-                        Do you want to add another vehicle under this customer?
+                        Customer already exists. Do you want to add a vehicle under the same customer?
                     </p>
                 </Modal>
             )}

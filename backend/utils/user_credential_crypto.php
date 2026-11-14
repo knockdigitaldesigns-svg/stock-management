@@ -2,14 +2,32 @@
 
 function getUserCredentialEncryptionKey(): string
 {
-    $configuredKey = getenv('EAGLETRAZER_CREDENTIAL_ENCRYPTION_KEY');
-    if (!is_string($configuredKey) || !preg_match('/\A[0-9a-fA-F]{64}\z/', $configuredKey)) {
-        throw new RuntimeException('User credential encryption is not configured.');
+    $keyFile = __DIR__ . '/../config/eagletrazer-credential-key.php';
+
+    if (!file_exists($keyFile)) {
+        throw new RuntimeException('KEY FILE DOES NOT EXIST: ' . $keyFile);
+    }
+
+    $configuredKey = require $keyFile;
+
+    if (!is_string($configuredKey)) {
+        throw new RuntimeException('KEY FILE DID NOT RETURN A STRING');
+    }
+
+    if (strlen($configuredKey) !== 64) {
+        throw new RuntimeException(
+            'KEY LENGTH IS ' . strlen($configuredKey) . ', EXPECTED 64'
+        );
+    }
+
+    if (!preg_match('/\A[0-9a-fA-F]{64}\z/', $configuredKey)) {
+        throw new RuntimeException('KEY FORMAT IS INVALID');
     }
 
     $key = hex2bin($configuredKey);
+
     if ($key === false || strlen($key) !== 32) {
-        throw new RuntimeException('User credential encryption is not configured.');
+        throw new RuntimeException('KEY CONVERSION FAILED');
     }
 
     return $key;

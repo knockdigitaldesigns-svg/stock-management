@@ -1,9 +1,9 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { formatDate, isDateKey } from './date';
+import { formatDateValue, isDateKey } from './date';
 
-const formatExportValue = (value, key) => isDateKey(key) ? formatDate(value) : (value ?? '-');
+const formatExportValue = (value, key) => isDateKey(key) ? formatDateValue(value) : (value ?? '-');
 
 export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}) => {
     const rawData = data || [];
@@ -15,7 +15,7 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
         const rows = [[options.combinedSheet.title || filename], []];
         if (options.summary) {
             rows.push([options.summaryTitle || 'Summary'], ['Metric', 'Value']);
-            options.summary.forEach((item) => rows.push([item.label, item.value ?? '-']));
+            options.summary.forEach((item) => rows.push([item.label, formatExportValue(item.value, item.label)]));
             rows.push([]);
         }
         (options.sections || []).forEach((section) => {
@@ -23,7 +23,7 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
             const sectionColumns = section.columns || (section.rows && section.rows[0] ? Object.keys(section.rows[0]).map((key) => ({ header: key, key })) : []);
             if (sectionColumns.length > 0) {
                 rows.push(sectionColumns.map((column) => column.header));
-                section.rows.forEach((row) => rows.push(sectionColumns.map((column) => row[column.key] ?? '-')));
+                section.rows.forEach((row) => rows.push(sectionColumns.map((column) => formatExportValue(row[column.key], column.key))));
             }
             rows.push([]);
         });
@@ -43,14 +43,17 @@ export const exportToExcel = (data, filename, sheetName = 'Sheet1', options = {}
     if (options.summary) {
         const summaryData = options.summary.map((item) => ({
             Metric: item.label,
-            Value: item.value ?? '-'
+            Value: formatExportValue(item.value, item.label)
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Summary');
     }
 
     (options.sections || []).forEach((section) => {
         if (section.rows && section.rows.length > 0) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(section.rows), section.name || 'Breakdown');
+            const rows = section.rows.map((row) => Object.fromEntries(
+                Object.entries(row).map(([key, value]) => [key, formatExportValue(value, key)])
+            ));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), section.name || 'Breakdown');
         }
     });
 
@@ -67,7 +70,7 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
     doc.setFontSize(16);
     doc.text(title, 14, 20);
     doc.setFontSize(10);
-    doc.text(`Generated on: ${formatDate(new Date())}`, 14, 28);
+    doc.text(`Generated on: ${formatDateValue(new Date())}`, 14, 28);
 
     let nextY = 35;
 
@@ -81,7 +84,7 @@ export const exportToPDF = (data, filename, title, columns, options = {}) => {
         }
         autoTable(doc, {
             head: [options.summary.map((item) => item.label)],
-            body: [options.summary.map((item) => item.value ?? '-')],
+            body: [options.summary.map((item) => formatExportValue(item.value, item.label))],
             startY: nextY,
             styles: { fontSize: 9, halign: 'center' },
             headStyles: { fillColor: [55, 48, 163] },

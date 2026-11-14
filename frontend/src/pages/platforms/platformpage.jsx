@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const PlatformPage = () => {
     const { hasPermission } = useAuth();
@@ -55,15 +56,9 @@ const PlatformPage = () => {
         setError('');
 
         try {
-            const response = await api.get('/platforms/list.php');
-
-            if (response.data.success) {
-                setPlatforms(response.data.data?.platforms || []);
-            } else {
-                triggerError(response.data.message || 'Unable to load platforms.');
-            }
+            setPlatforms(await fetchAllPaginatedRecords('/platforms/list.php', 'platforms'));
         } catch (err) {
-            triggerError(err.response?.data?.message || 'Unable to load platforms.');
+            triggerError(err.response?.data?.message || err.message || 'Unable to load platforms.');
         } finally {
             setLoading(false);
         }

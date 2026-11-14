@@ -421,23 +421,35 @@ const PaymentDetailsPart1Page = () => {
              * No Payment Mode:
              *
              * Sale Amount only
-             * -> Pending
-             * -> Finish customer flow
+             * -> Pending payment status
+             * -> Submit new customers for Admin verification
              */
             if (!goToPart2) {
                 const submission = buildCustomerSubmission(persistedSession);
-                const committed = await commitCustomerSubmission(submission, draftId);
-                await api.post('/customers/verification/finish.php', {
-                    submission_id: draftId,
-                    customer_id: committed.customerId,
-                    vehicle_id: committed.vehicleId,
-                    payment_id: committed.paymentId
-                });
-                sessionStorage.removeItem(storageKey);
-
-                setSuccess(
-                    'Payment saved as Pending.'
-                );
+                if (existingCustomerId > 0) {
+                    const committed = await commitCustomerSubmission(submission, draftId);
+                    await api.post('/customers/verification/finish.php', {
+                        submission_id: draftId,
+                        customer_id: committed.customerId,
+                        vehicle_id: committed.vehicleId,
+                        payment_id: committed.paymentId
+                    });
+                    sessionStorage.removeItem(storageKey);
+                    setSuccess('Payment saved as Pending.');
+                } else {
+                    const response = await api.post('/customers/verification/submit.php', {
+                        submission_id: draftId,
+                        submission_data: submission
+                    });
+                    if (!response.data?.success) {
+                        throw new Error(response.data?.message || 'Failed to submit customer for Admin verification.');
+                    }
+                    sessionStorage.setItem(storageKey, JSON.stringify({
+                        ...persistedSession,
+                        verification_status: 'Pending Verification'
+                    }));
+                    setSuccess('Customer submitted successfully for Admin verification.');
+                }
 
                 setTimeout(() => {
                     navigate(
