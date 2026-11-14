@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
+import DateInput from '../../../components/DateInput';
 import { PAYMENT_MODES } from '../../../constants/paymentModes';
 
 const localToday = () => {
@@ -235,7 +236,7 @@ const DealerSimActivationBulkPaymentModal = ({ selectedIds, onClose, onSuccess }
                 </div>
                 <div className="form-group">
                     <label className="form-label">Payment Date *</label>
-                    <input className="form-control" type="date" value={paymentDate} disabled={busy} onChange={(event) => setPaymentDate(event.target.value)} />
+                    <DateInput className="form-control" value={paymentDate} disabled={busy} onChange={setPaymentDate} allowFuture />
                 </div>
                 <div className="form-group dealer-sim-bulk-payment-remarks">
                     <label className="form-label">Remarks</label>

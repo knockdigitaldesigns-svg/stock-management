@@ -9,6 +9,7 @@ import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const VehicleTypesPage = () => {
     const { hasPermission } = useAuth();
@@ -68,23 +69,11 @@ const VehicleTypesPage = () => {
         setError('');
 
         try {
-            const response = await api.get(
-                '/vehicle_types/list.php'
-            );
-
-            if (response.data.success) {
-                setVehicleTypes(
-                    response.data.data?.vehicle_types || []
-                );
-            } else {
-                triggerError(
-                    response.data.message ||
-                    'Unable to load vehicle types.'
-                );
-            }
+            setVehicleTypes(await fetchAllPaginatedRecords('/vehicle_types/list.php', 'vehicle_types'));
         } catch (err) {
             triggerError(
                 err.response?.data?.message ||
+                err.message ||
                 'Unable to load vehicle types.'
             );
         } finally {

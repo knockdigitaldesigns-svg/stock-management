@@ -13,18 +13,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $currentUser = authenticate();
-
 $data = json_decode(file_get_contents('php://input'));
 
 if (!$data) {
     sendResponse(false, 'Invalid request data.', [], [], 400);
 }
 $verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
-if ($verificationSubmissionId > 0) {
-    requireAnyPermission(['customers.add', CUSTOMER_PAYMENT_VERIFICATION_PERMISSION]);
-} else {
-    requirePermission('customers.add');
+if ($verificationSubmissionId <= 0) {
+    sendResponse(false, 'A customer verification submission is required before creating a customer.', [], [], 403);
 }
+requireAnyPermission(['customers.add', CUSTOMER_PAYMENT_VERIFICATION_PERMISSION]);
 
 
 /*
@@ -227,9 +225,8 @@ if ($verificationSubmissionId > 0) {
     $draft = $draftStmt->get_result()->fetch_assoc();
     $draftStmt->close();
     $currentUserId = (int) ($currentUser['user_id'] ?? 0);
-    $isOwnerDraft = $draft && (int) $draft['submitter_user_id'] === $currentUserId && $draft['status'] === 'Draft';
     $isApplyingDraft = $draft && (int) ($draft['reviewer_user_id'] ?? 0) === $currentUserId && $draft['status'] === 'Applying';
-    if (!$draft || (!$isOwnerDraft && !$isApplyingDraft)) {
+    if (!$draft || !$isApplyingDraft) {
         $conn->rollback();
         $conn->close();
         sendResponse(false, 'This customer draft is not available for commit.', [], [], 403);
@@ -396,6 +393,37 @@ if ($existingSameMobile) {
     );
 }
 
+// A mobile number can belong to only one username within the selected platform.
+$stmt = $conn->prepare(
+    "SELECT id
+     FROM customers
+     WHERE platform_id = ?
+       AND TRIM(primary_mobile_no) = ?
+       AND LOWER(TRIM(username)) <> LOWER(?)
+     ORDER BY id ASC
+     LIMIT 1"
+);
+
+$stmt->bind_param('iss', $platformId, $primaryMobile, $username);
+$stmt->execute();
+$existingDifferentUsername = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+if ($existingDifferentUsername) {
+    $conn->rollback();
+    $conn->close();
+
+    sendResponse(
+        false,
+        'This mobile number is already registered with another username in this software. Please use the existing registered username.',
+        [
+            'code' => 'MOBILE_EXISTS_DIFFERENT_USERNAME'
+        ],
+        [],
+        409
+    );
+}
+
 // A username can identify only one customer per platform.
 $stmt = $conn->prepare(
     "SELECT id
@@ -459,9 +487,10 @@ $stmt = $conn->prepare(
         location,
         pincode,
         status,
+        verification_status,
         verification_submission_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0))"
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', NULLIF(?, 0))"
 );
 
 $stmt->bind_param(

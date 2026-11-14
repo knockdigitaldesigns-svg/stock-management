@@ -7,10 +7,12 @@ import { useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 import SimStatusSummaryCards from '../../components/SimStatusSummaryCards/SimStatusSummaryCards';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { useAuth } from '../../context/AuthContext';
+import { formatDate, formatDateTime } from '../../utils/date';
 import './renewalspage.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -19,9 +21,7 @@ const EMPTY_FILTERS = { search: '', customer_id: '', date_from: '', date_to: '',
 const EMPTY_FORM = { action: '', action_date: '', reactivation_date: '', validity_months: '', payment_amount: '', amount_paid: '0', payment_status: 'Not Paid', payment_mode: '', payment_date: '', transaction_id: '', notes: '', expired_to_safe_days: '', safe_to_deactive_days: '', installation_date: '' };
 
 const display = (value) => value === null || value === undefined || value === '' ? '-' : value;
-const formatDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '-';
-const formatDateTime = (value) => value ? `${formatDate(value)} ${String(value).slice(11, 19)}` : '-';
-const formatExportDate = (value) => value ? String(value).slice(0, 10).split('-').reverse().join('-') : '';
+const formatExportDate = (value) => value ? formatDate(value) : '';
 const protectSpreadsheetValue = (value) => {
     if (typeof value !== 'string') return value ?? '';
     return /^[\t\r\n ]*[=+\-@]/.test(value) ? `'${value}` : value;
@@ -54,7 +54,7 @@ const ModalGrid = ({ children }) => (
         {children}
     </div>
 );
-const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 16, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}><h4 style={{ margin: '0 0 14px', borderBottom: '1px solid #e2e8f0', paddingBottom: 9, color: '#17243b', fontSize: 14, fontWeight: 700 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : key === 'validity_months' && record?.[key] ? formatValidity(record[key]) : display(record?.[key]); const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <input className="form-control" type="date" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
+const InfoSection = ({ title, fields, record, inputStyle = false, onChange }) => <section style={{ marginBottom: 16, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}><h4 style={{ margin: '0 0 14px', borderBottom: '1px solid #e2e8f0', paddingBottom: 9, color: '#17243b', fontSize: 14, fontWeight: 700 }}>{title}</h4><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>{fields.map(([label, key, isDate]) => { const rawValue = isDate ? formatDate(record?.[key]) : key === 'validity_months' && record?.[key] ? formatValidity(record[key]) : display(record?.[key]); const inputValue = isDate ? String(record?.[key] || '').slice(0, 10) : String(record?.[key] ?? ''); const handleChange = (value) => onChange ? onChange(key, value) : (record[key] = value); return <div key={key}><strong>{label}</strong>{inputStyle ? isDate ? <DateInput className="form-control" value={inputValue} onChange={handleChange} allowFuture /> : <input className="form-control" type="text" defaultValue={inputValue} readOnly={false} onChange={(event) => handleChange(event.target.value)} /> : <div>{rawValue}</div>}</div>; })}</div></section>;
 
 const RenewalsPage = () => {
     const location = useLocation();
@@ -525,24 +525,24 @@ const RenewalsPage = () => {
                 {/* DATE FROM */}
                 <div className="filter-group">
                     <label className="filter-label">Renewal Date From</label>
-                    <input className="form-control filter-input" type="date" value={filters.date_from || ''} onChange={(event) => {
-                        if (filters.date_to && event.target.value > filters.date_to) {
+                    <DateInput className="form-control filter-input" value={filters.date_from || ''} onChange={(value) => {
+                        if (filters.date_to && value > filters.date_to) {
                             showGlobalError('From Date cannot be later than To Date.');
                             return;
                         }
-                        updateFilter('date_from', event.target.value);
+                        updateFilter('date_from', value);
                     }} aria-label="Renewal Date From" />
                 </div>
 
                 {/* DATE TO */}
                 <div className="filter-group">
                     <label className="filter-label">Renewal Date To</label>
-                    <input className="form-control filter-input" type="date" value={filters.date_to || ''} onChange={(event) => {
-                        if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                    <DateInput className="form-control filter-input" value={filters.date_to || ''} onChange={(value) => {
+                        if (filters.date_from && value && value < filters.date_from) {
                             showGlobalError('From Date cannot be later than To Date.');
                             return;
                         }
-                        updateFilter('date_to', event.target.value);
+                        updateFilter('date_to', value);
                     }} aria-label="Renewal Date To" />
                 </div>
 
@@ -595,7 +595,7 @@ const RenewalsPage = () => {
                     <Field label="Installation Person"><input className="form-control" value={selected.installation_person || ''} readOnly /></Field>
                     <Field label="Installation Person Type"><input className="form-control" value={selected.installation_person_type || ''} readOnly /></Field>
                     <Field label="Lead Closure"><input className="form-control" value={selected.lead_closure || ''} readOnly /></Field>
-                    <Field label="Installation Date"><input className="form-control" type="date" value={form.installation_date} onChange={(event) => setForm({ ...form, installation_date: event.target.value })} /></Field>
+                    <Field label="Installation Date"><DateInput className="form-control" value={form.installation_date} onChange={(value) => setForm({ ...form, installation_date: value })} allowFuture /></Field>
                 </ModalGrid>
                 {!form.action && form.installation_date && form.validity_months && calculatedDate !== '-' && (
                     <div style={{ marginTop: 12, padding: '9px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: 13, color: '#15803d' }}>
@@ -621,7 +621,7 @@ const RenewalsPage = () => {
         {form.action === 'Reactivate SIM' ? <>
             <ModalSection title="Reactivation Details">
                 <ModalGrid>
-                    <Field label="Reactivation Date *"><input className="form-control" type="date" required value={form.reactivation_date} onChange={(event) => setForm({ ...form, reactivation_date: event.target.value })} /></Field>
+                    <Field label="Reactivation Date *"><DateInput className="form-control" required value={form.reactivation_date} onChange={(value) => setForm({ ...form, reactivation_date: value })} allowFuture /></Field>
                     <Field label="Previous Expiry Date"><input className="form-control" readOnly value={formatDate(selected?.next_renewal_date)} /></Field>
                     <Field label="Validity *"><select className="form-control" value={form.validity_months} onChange={(event) => setForm({ ...form, validity_months: event.target.value })}><option value="">Select validity</option>{validities.map((validity) => <option key={validity} value={validity}>{formatValidity(validity)}</option>)}</select></Field>
                     <Field label="Next Expiry / Renewal Date"><input className="form-control" readOnly value={formatDate(calculatedDate)} /></Field>
@@ -635,7 +635,7 @@ const RenewalsPage = () => {
                     <Field label="Pending Amount"><input className="form-control" readOnly value={pending.toFixed(2)} /></Field>
                     <Field label="Payment Status"><input className="form-control" readOnly value={paymentStatus} /></Field>
                     <Field label="Payment Mode"><select className="form-control" value={form.payment_mode} onChange={(event) => setForm({ ...form, payment_mode: event.target.value })}><option value="">Select mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></Field>
-                    <Field label="Payment Date"><input className="form-control" type="date" value={form.payment_date} onChange={(event) => setForm({ ...form, payment_date: event.target.value })} /></Field>
+                    <Field label="Payment Date"><DateInput className="form-control" value={form.payment_date} onChange={(value) => setForm({ ...form, payment_date: value })} allowFuture /></Field>
                     <Field label={`Transaction ID${Number(form.amount_paid) > 0 && form.payment_mode !== 'Cash' ? ' *' : ''}`}><input className="form-control" type="text" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={form.transaction_id} onChange={(event) => setForm({ ...form, transaction_id: event.target.value.replace(/\D/g, '').slice(0, 6) })} /></Field>
                 </ModalGrid>
             </ModalSection>
@@ -654,7 +654,7 @@ const RenewalsPage = () => {
                     <Field label="Pending Amount"><input className="form-control" readOnly value={pending.toFixed(2)} /></Field>
                     <Field label="Payment Status"><input className="form-control" readOnly value={paymentStatus} /></Field>
                     <Field label="Payment Mode"><select className="form-control" value={form.payment_mode} onChange={(event) => setForm({ ...form, payment_mode: event.target.value })}><option value="">Select mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></Field>
-                    <Field label="Payment Date"><input className="form-control" type="date" value={form.payment_date} onChange={(event) => setForm({ ...form, payment_date: event.target.value })} /></Field>
+                    <Field label="Payment Date"><DateInput className="form-control" value={form.payment_date} onChange={(value) => setForm({ ...form, payment_date: value })} allowFuture /></Field>
                     <Field label={`Transaction ID${Number(form.amount_paid) > 0 && form.payment_mode !== 'Cash' ? ' *' : ''}`}><input className="form-control" type="text" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={form.transaction_id} onChange={(event) => setForm({ ...form, transaction_id: event.target.value.replace(/\D/g, '').slice(0, 6) })} /></Field>
                 </ModalGrid>
             </ModalSection>
@@ -662,7 +662,7 @@ const RenewalsPage = () => {
             <ModalSection title="Safe Custody Details">
                 <ModalGrid>
                     <Field label="Previous Expiry Date"><input className="form-control" readOnly value={formatDate(selected?.next_renewal_date)} /></Field>
-                    <Field label="Safe Custody Date *"><input className="form-control" type="date" required value={form.action_date} onChange={(event) => setForm({ ...form, action_date: event.target.value })} /></Field>
+                    <Field label="Safe Custody Date *"><DateInput className="form-control" required value={form.action_date} onChange={(value) => setForm({ ...form, action_date: value })} allowFuture /></Field>
                     <Field label="Remarks"><input className="form-control" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
                 </ModalGrid>
             </ModalSection>
@@ -690,7 +690,7 @@ const RenewalsPage = () => {
                     <Field label="Old Renewal Outstanding"><input className="form-control" readOnly value={`₹${oldRenewalPending.toFixed(2)}`} /></Field>
                     <Field label="Amount to Pay *"><input className="form-control" type="number" min="0.01" max={oldRenewalPending} step="0.01" value={oldRenewalPayment.amount_paid} onChange={(event) => setOldRenewalPayment({ ...oldRenewalPayment, amount_paid: event.target.value })} /><small>Outstanding after payment: ₹{oldRenewalRemaining.toFixed(2)}</small></Field>
                     <Field label="Payment Mode *"><select className="form-control" value={oldRenewalPayment.payment_mode} onChange={(event) => setOldRenewalPayment({ ...oldRenewalPayment, payment_mode: event.target.value })}><option value="">Select mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></Field>
-                    <Field label="Payment Date *"><input className="form-control" type="date" value={oldRenewalPayment.payment_date} onChange={(event) => setOldRenewalPayment({ ...oldRenewalPayment, payment_date: event.target.value })} /></Field>
+                    <Field label="Payment Date *"><DateInput className="form-control" value={oldRenewalPayment.payment_date} onChange={(value) => setOldRenewalPayment({ ...oldRenewalPayment, payment_date: value })} allowFuture /></Field>
                     <Field label={`Transaction ID${oldRenewalPayment.payment_mode !== 'Cash' ? ' *' : ''}`}><input className="form-control" type="text" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={oldRenewalPayment.transaction_id} onChange={(event) => setOldRenewalPayment({ ...oldRenewalPayment, transaction_id: event.target.value.replace(/\D/g, '').slice(0, 6) })} /></Field>
                     <div style={{ display: 'flex', alignItems: 'flex-end' }}><button className="btn btn-primary" type="button" disabled={saving} onClick={recordOldRenewalPayment}>{saving ? 'Recording...' : 'Record Old Payment'}</button></div>
                 </ModalGrid>}

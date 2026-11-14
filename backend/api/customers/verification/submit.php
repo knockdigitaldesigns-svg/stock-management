@@ -21,8 +21,7 @@ if ($submissionId <= 0 || !is_array($submissionData)) {
 }
 
 $paymentCount = 0;
-$requiresVerification = false;
-$firstVerifiedPayment = null;
+$firstPayment = null;
 $payments = [];
 if (is_array($submissionData['vehicles'] ?? null)) {
     foreach ($submissionData['vehicles'] as &$vehicle) {
@@ -47,21 +46,36 @@ foreach ($payments as &$payment) {
     }
     $computedStatus = $amountPaid >= $totalAmount
         ? 'Paid'
-        : ($amountPaid > 0 ? 'Partially Paid' : 'Not Paid');
+        : ($amountPaid > 0
+            ? 'Partially Paid'
+            : (($payment['payment_status'] ?? '') === 'Pending' ? 'Pending' : 'Not Paid'));
     $payment['amount_pending'] = round(max(0, $totalAmount - $amountPaid), 2);
     $payment['payment_status'] = $computedStatus;
     $paymentCount++;
-    if (in_array($computedStatus, ['Paid', 'Partially Paid'], true)) {
-        $requiresVerification = true;
-        $firstVerifiedPayment = $firstVerifiedPayment ?? $payment;
-    }
+    $firstPayment = $firstPayment ?? $payment;
 }
 unset($payment);
-if ($firstVerifiedPayment !== null) {
-    $submissionData['payment_part2'] = $firstVerifiedPayment;
+if ($firstPayment !== null) {
+    $submissionData['payment_part2'] = $firstPayment;
 }
-if ($paymentCount === 0 || !$requiresVerification) {
-    sendResponse(false, 'Only submissions with a Paid or Partially Paid Payment Part 2 require verification.', [], [], 400);
+if ($paymentCount === 0) {
+    $paymentPart1 = $submissionData['payment_part1'] ?? null;
+    if (!is_array($paymentPart1) && is_array($submissionData['vehicles'] ?? null)) {
+        foreach ($submissionData['vehicles'] as $vehicle) {
+            if (is_array($vehicle['payment_part1'] ?? null)) {
+                $paymentPart1 = $vehicle['payment_part1'];
+                break;
+            }
+        }
+    }
+    if (is_array($paymentPart1)
+        && (float) ($paymentPart1['total_sale_amount'] ?? $paymentPart1['totalSaleAmount'] ?? 0) > 0) {
+        $paymentCount = 1;
+        $submissionData['payment_status'] = 'Pending';
+    }
+}
+if ($paymentCount === 0) {
+    sendResponse(false, 'Payment details are required before submitting for verification.', [], [], 400);
 }
 $submissionJson = json_encode($submissionData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 if ($submissionJson === false || strlen($submissionJson) > 2000000) {
@@ -90,7 +104,7 @@ try {
     if ($draft['status'] === 'Pending Verification') {
         $conn->commit();
         $conn->close();
-        sendResponse(true, 'Payment details are already pending Admin verification.', ['submission_id' => $submissionId, 'status' => 'Pending Verification']);
+        sendResponse(true, 'Customer details are already pending Admin verification.', ['submission_id' => $submissionId, 'status' => 'Pending Verification']);
     }
     if (!in_array($draft['status'], ['Draft', 'Rejected'], true)) {
         throw new RuntimeException('This customer submission cannot be submitted again.');
@@ -114,7 +128,7 @@ try {
     insertCustomerPaymentVerificationHistory($conn, $submissionId, $draft['status'], 'Pending Verification', null, $userId);
     $conn->commit();
     $conn->close();
-    sendResponse(true, 'Payment details submitted successfully for Admin verification.', ['submission_id' => $submissionId, 'status' => 'Pending Verification']);
+    sendResponse(true, 'Customer submitted successfully for Admin verification.', ['submission_id' => $submissionId, 'status' => 'Pending Verification']);
 } catch (Throwable $error) {
     $conn->rollback();
     $conn->close();

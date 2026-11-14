@@ -547,32 +547,30 @@ const TableFilterBar = ({
                     <>
                         <div className="filter-group">
                             <label className="filter-label">From Date</label>
-                            <input
+                            <DateInput
                                 className="form-control filter-input"
-                                type="date"
                                 value={filters.date_from || ''}
-                                onChange={(e) => {
-                                    if (filters.date_to && e.target.value > filters.date_to) {
+                                onChange={(value) => {
+                                    if (filters.date_to && value > filters.date_to) {
                                         showError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    onChange({ ...filters, date_from: e.target.value });
+                                    onChange({ ...filters, date_from: value });
                                 }}
                                 aria-label="From Date"
                             />
                         </div>
                         <div className="filter-group">
                             <label className="filter-label">To Date</label>
-                            <input
+                            <DateInput
                                 className="form-control filter-input"
-                                type="date"
                                 value={filters.date_to || ''}
-                                onChange={(e) => {
-                                    if (filters.date_from && e.target.value && e.target.value < filters.date_from) {
+                                onChange={(value) => {
+                                    if (filters.date_from && value && value < filters.date_from) {
                                         showError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    onChange({ ...filters, date_to: e.target.value });
+                                    onChange({ ...filters, date_to: value });
                                 }}
                                 aria-label="To Date"
                             />

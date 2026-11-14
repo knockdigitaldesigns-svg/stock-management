@@ -4,6 +4,7 @@ import { Eye, RefreshCw, RotateCcw, Search, X } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
+import { formatDateValue } from '../../utils/date';
 import './CustomerPaymentVerificationPage.css';
 
 const detailSections = [
@@ -17,8 +18,25 @@ const detailSections = [
 
 const getSectionData = (data, key) => {
     if (key === 'customer') return data.customer || data.step1;
-    if (key === 'payment_part1') return data.payment_part1 || data.step4;
-    if (key === 'vehicle') return data.vehicle || data.vehicles;
+    const vehicles = Array.isArray(data.vehicles)
+        ? data.vehicles
+        : data.vehicle
+            ? [data.vehicle]
+            : [];
+    if (key === 'vehicle') return data.vehicle || data.vehicles || data.step2;
+    if (key === 'installation') {
+        const installations = vehicles.map((vehicle) => vehicle.installation).filter(Boolean);
+        return data.installation || data.step3 || (installations.length ? installations : null);
+    }
+    if (key === 'payment_part1') {
+        const payments = vehicles.map((vehicle) => vehicle.payment_part1).filter(Boolean);
+        return data.payment_part1 || data.step4 || (payments.length ? payments : null);
+    }
+    if (key === 'payment_part2') {
+        const payments = vehicles.map((vehicle) => vehicle.payment_part2).filter(Boolean);
+        return data.payment_part2 || data.paymentPart2 || data.step5 ||
+            (payments.length ? payments : null);
+    }
     return data[key];
 };
 
@@ -27,12 +45,6 @@ const formatValue = (value) => {
     if (typeof value === 'boolean') return value ? 'Yes' : 'No';
     if (typeof value === 'object') return JSON.stringify(value);
     return String(value);
-};
-
-const formatDate = (value) => {
-    if (!value) return '—';
-    const date = new Date(String(value).replace(' ', 'T'));
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
 const getCorrectionStep = (reason) => {
@@ -139,50 +151,59 @@ const MyCustomerVerificationsPage = () => {
             const item = response.data.data?.submission;
             const data = item?.submission_data || {};
             const correctionStep = getCorrectionStep(item?.rejection_reason);
-            if (Array.isArray(data.vehicles) && Number(item.existing_customer_id || 0) > 0) {
-                const customerRouteId = Number(item.existing_customer_id);
+            const existingCustomerId = Number(item.existing_customer_id || data.existing_customer_id || 0);
+            if (Array.isArray(data.vehicles) && existingCustomerId > 0) {
+                const customerRouteId = existingCustomerId;
                 sessionStorage.setItem(`customer_edit_verification_${customerRouteId}`, JSON.stringify({
                     id: Number(item.id),
+                    rejection_reason: item.rejection_reason || '',
                     submission_data: data
                 }));
                 navigate(`/customer-management/details/${customerRouteId}/edit?step=${correctionStep}`);
                 return;
             }
-            const normalized = Boolean(data.customer);
+            const normalized = Boolean(data.customer || data.step1);
+            const vehicle = data.vehicle || data.step2 ||
+                (Array.isArray(data.vehicles) ? data.vehicles[0] : null);
+            const installation = data.installation || data.step3 || vehicle?.installation || {};
+            const paymentPart1 = data.payment_part1 || data.step4 || vehicle?.payment_part1 || null;
             const sessionData = normalized
                 ? {
                     draft_id: Number(item.id),
-                    existing_customer_id: item.existing_customer_id || null,
-                    customer_id: item.existing_customer_id || -Number(item.id),
-                    step1: data.customer || {},
-                    step2: data.vehicle ? {
-                        vehicle_no: data.vehicle.vehicle_no || '',
-                        vehicle_type_id: data.vehicle.vehicle_type_id || '',
-                        imei_no: data.vehicle.imei_no || '',
-                        sim_no_1: data.vehicle.sim_no_1 || '',
-                        sim_no_2: data.vehicle.sim_no_2 || '',
-                        device_model_id: data.vehicle.device_model_id || '',
-                        validity_id: data.vehicle.validity_id || ''
+                    existing_customer_id: existingCustomerId || null,
+                    customer_id: existingCustomerId || -Number(item.id),
+                    step1: data.customer || data.step1 || {},
+                    step2: vehicle ? {
+                        ...vehicle,
+                        vehicle_no: vehicle.vehicle_no || '',
+                        vehicle_type_id: vehicle.vehicle_type_id || '',
+                        imei_no: vehicle.imei_no || '',
+                        sim_no_1: vehicle.sim_no_1 || '',
+                        sim_no_2: vehicle.sim_no_2 || '',
+                        device_model_id: vehicle.device_model_id || '',
+                        validity_id: vehicle.validity_id || vehicle.validity_months || ''
                     } : undefined,
-                    vehicle_record_id: data.vehicle?.vehicle_record_id || null,
-                    append_vehicle: Boolean(data.vehicle?.append_vehicle),
+                    vehicle_record_id: vehicle?.vehicle_record_id || vehicle?.id || null,
+                    append_vehicle: Boolean(vehicle?.append_vehicle),
                     new_vehicle_flow: true,
-                    step3: data.installation || {},
-                    step4: data.payment_part1 ? {
-                        totalSaleAmount: data.payment_part1.totalSaleAmount ?? data.payment_part1.total_sale_amount,
-                        transactionId: data.payment_part1.transactionId || data.payment_part1.transaction_id || '',
-                        paymentMode: data.payment_part1.paymentMode || data.payment_part1.payment_mode || ''
+                    step3: installation,
+                    step4: paymentPart1 ? {
+                        ...paymentPart1,
+                        totalSaleAmount: paymentPart1.totalSaleAmount ?? paymentPart1.total_sale_amount ?? '',
+                        transactionId: paymentPart1.transactionId || paymentPart1.transaction_id || '',
+                        paymentMode: paymentPart1.paymentMode || paymentPart1.payment_mode || ''
                     } : {},
-                    payment_part2: data.payment_part2 || null
+                    payment_part2: data.payment_part2 || data.paymentPart2 || data.step5 ||
+                        vehicle?.payment_part2 || null
                 }
                 : {
                     ...data,
                     draft_id: Number(item.id),
-                    existing_customer_id: item.existing_customer_id || null,
-                    customer_id: item.existing_customer_id || -Number(item.id),
+                    existing_customer_id: existingCustomerId || null,
+                    customer_id: existingCustomerId || -Number(item.id),
                     new_vehicle_flow: true
                 };
-            const customerRouteId = Number(item.existing_customer_id || 0) || -Number(item.id);
+            const customerRouteId = existingCustomerId || -Number(item.id);
             sessionStorage.setItem(`customer_creation_${customerRouteId}`, JSON.stringify(sessionData));
             const correctionRoutes = {
                 1: `/customer-management/details/${customerRouteId}`,
@@ -327,7 +348,7 @@ const MyCustomerVerificationsPage = () => {
                                 <td>{item.imei_numbers?.join(', ') || '—'}</td>
                                 <td>{item.sim_numbers?.join(', ') || '—'}</td>
                                 <td>{item.payment_status || '—'}</td>
-                                <td>{formatDate(item.submitted_at)}</td>
+                                <td>{formatDateValue(item.submitted_at)}</td>
                                 <td>{item.status}</td>
                                 <td>{item.rejection_reason || '—'}</td>
                                 <td>
@@ -387,8 +408,8 @@ const MyCustomerVerificationsPage = () => {
                     <div className="verification-details">
                         <div className="verification-meta">
                             <span><strong>Status:</strong> {selected.status}</span>
-                            <span><strong>Submitted At:</strong> {formatDate(selected.submitted_at)}</span>
-                            {selected.decided_at && <span><strong>Reviewed At:</strong> {formatDate(selected.decided_at)}</span>}
+                            <span><strong>Submitted At:</strong> {formatDateValue(selected.submitted_at)}</span>
+                            {selected.decided_at && <span><strong>Reviewed At:</strong> {formatDateValue(selected.decided_at)}</span>}
                             {selected.rejection_reason && (
                                 <div className="my-verification-rejection">
                                     <strong>Rejection reason</strong>

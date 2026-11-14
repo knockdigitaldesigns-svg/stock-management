@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
+import DateInput from '../../../components/DateInput';
 import { PAYMENT_MODES } from '../../../constants/paymentModes';
 import { formatDate } from '../../../utils/date';
 
@@ -559,7 +560,7 @@ const DealerSimActivationEditModal = ({
                 <div className="form-group">
                     <label className="form-label">Payment Date</label>
                     {isAdminEdit
-                        ? <input type="date" className="form-control" value={paymentDetails?.payment_date || ''} onChange={(event) => setPaymentDetails({ ...paymentDetails, payment_date: event.target.value })} />
+                        ? <DateInput className="form-control" value={paymentDetails?.payment_date || ''} onChange={(value) => setPaymentDetails({ ...paymentDetails, payment_date: value })} allowFuture />
                         : <input className="form-control" value={formatDate(allocation.payment_date)} readOnly />}
                 </div>
                 <div className="form-group">
@@ -627,7 +628,7 @@ const DealerSimActivationEditModal = ({
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Payment Date *</label>
-                                <input type="date" className="form-control" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
+                                <DateInput className="form-control" value={paymentDate} onChange={setPaymentDate} allowFuture />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Transaction ID{transactionRequired ? ' *' : ''}</label>
@@ -674,7 +675,7 @@ const DealerSimActivationEditModal = ({
                         </div>
                         <div className="form-group">
                             <label className="form-label">Payment Date</label>
-                            <input type="date" className="form-control" value={lifecyclePayment.paymentDate} onChange={(event) => setLifecyclePayment({ ...lifecyclePayment, paymentDate: event.target.value })} />
+                            <DateInput className="form-control" value={lifecyclePayment.paymentDate} onChange={(value) => setLifecyclePayment({ ...lifecyclePayment, paymentDate: value })} allowFuture />
                         </div>
                         <div className="form-group">
                             <label className="form-label">Transaction ID{lifecycleTransactionRequired ? ' *' : ''}</label>
@@ -719,7 +720,7 @@ const DealerSimActivationEditModal = ({
                         </div>
                         <div className="form-group">
                             <label className="form-label">Payment Date *</label>
-                            <input type="date" className="form-control" value={previousPendingPayment.paymentDate} onChange={(event) => setPreviousPendingPayment({ ...previousPendingPayment, paymentDate: event.target.value })} />
+                            <DateInput className="form-control" value={previousPendingPayment.paymentDate} onChange={(value) => setPreviousPendingPayment({ ...previousPendingPayment, paymentDate: value })} allowFuture />
                         </div>
                         <div className="form-group">
                             <label className="form-label">Transaction ID{previousPendingPayment.paymentMode !== 'Cash' ? ' *' : ''}</label>
@@ -761,7 +762,7 @@ const DealerSimActivationEditModal = ({
                 </div>
                 <div className="form-group">
                     <label className="form-label">Payment Date</label>
-                    <input type="date" className="form-control" value={lifecyclePayment.paymentDate} onChange={(event) => setLifecyclePayment({ ...lifecyclePayment, paymentDate: event.target.value })} />
+                    <DateInput className="form-control" value={lifecyclePayment.paymentDate} onChange={(value) => setLifecyclePayment({ ...lifecyclePayment, paymentDate: value })} allowFuture />
                 </div>
                 <div className="form-group">
                     <label className="form-label">Transaction ID{lifecycleTransactionRequired ? ' *' : ''}</label>
@@ -823,11 +824,11 @@ const DealerSimActivationEditModal = ({
                             </>
                         )}
                         {lifecycleAction === 'deactivate' && (
-                            <div className="form-group"><label className="form-label">Deactivation Date *</label><input type="date" className="form-control" value={form.deactivation_date} onChange={(event) => update('deactivation_date', event.target.value)} /></div>
+                            <div className="form-group"><label className="form-label">Deactivation Date *</label><DateInput className="form-control" value={form.deactivation_date} onChange={(value) => update('deactivation_date', value)} allowFuture /></div>
                         )}
                         {lifecycleAction === 'reactivate' && (
                             <>
-                                <div className="form-group"><label className="form-label">Actual Reactivation Date *</label><input type="date" className="form-control" value={form.reactivation_date} onChange={(event) => update('reactivation_date', event.target.value)} /></div>
+                                <div className="form-group"><label className="form-label">Actual Reactivation Date *</label><DateInput className="form-control" value={form.reactivation_date} onChange={(value) => update('reactivation_date', value)} allowFuture /></div>
                                 <div className="form-group"><label className="form-label">Previous Expiry Date</label><input className="form-control" value={formatDate(allocation.expiry_date)} readOnly /></div>
                                 <div className="form-group">
                                     <label className="form-label">SIM Validity *</label>
@@ -854,14 +855,14 @@ const DealerSimActivationEditModal = ({
                         <div className="form-group">
                             <label className="form-label">Given Date</label>
                             {isAdminEdit
-                                ? <input type="date" className="form-control" value={adminSimDetails?.given_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, given_date: event.target.value })} />
+                                ? <DateInput className="form-control" value={adminSimDetails?.given_date || ''} onChange={(value) => setAdminSimDetails({ ...adminSimDetails, given_date: value })} allowFuture />
                                 : <input className="form-control" value={formatDate(allocation.given_date)} readOnly />}
                         </div>
                         <div className="form-group"><label className="form-label">SIM Type</label><input className="form-control" value={allocation.sim_type || '-'} readOnly /></div>
                         <div className="form-group">
                             <label className="form-label">Activation Date</label>
                             {canEditActivationDetails
-                                ? <input type="date" className="form-control" value={form.activation_date} onChange={(event) => update('activation_date', event.target.value)} />
+                                ? <DateInput className="form-control" value={form.activation_date} onChange={(value) => update('activation_date', value)} allowFuture />
                                 : <input className="form-control" value={formatDate(allocation.activation_date)} readOnly />}
                         </div>
                         <div className="form-group">
@@ -879,7 +880,7 @@ const DealerSimActivationEditModal = ({
                             <div className="form-group">
                                 <label className="form-label">Deactivation Date</label>
                                 {isAdminEdit
-                                    ? <input type="date" className="form-control" value={adminSimDetails?.deactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, deactivation_date: event.target.value })} />
+                                    ? <DateInput className="form-control" value={adminSimDetails?.deactivation_date || ''} onChange={(value) => setAdminSimDetails({ ...adminSimDetails, deactivation_date: value })} allowFuture />
                                     : <input className="form-control" value={formatDate(allocation.deactivation_date)} readOnly />}
                             </div>
                         )}
@@ -887,7 +888,7 @@ const DealerSimActivationEditModal = ({
                             <div className="form-group">
                                 <label className="form-label">Reactivation Date</label>
                                 {isAdminEdit
-                                    ? <input type="date" className="form-control" value={adminSimDetails?.reactivation_date || ''} onChange={(event) => setAdminSimDetails({ ...adminSimDetails, reactivation_date: event.target.value })} />
+                                    ? <DateInput className="form-control" value={adminSimDetails?.reactivation_date || ''} onChange={(value) => setAdminSimDetails({ ...adminSimDetails, reactivation_date: value })} allowFuture />
                                     : <input className="form-control" value={formatDate(allocation.reactivation_date)} readOnly />}
                             </div>
                         )}

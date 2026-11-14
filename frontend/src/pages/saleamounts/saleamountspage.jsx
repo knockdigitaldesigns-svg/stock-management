@@ -9,6 +9,7 @@ import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const SaleAmountsPage = () => {
     const { hasPermission } = useAuth();
@@ -59,23 +60,11 @@ const SaleAmountsPage = () => {
         setError('');
 
         try {
-            const response = await api.get(
-                '/sale_amounts/list.php'
-            );
-
-            if (response.data?.success) {
-                setSaleAmounts(
-                    response.data?.data?.sale_amounts || []
-                );
-            } else {
-                triggerError(
-                    response.data?.message ||
-                    'Unable to load sale amounts.'
-                );
-            }
+            setSaleAmounts(await fetchAllPaginatedRecords('/sale_amounts/list.php', 'sale_amounts'));
         } catch (err) {
             triggerError(
                 err.response?.data?.message ||
+                err.message ||
                 'Unable to load sale amounts.'
             );
         } finally {

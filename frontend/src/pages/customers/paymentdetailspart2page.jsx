@@ -12,7 +12,6 @@ import { showGlobalError } from '../../context/ErrorContext';
 import { normalizeCurrency } from '../../utils/paymentValidation';
 import {
     buildCustomerSubmission,
-    commitCustomerSubmission,
     ensureCustomerSubmissionData,
     saveCustomerDraft
 } from '../../utils/customerSubmission';
@@ -632,36 +631,20 @@ const PaymentDetailsPart2Page = () => {
                 existingCustomerId,
                 submission
             );
-            const isVerificationRequired = ['Paid', 'Partially Paid'].includes(paymentPayload.payment_status);
-
-            if (isVerificationRequired) {
-                const response = await api.post('/customers/verification/submit.php', {
-                    submission_id: draftId,
-                    submission_data: submission
-                });
-                if (!response.data?.success) {
-                    throw new Error(response.data?.message || 'Failed to submit payment for Admin verification.');
-                }
-                sessionStorage.setItem(storageKey, JSON.stringify({
-                    ...stored,
-                    draft_id: draftId,
-                    payment_part2: paymentPayload,
-                    verification_status: 'Pending Verification'
-                }));
-                setSuccess('Payment details submitted successfully for Admin verification.');
-            } else {
-                const committed = await commitCustomerSubmission(submission, draftId);
-                await api.post('/customers/verification/finish.php', {
-                    submission_id: draftId,
-                    customer_id: committed.customerId,
-                    vehicle_id: committed.vehicleId,
-                    payment_id: committed.paymentId
-                });
-                sessionStorage.removeItem(storageKey);
-                setSuccess(isEditMode
-                    ? 'Customer payment details updated successfully.'
-                    : 'Customer saved successfully.');
+            const response = await api.post('/customers/verification/submit.php', {
+                submission_id: draftId,
+                submission_data: submission
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to submit customer for Admin verification.');
             }
+            sessionStorage.setItem(storageKey, JSON.stringify({
+                ...stored,
+                draft_id: draftId,
+                payment_part2: paymentPayload,
+                verification_status: 'Pending Verification'
+            }));
+            setSuccess('Customer submitted successfully for Admin verification.');
 
             setTimeout(() => {
                 navigate(
@@ -716,16 +699,22 @@ const PaymentDetailsPart2Page = () => {
             const submission = buildCustomerSubmission(stored, pendingPayload);
             const existingCustomerId = Number(submission.existing_customer_id || 0);
             const draftId = await saveCustomerDraft(stored.draft_id, existingCustomerId, submission);
-            const committed = await commitCustomerSubmission(submission, draftId);
-            await api.post('/customers/verification/finish.php', {
+            const response = await api.post('/customers/verification/submit.php', {
                 submission_id: draftId,
-                customer_id: committed.customerId,
-                vehicle_id: committed.vehicleId,
-                payment_id: committed.paymentId
+                submission_data: submission
             });
-            sessionStorage.removeItem(storageKey);
-
-            navigate('/customer-management/details');
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to submit customer for Admin verification.');
+            }
+            sessionStorage.setItem(storageKey, JSON.stringify({
+                ...stored,
+                draft_id: draftId,
+                payment_part2: pendingPayload,
+                verification_status: 'Pending Verification'
+            }));
+            setShowPendingModal(false);
+            setSuccess('Customer submitted successfully for Admin verification.');
+            setTimeout(() => navigate('/customer-management/details'), 400);
         } catch (err) {
             console.error('Pending payment save error:', err);
             triggerError(
@@ -1290,7 +1279,7 @@ const PaymentDetailsPart2Page = () => {
                                 marginBottom: '12px'
                             }}
                         >
-                            Save as Pending Payment?
+                            Submit for Admin Verification?
                         </div>
                         <p
                             style={{
@@ -1300,7 +1289,7 @@ const PaymentDetailsPart2Page = () => {
                                 lineHeight: '1.5'
                             }}
                         >
-                            This user is saved as pending payment.
+                            The customer will remain pending until an Admin approves the verification request.
                         </p>
                         <div
                             style={{
@@ -1323,7 +1312,7 @@ const PaymentDetailsPart2Page = () => {
                                 onClick={handlePendingOk}
                                 disabled={saving}
                             >
-                                {saving ? 'Saving...' : 'OK'}
+                                {saving ? 'Submitting...' : 'Submit'}
                             </button>
                         </div>
                     </div>

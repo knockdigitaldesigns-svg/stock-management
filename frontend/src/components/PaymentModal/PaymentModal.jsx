@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../../services/api';
 import Modal from '../Modal/Modal';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
+import DateInput from '../DateInput';
 import { formatDate } from '../../utils/date';
 
 const money = (value) => `₹${Number(value || 0).toFixed(2)}`;
@@ -302,7 +303,7 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 16 }}>
                         <div className="form-group"><label className="form-label">Payment Mode *</label><select className="form-control" value={paymentMode} disabled={busy} onChange={(event) => setPaymentMode(event.target.value)}><option value="">Select payment mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></div>
-                        <div className="form-group"><label className="form-label">Payment Date *</label><input className="form-control" type="date" value={paymentDate} disabled={busy} onChange={(event) => setPaymentDate(event.target.value)} /></div>
+                        <div className="form-group"><label className="form-label">Payment Date *</label><DateInput className="form-control" value={paymentDate} disabled={busy} onChange={setPaymentDate} /></div>
                         <div className="form-group"><label className="form-label">Transaction ID{paymentMode && paymentMode !== 'Cash' ? ' *' : ''}</label><input className="form-control" type="text" inputMode="numeric" maxLength={6} value={transactionId} disabled={busy || paymentMode === 'Cash'} onChange={(event) => setTransactionId(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={paymentMode === 'Cash' ? 'Not required' : '6 digits'} /></div>
                         <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Remarks</label><textarea className="form-control" rows="2" value={remarks} disabled={busy} onChange={(event) => setRemarks(event.target.value)} /></div>
                     </div>
@@ -318,7 +319,7 @@ const PaymentModal = ({ dealer, onClose, onSuccess }) => {
                         <div className="form-group"><label className="form-label">Amount to Pay *</label><input className="form-control" type="number" min="0.01" max={Math.max(0, Number(individual.total_amount || 0) - Number(individual.amount_paid || 0))} step="0.01" value={amountPaid} disabled={busy} onChange={(event) => setAmountPaid(event.target.value)} /></div>
                         <div className="form-group"><label className="form-label">Payment Mode *</label><select className="form-control" value={paymentMode} disabled={busy} onChange={(event) => setPaymentMode(event.target.value)}><option value="">Select payment mode</option>{PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></div>
                         <div className="form-group"><label className="form-label">Transaction ID{paymentMode !== 'Cash' ? ' *' : ''}</label><input className="form-control" type="text" inputMode="numeric" maxLength={6} value={transactionId} disabled={busy || paymentMode === 'Cash'} onChange={(event) => setTransactionId(event.target.value.replace(/\D/g, '').slice(0, 6))} /></div>
-                        <div className="form-group"><label className="form-label">Payment Date *</label><input className="form-control" type="date" value={paymentDate} disabled={busy} onChange={(event) => setPaymentDate(event.target.value)} /></div>
+                        <div className="form-group"><label className="form-label">Payment Date *</label><DateInput className="form-control" value={paymentDate} disabled={busy} onChange={setPaymentDate} /></div>
                         <div className="form-group"><label className="form-label">Remarks</label><textarea className="form-control" rows="2" value={remarks} disabled={busy} onChange={(event) => setRemarks(event.target.value)} /></div>
                     </>
                 ) : (

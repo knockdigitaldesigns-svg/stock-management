@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const SimValidityPage = () => {
     const { hasPermission } = useAuth();
@@ -33,10 +34,9 @@ const SimValidityPage = () => {
     const fetchValidities = async () => {
         setLoading(true);
         try {
-            const response = await api.get('/sim_validities/list.php');
-            if (response.data.success) setValidities(response.data.data?.validities || []);
+            setValidities(await fetchAllPaginatedRecords('/sim_validities/list.php', 'validities'));
         } catch (err) {
-            triggerError(err.response?.data?.message || 'Unable to load SIM validities.');
+            triggerError(err.response?.data?.message || err.message || 'Unable to load SIM validities.');
         } finally {
             setLoading(false);
         }
@@ -291,4 +291,3 @@ await fetchValidities();
 };
 
 export default SimValidityPage;
-

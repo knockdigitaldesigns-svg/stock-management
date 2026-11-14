@@ -3,6 +3,8 @@ import { Eye, RefreshCw, Search, RotateCcw } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
+import { formatDateTime, formatDateValue, isDateKey } from '../../utils/date';
 import './HistoryPage.css';
 
 const emptyFilters = { search: '', module: '', action: '', date_from: '', date_to: '', changed_by: '' };
@@ -14,28 +16,32 @@ const FIELD_LABELS = {
     lead_closure_id: 'Lead Closure', installation_person_id: 'Installation Person', record_snapshot: 'Record Snapshot'
 };
 
-const formatDateTime = (value) => {
-    if (!value) return '-';
-    const date = new Date(String(value).replace(' ', 'T'));
-    if (Number.isNaN(date.getTime())) return value;
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const hours = date.getHours();
-    return `${day}-${month}-${date.getFullYear()} ${String(hours % 12 || 12).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
-};
 const fieldLabel = (field) => FIELD_LABELS[field] || String(field || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const actionLabel = (action) => action === 'Create' ? 'Add' : action;
 const parseValue = (value) => {
     if (value === null || value === undefined || value === '') return null;
     try { return JSON.parse(value); } catch { return value; }
 };
-const displayValue = (value) => {
+const formatStructuredDates = (value, key = '') => {
+    if (Array.isArray(value)) return value.map((item) => formatStructuredDates(item, key));
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
+            childKey,
+            formatStructuredDates(childValue, childKey)
+        ]));
+    }
+    return isDateKey(key) ? formatDateValue(value) : value;
+};
+const displayValue = (value, key = '') => {
     const parsed = parseValue(value);
     if (parsed === null) return '-';
-    return typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : String(parsed);
+    if (typeof parsed === 'object') return JSON.stringify(formatStructuredDates(parsed, key), null, 2);
+    return isDateKey(key) ? formatDateValue(parsed) : String(parsed);
 };
 const cleanSnapshot = (snapshot) => Object.fromEntries(Object.entries(snapshot || {}).filter(([key]) => key !== 'id' && !key.endsWith('_id')));
-const auditDisplayValue = (record, key) => record?.[key] !== undefined ? displayValue(record[key]) : displayValue(record?.[key === 'old_display_value' ? 'old_value' : 'new_value']);
+const auditDisplayValue = (record, key) => record?.[key] !== undefined
+    ? displayValue(record[key], record.field_changed)
+    : displayValue(record?.[key === 'old_display_value' ? 'old_value' : 'new_value'], record.field_changed);
 const arrayValue = (value) => {
     const parsed = parseValue(value);
     return Array.isArray(parsed) ? parsed : [];
@@ -68,7 +74,7 @@ const SnapshotView = ({ snapshot, title }) => {
     if (typeof snapshot === 'string') snapshot = parseValue(snapshot);
     const sections = snapshotSections(snapshot);
     if (!sections.length) return null;
-    return <div className="history-snapshot"><h4>{title}</h4>{sections.map((section) => <section key={section.label}><h5>{section.label}</h5>{section.rows.map((row, index) => <dl key={`${section.label}-${index}`}>{Object.entries(row || {}).filter(([key]) => key !== 'id').map(([key, value]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(value)}</dd></div>)}</dl>)}</section>)}</div>;
+    return <div className="history-snapshot"><h4>{title}</h4>{sections.map((section) => <section key={section.label}><h5>{section.label}</h5>{section.rows.map((row, index) => <dl key={`${section.label}-${index}`}>{Object.entries(row || {}).filter(([key]) => key !== 'id').map(([key, value]) => <div key={key}><dt>{fieldLabel(key)}</dt><dd>{displayValue(value, key)}</dd></div>)}</dl>)}</section>)}</div>;
 };
 
 const HistoryPage = () => {
@@ -145,24 +151,24 @@ const HistoryPage = () => {
                         {/* DATE FROM */}
                         <div className="filter-group">
                             <label className="filter-label">From Date</label>
-                            <input className="form-control filter-input" type="date" value={filters.date_from} onChange={(event) => {
-                                if (filters.date_to && event.target.value > filters.date_to) {
+                            <DateInput className="form-control filter-input" value={filters.date_from} onChange={(value) => {
+                                if (filters.date_to && value > filters.date_to) {
                                     setError('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter('date_from', event.target.value);
+                                updateFilter('date_from', value);
                             }} aria-label="Date from" />
                         </div>
 
                         {/* DATE TO */}
                         <div className="filter-group">
                             <label className="filter-label">To Date</label>
-                            <input className="form-control filter-input" type="date" value={filters.date_to} onChange={(event) => {
-                                if (filters.date_from && event.target.value && event.target.value < filters.date_from) {
+                            <DateInput className="form-control filter-input" value={filters.date_to} onChange={(value) => {
+                                if (filters.date_from && value && value < filters.date_from) {
                                     setError('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter('date_to', event.target.value);
+                                updateFilter('date_to', value);
                             }} aria-label="Date to" />
                         </div>
 

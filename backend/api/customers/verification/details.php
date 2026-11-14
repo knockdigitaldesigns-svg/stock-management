@@ -382,6 +382,14 @@ if (!$displayPaymentPart2 && is_array($snapshot['payment_part2'] ?? null)) {
     $payment2 = $snapshot['payment_part2'];
     $displayPaymentPart2[] = customerVerificationPayment($payment2, $resolvePaymentVehicle($payment2), true);
 }
+if (!$displayPaymentPart2 && !empty($snapshot['payment_status'])) {
+    $displayPaymentPart2[] = [
+        'Vehicle' => count($vehicleAssociations) === 1
+            ? $vehicleAssociations[0]['label']
+            : 'Customer-level payment',
+        'Payment Status' => $snapshot['payment_status']
+    ];
+}
 $row['display_data'] = [
     'customer' => $customerDisplay,
     'vehicle' => $displayVehicles,

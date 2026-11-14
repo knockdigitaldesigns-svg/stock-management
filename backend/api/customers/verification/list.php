@@ -8,7 +8,8 @@ handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, 'Method not allowed.', [], [], 405);
 }
-requireCustomerPaymentVerificationReviewer();
+$reviewer = requireCustomerPaymentVerificationReviewer();
+$canDecide = isSuperAdminUser((int) ($reviewer['user_id'] ?? 0));
 
 $status = trim((string) ($_GET['status'] ?? 'Pending Verification'));
 $search = trim((string) ($_GET['search'] ?? ''));
@@ -90,6 +91,7 @@ while ($row = $result->fetch_assoc()) {
     }
     $customer = $detail['customer'] ?? [];
     $payment = $detail['payment_part2'] ?? null;
+    $paymentStatus = '';
     if (!is_array($payment) && is_array($detail['vehicles'] ?? null)) {
         foreach ($detail['vehicles'] as $vehicle) {
             if (is_array($vehicle['payment_part2'] ?? null)) {
@@ -98,7 +100,44 @@ while ($row = $result->fetch_assoc()) {
             }
         }
     }
+    if (is_array($payment)) {
+        $paymentStatus = (string) ($payment['payment_status'] ?? '');
+    }
+    if ($paymentStatus === '') {
+        $paymentPart1 = $detail['payment_part1'] ?? null;
+        if (!is_array($paymentPart1) && is_array($detail['vehicles'] ?? null)) {
+            foreach ($detail['vehicles'] as $vehicle) {
+                if (is_array($vehicle['payment_part1'] ?? null)) {
+                    $paymentPart1 = $vehicle['payment_part1'];
+                    break;
+                }
+            }
+        }
+        if (is_array($paymentPart1)) {
+            $payment = $paymentPart1;
+            $paymentStatus = (string) ($detail['payment_status'] ?? 'Pending');
+        }
+    }
     $payment = is_array($payment) ? $payment : [];
+    $platformName = trim((string) ($customer['platform_name'] ?? ''));
+    if ($platformName === '' && (int) ($customer['platform_id'] ?? 0) > 0) {
+        $platformStmt = $conn->prepare('SELECT platform_name FROM platforms WHERE id = ? LIMIT 1');
+        if (!$platformStmt) {
+            $stmt->close();
+            $conn->close();
+            sendResponse(false, 'Unable to prepare verification platform lookup.', [], [], 500);
+        }
+        $platformId = (int) $customer['platform_id'];
+        $platformStmt->bind_param('i', $platformId);
+        if (!$platformStmt->execute()) {
+            $platformStmt->close();
+            $stmt->close();
+            $conn->close();
+            sendResponse(false, 'Unable to resolve verification platform.', [], [], 500);
+        }
+        $platformName = (string) ($platformStmt->get_result()->fetch_assoc()['platform_name'] ?? '');
+        $platformStmt->close();
+    }
     $submissions[] = [
         'id' => (int) $row['id'],
         'submission_type' => ($detail['source'] ?? '') === 'courier' ? 'Courier Request' : 'Customer Payment',
@@ -107,14 +146,15 @@ while ($row = $result->fetch_assoc()) {
         'status' => $row['status'],
         'customer_name' => (string) ($customer['username'] ?? $customer['customer_name'] ?? '—'),
         'primary_mobile_no' => (string) ($customer['primary_mobile_no'] ?? ''),
-        'platform_name' => (string) ($customer['platform_name'] ?? ''),
+        'platform_name' => $platformName,
         'location' => (string) ($customer['location'] ?? ''),
-        'payment_status' => (string) ($payment['payment_status'] ?? ''),
-        'total_sale_amount' => (float) ($payment['total_sale_amount'] ?? 0),
+        'payment_status' => $paymentStatus,
+        'total_sale_amount' => (float) ($payment['total_sale_amount'] ?? $payment['totalSaleAmount'] ?? 0),
         'submitted_by' => (string) ($row['submitted_by'] ?? ''),
         'reviewed_by' => (string) ($row['reviewed_by'] ?? ''),
         'submitted_at' => $row['submitted_at'] ?? $row['created_at'],
-        'rejection_reason' => $row['rejection_reason']
+        'rejection_reason' => $row['rejection_reason'],
+        'can_decide' => $canDecide && in_array($row['status'], ['Pending Verification', 'Applying'], true)
     ];
 }
 $stmt->close();
@@ -136,6 +176,7 @@ $conn->close();
 sendResponse(true, 'Verification submissions fetched.', [
     'submissions' => $submissions,
     'counts' => $counts,
+    'can_decide' => $canDecide,
     'pagination' => [
         'total' => $total,
         'page' => $page,

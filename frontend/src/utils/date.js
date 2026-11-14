@@ -69,6 +69,39 @@ export const formatDate = (value) => {
     return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}`;
 };
 
+export const formatDateTime = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+
+    if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return '-';
+        return `${formatDate(value)} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+    }
+
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (match) {
+        const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+        const year = Number(yearText);
+        const month = Number(monthText);
+        const day = Number(dayText);
+        const hour = Number(hourText);
+        const minute = Number(minuteText);
+        const second = secondText === undefined ? null : Number(secondText);
+        if (!isValidDateParts(year, month, day) || hour > 23 || minute > 59 || (second !== null && second > 59)) {
+            return '-';
+        }
+        const time = `${pad(hour)}:${pad(minute)}${second === null ? '' : `:${pad(second)}`}`;
+        return `${pad(day)}-${pad(month)}-${year} ${time}`;
+    }
+
+    return formatDate(value);
+};
+
+export const formatDateValue = (value) =>
+    /[T\s]\d{1,2}:\d{2}/.test(String(value ?? ''))
+        ? formatDateTime(value)
+        : formatDate(value);
+
 export const parseDate = (value) => {
     if (value === null || value === undefined || value === '') return '';
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -89,4 +122,7 @@ export const parseDate = (value) => {
     return '';
 };
 
-export const isDateKey = (key) => /(^|_)(date|at)$|date/i.test(String(key));
+export const isDateKey = (key) => {
+    const normalized = String(key).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+    return /(?:^|[^a-z0-9])(?:date|datetime|time|timestamp|at|on)(?=$|[^a-z0-9])/.test(normalized);
+};

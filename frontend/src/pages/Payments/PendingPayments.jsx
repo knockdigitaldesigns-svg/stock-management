@@ -4,6 +4,7 @@ import api from '../../services/api';
 import { formatDate } from '../../utils/date';
 import { exportToExcel, exportToPDF } from '../../utils/export';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 
 const PendingPayments = () => {
     const [rows, setRows] = useState([]);
@@ -334,32 +335,30 @@ const PendingPayments = () => {
 
                     <div className="filter-group">
                         <label className="filter-label">Date From</label>
-                        <input
-                            type="date"
+                        <DateInput
                             className="form-control filter-input"
                             value={dateFrom}
-                            onChange={(e) => {
-                                if (dateTo && e.target.value > dateTo) {
+                            onChange={(value) => {
+                                if (dateTo && value > dateTo) {
                                     alert('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter(setDateFrom, e.target.value);
+                                updateFilter(setDateFrom, value);
                             }}
                         />
                     </div>
 
                     <div className="filter-group">
                         <label className="filter-label">Date To</label>
-                        <input
-                            type="date"
+                        <DateInput
                             className="form-control filter-input"
                             value={dateTo}
-                            onChange={(e) => {
-                                if (dateFrom && e.target.value && e.target.value < dateFrom) {
+                            onChange={(value) => {
+                                if (dateFrom && value && value < dateFrom) {
                                     alert('From Date cannot be later than To Date.');
                                     return;
                                 }
-                                updateFilter(setDateTo, e.target.value);
+                                updateFilter(setDateTo, value);
                             }}
                         />
                     </div>

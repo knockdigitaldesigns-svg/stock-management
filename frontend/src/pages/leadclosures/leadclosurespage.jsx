@@ -9,6 +9,7 @@ import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { formatDate } from '../../utils/date';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const LeadClosuresPage = () => {
     const { hasPermission } = useAuth();
@@ -52,21 +53,11 @@ const LeadClosuresPage = () => {
         setError('');
 
         try {
-            const response = await api.get('/lead_closures/list.php');
-
-            if (response.data?.success) {
-                setLeadClosures(
-                    response.data?.data?.lead_closures || []
-                );
-            } else {
-                triggerError(
-                    response.data?.message ||
-                    'Unable to load lead closures.'
-                );
-            }
+            setLeadClosures(await fetchAllPaginatedRecords('/lead_closures/list.php', 'lead_closures'));
         } catch (err) {
             triggerError(
                 err.response?.data?.message ||
+                err.message ||
                 'Unable to load lead closures.'
             );
         } finally {

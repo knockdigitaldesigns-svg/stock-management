@@ -16,7 +16,9 @@ import { useAuth } from '../../context/AuthContext';
 import CustomerExcelUploadModal from './CustomerExcelUploadModal';
 import { showGlobalError } from '../../context/ErrorContext';
 import Pagination from '../../components/Pagination/Pagination';
+import DateInput from '../../components/DateInput';
 import Modal from '../../components/Modal/Modal';
+import { formatDate, getTodayDate } from '../../utils/date';
 
 const CustomerDetailsPage = () => {
 
@@ -75,10 +77,8 @@ const CustomerDetailsPage = () => {
         const formattedDates = [...new Set(dates
             .map((date) => String(date).trim())
             .filter(Boolean)
-            .map((date) => {
-                const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
-                return match ? `${match[3]}-${match[2]}-${match[1]}` : '';
-            })
+            .map((date) => formatDate(date))
+            .filter((date) => date !== '-')
             .filter(Boolean))];
 
         return formattedDates.length ? formattedDates.join(', ') : '—';
@@ -443,7 +443,9 @@ const CustomerDetailsPage = () => {
     const handleExport = async () => {
         let exportCustomers = [];
         try {
-            const response = await api.get('/customers/list.php', { params: appliedFilters });
+            const response = await api.get('/customers/list.php', {
+                params: { ...appliedFilters, all: 1 }
+            });
             if (!response.data?.success) {
                 throw new Error(response.data?.message || 'Failed to export customer records.');
             }
@@ -793,37 +795,35 @@ const CustomerDetailsPage = () => {
                         {/* DATE FROM */}
                         <div className="filter-group">
                             <label className="filter-label">From Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="form-control filter-input"
                                 value={dateFrom}
-                                onChange={e => {
-                                    if (dateTo && e.target.value > dateTo) {
+                                onChange={value => {
+                                    if (dateTo && value > dateTo) {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    setDateFrom(e.target.value)
+                                    setDateFrom(value)
                                 }}
-                                max={dateTo || new Date().toISOString().split('T')[0]}
+                                max={dateTo || getTodayDate()}
                             />
                         </div>
 
                         {/* DATE TO */}
                         <div className="filter-group">
                             <label className="filter-label">To Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 className="form-control filter-input"
                                 value={dateTo}
-                                onChange={e => {
-                                    if (dateFrom && e.target.value && e.target.value < dateFrom) {
+                                onChange={value => {
+                                    if (dateFrom && value && value < dateFrom) {
                                         showGlobalError('From Date cannot be later than To Date.');
                                         return;
                                     }
-                                    setDateTo(e.target.value)
+                                    setDateTo(value)
                                 }}
                                 min={dateFrom || undefined}
-                                max={new Date().toISOString().split('T')[0]}
+                                max={getTodayDate()}
                             />
                         </div>
 
