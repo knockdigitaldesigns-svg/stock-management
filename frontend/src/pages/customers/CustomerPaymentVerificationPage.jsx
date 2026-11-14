@@ -20,7 +20,8 @@ const detailSections = [
     ['vehicle', 'Vehicle & Device Details'],
     ['installation', 'Installation Details'],
     ['payment_part1', 'Payment Details — Part 1'],
-    ['payment_part2', 'Payment Details — Part 2']
+    ['payment_part2', 'Payment Details — Part 2'],
+    ['installment_request', 'Installment Request']
 ];
 
 const fieldLabels = {
@@ -67,6 +68,10 @@ const fieldLabels = {
     amountPaid: 'Amount Paid',
     amount_pending: 'Amount Pending',
     amountPending: 'Amount Pending',
+    current_total_amount: 'Current Total Amount',
+    current_amount_paid: 'Current Amount Paid',
+    current_amount_pending: 'Current Amount Pending',
+    current_payment_status: 'Current Payment Status',
     payment_status: 'Payment Status',
     paymentStatus: 'Payment Status',
     payment_mode: 'Payment Mode',
@@ -112,7 +117,8 @@ const formatDetailValue = (label, value) => {
     if (
         ['Total Sale Amount', 'Device Charge', 'Software Charge', 'Technician Charge',
             'SIM Charge', 'Courier Charge', 'Courier Payment Amount', 'Total Amount',
-            'Amount Paid', 'Amount Pending'].includes(label) &&
+            'Amount Paid', 'Amount Pending', 'Installment Amount',
+            'Current Total Amount', 'Current Amount Paid', 'Current Amount Pending'].includes(label) &&
         Number.isFinite(Number(parsed))
     ) {
         return Number(parsed).toLocaleString('en-IN', {
@@ -308,7 +314,13 @@ const CustomerPaymentVerificationPage = () => {
                 throw new Error(decision.data?.message || 'Unable to start approval.');
             }
             approvalStarted = decision.data?.data?.status === 'Applying';
-            const commit = submission.submission_data?.legacy_customer_review
+            const commit = submission.submission_data?.source === 'payment_installment'
+                ? {
+                    customerId: Number(submission.existing_customer_id || submission.linked_customer_id || 0),
+                    vehicleId: Number(submission.submission_data?.vehicle?.vehicle_record_id || submission.linked_vehicle_id || 0),
+                    paymentId: Number(submission.submission_data?.payment_installment?.payment_id || submission.linked_payment_id || 0)
+                }
+                : submission.submission_data?.legacy_customer_review
                 ? {
                     customerId: Number(submission.linked_customer_id || 0),
                     vehicleId: Number(submission.linked_vehicle_id || 0),
@@ -594,7 +606,7 @@ const CustomerPaymentVerificationPage = () => {
                             <th>Mobile</th>
                             <th>Platform</th>
                             <th>Location</th>
-                            <th>Total Sale</th>
+                            <th>Installment / Sale Amount</th>
                             <th>Payment Status</th>
                             <th>Submitted By</th>
                             <th>Submitted At</th>
@@ -796,6 +808,8 @@ const CustomerPaymentVerificationPage = () => {
                                 <h3>{title}</h3>
                                 {key.startsWith('payment_')
                                     ? renderPaymentDetails(data[key] || [])
+                                    : key === 'installment_request'
+                                        ? renderStructuredValue(data[key])
                                     : renderStructuredValue(data[key])}
                             </section>
                         ))}

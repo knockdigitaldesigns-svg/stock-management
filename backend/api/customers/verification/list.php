@@ -138,9 +138,17 @@ while ($row = $result->fetch_assoc()) {
         $platformName = (string) ($platformStmt->get_result()->fetch_assoc()['platform_name'] ?? '');
         $platformStmt->close();
     }
+    $submissionType = 'Customer Payment';
+    if (($detail['source'] ?? '') === 'courier') {
+        $submissionType = 'Courier Request';
+    } elseif (($detail['source'] ?? '') === 'payment_installment') {
+        $submissionType = 'Payment Installment';
+    } elseif (($detail['source'] ?? '') === 'customer_vehicle_addition') {
+        $submissionType = 'Additional Customer Vehicle';
+    }
     $submissions[] = [
         'id' => (int) $row['id'],
-        'submission_type' => ($detail['source'] ?? '') === 'courier' ? 'Courier Request' : 'Customer Payment',
+        'submission_type' => $submissionType,
         'submitter_user_id' => (int) $row['submitter_user_id'],
         'existing_customer_id' => $row['existing_customer_id'] !== null ? (int) $row['existing_customer_id'] : null,
         'status' => $row['status'],
@@ -149,7 +157,11 @@ while ($row = $result->fetch_assoc()) {
         'platform_name' => $platformName,
         'location' => (string) ($customer['location'] ?? ''),
         'payment_status' => $paymentStatus,
-        'total_sale_amount' => (float) ($payment['total_sale_amount'] ?? $payment['totalSaleAmount'] ?? 0),
+        'total_sale_amount' => (float) (
+            ($detail['source'] ?? '') === 'payment_installment'
+                ? ($detail['payment_installment']['amount'] ?? 0)
+                : ($payment['total_sale_amount'] ?? $payment['totalSaleAmount'] ?? 0)
+        ),
         'submitted_by' => (string) ($row['submitted_by'] ?? ''),
         'reviewed_by' => (string) ($row['reviewed_by'] ?? ''),
         'submitted_at' => $row['submitted_at'] ?? $row['created_at'],

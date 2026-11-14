@@ -34,6 +34,7 @@ import {
 import { normalizeCurrency } from '../../utils/paymentValidation';
 import DateInput from '../../components/DateInput';
 import { formatDate, getTodayDate } from '../../utils/date';
+import './CustomerInstallments.css';
 
 const sectionCardStyle = {
     background: '#fff',
@@ -144,11 +145,14 @@ const hasCompletedPaymentPart2 = (vehicle) => {
         && Math.abs(totalAmount - totalSaleAmount) <= 0.005;
 };
 
-const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, max, step, maxLength, inputMode, id, error, onBlur }) => (
+const createPaymentRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, min, max, step, maxLength, inputMode, id, error, onBlur, disabled = false }) => (
     <div style={fieldStyle}>
         <strong>{label}</strong>
         {type === 'date' ? (
-            <DateInput id={id} value={value} onChange={onChange} max={max} style={inputStyle} />
+            <DateInput id={id} value={value} onChange={onChange} max={max} disabled={disabled} style={inputStyle} />
         ) : (
             <input
                 id={id}
@@ -162,6 +166,7 @@ const EditField = ({ label, value, onChange, type = 'text', digitsOnly = false, 
                 min={min}
                 max={max}
                 step={step}
+                disabled={disabled}
                 style={inputStyle}
             />
         )}
@@ -218,6 +223,11 @@ const CustomerViewPage = () => {
         return requestedStep >= 1 && requestedStep <= 5 ? requestedStep : 1;
     });
     const [savedPaymentModes, setSavedPaymentModes] = useState({});
+    const [paymentLedgerByVehicle, setPaymentLedgerByVehicle] = useState({});
+    const [pendingInstallmentsByVehicle, setPendingInstallmentsByVehicle] = useState({});
+    const [installmentForms, setInstallmentForms] = useState({});
+    const [installmentSavingVehicleId, setInstallmentSavingVehicleId] = useState(null);
+    const [installmentLoadErrors, setInstallmentLoadErrors] = useState({});
     const [masterData, setMasterData] = useState({
         platforms: [],
         vehicleTypes: [],
@@ -314,6 +324,57 @@ const CustomerViewPage = () => {
                     };
                 });
             const allHydratedVehicles = [...hydratedVehicles, ...resumedOnlyVehicles];
+            const paymentHistoryResults = await Promise.all(allHydratedVehicles
+                .filter((vehicle) => Number(vehicle.id) > 0 && Number(vehicle.vehicle_payment_id) > 0)
+                .map(async (vehicle) => {
+                    try {
+                        const historyResponse = await api.get(
+                            `/customers/details.php?customer_id=${encodeURIComponent(customerId)}&vehicle_id=${encodeURIComponent(vehicle.id)}`
+                        );
+                        if (!historyResponse.data?.success) {
+                            throw new Error(historyResponse.data?.message || 'Failed to load payment history.');
+                        }
+                        const historyData = historyResponse.data.data || {};
+                        return [
+                            vehicle.id,
+                            {
+                                paymentId: Number(historyData.payment_part2?.payment_id || vehicle.vehicle_payment_id),
+                                transactions: historyData.payment_transactions || [],
+                                pendingInstallments: historyData.payment_installment_requests || [],
+                                error: ''
+                            }
+                        ];
+                    } catch (historyError) {
+                        return [
+                            vehicle.id,
+                            {
+                                paymentId: Number(vehicle.vehicle_payment_id),
+                                transactions: [],
+                                pendingInstallments: [],
+                                error: historyError.response?.data?.message || historyError.message || 'Failed to load payment history.'
+                            }
+                        ];
+                    }
+                }));
+            setPaymentLedgerByVehicle(Object.fromEntries(paymentHistoryResults));
+            setPendingInstallmentsByVehicle(Object.fromEntries(paymentHistoryResults.map(([vehicleId, ledger]) => [
+                vehicleId,
+                ledger.pendingInstallments || []
+            ])));
+            setInstallmentLoadErrors(Object.fromEntries(paymentHistoryResults
+                .filter(([, ledger]) => ledger.error)
+                .map(([vehicleId, ledger]) => [vehicleId, ledger.error])));
+            setInstallmentForms(Object.fromEntries(paymentHistoryResults.map(([vehicleId]) => [
+                vehicleId,
+                {
+                    amount: '',
+                    paymentMode: '',
+                    transactionId: '',
+                    paymentDate: getTodayDate(),
+                    notes: '',
+                    requestKey: createPaymentRequestKey()
+                }
+            ])));
             setCustomerData({
                 customer: data.customer
                     ? {
@@ -764,7 +825,53 @@ const CustomerViewPage = () => {
         });
     };
 
-    const handleAddVehicle = () => {
+    const handleAddVehicle = async () => {
+        if (customerData.customer?.verification_status === 'Pending') {
+            const customer = customerData.customer;
+            const existingCustomerId = Number(customerId);
+            const customerDetails = {
+                platform_id: Number(customer.platform_id || 0),
+                platform_name: customer.platform_name || '',
+                username: customer.username || '',
+                primary_mobile_no: customer.primary_mobile_no || '',
+                secondary_mobile_no: customer.secondary_mobile_no || '',
+                email: customer.email || '',
+                location: customer.location || '',
+                pincode: customer.pincode || '',
+                status: customer.status || 'Active'
+            };
+
+            try {
+                setSaving(true);
+                const draftId = await saveCustomerDraft(0, existingCustomerId, {
+                    source: 'customer_vehicle_addition',
+                    _request_key: globalThis.crypto?.randomUUID?.()
+                        || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                    existing_customer_id: existingCustomerId,
+                    customer_changed: false,
+                    customer: customerDetails,
+                    append_vehicle: true
+                });
+                sessionStorage.setItem(`customer_creation_${customerId}`, JSON.stringify({
+                    customer_id: existingCustomerId,
+                    existing_customer_id: existingCustomerId,
+                    draft_id: draftId,
+                    source: 'customer_vehicle_addition',
+                    customer_changed: false,
+                    append_vehicle: true,
+                    step1: customerDetails
+                }));
+            } catch (error) {
+                triggerError(
+                    error.response?.data?.message ||
+                    error.message ||
+                    'Unable to start an additional vehicle verification request.'
+                );
+                return;
+            } finally {
+                setSaving(false);
+            }
+        }
         navigate(`/customer-management/details/vehicle/${customerId}?mode=add`);
     };
 
@@ -785,6 +892,117 @@ const CustomerViewPage = () => {
                 err.message ||
                 'Failed to delete vehicle details.'
             );
+        }
+    };
+
+    const updateInstallmentField = (vehicleId, field, value) => {
+        setInstallmentForms((previous) => ({
+            ...previous,
+            [vehicleId]: {
+                ...(previous[vehicleId] || {}),
+                [field]: value
+            }
+        }));
+    };
+
+    const handleRecordInstallment = async (vehicle) => {
+        const vehicleId = Number(vehicle.id);
+        const ledger = paymentLedgerByVehicle[vehicleId] || {};
+        const form = installmentForms[vehicleId] || {};
+        const amount = normalizeCurrency(form.amount);
+        const transactionId = String(form.transactionId || '').trim();
+        const paymentMode = String(form.paymentMode || '');
+        const pending = normalizeCurrency(vehicle.vehicle_amount_pending);
+
+        if (customerData.customer?.verification_status !== 'Approved') {
+            triggerError('Installment payments can only be recorded for an approved customer.');
+            return;
+        }
+        if (!ledger.paymentId) {
+            triggerError('The customer payment record could not be found.');
+            return;
+        }
+        if (amount <= 0) {
+            triggerError('Payment amount must be greater than zero.');
+            return;
+        }
+        if (amount > pending) {
+            triggerError(`Payment amount cannot exceed the remaining balance of ₹${pending.toLocaleString('en-IN')}.`);
+            return;
+        }
+        if (!paymentMode) {
+            triggerError('Select a payment method.');
+            return;
+        }
+        if (!form.paymentDate) {
+            triggerError('Enter the payment date.');
+            return;
+        }
+        if (paymentMode !== 'Cash' && !/^[0-9]{6}$/.test(transactionId)) {
+            triggerError('Transaction ID must contain exactly 6 digits.');
+            return;
+        }
+        if (transactionId && !/^[0-9]{6}$/.test(transactionId)) {
+            triggerError('Transaction ID must contain exactly 6 digits.');
+            return;
+        }
+
+        setInstallmentSavingVehicleId(vehicleId);
+        setError('');
+        setSuccess('');
+        try {
+            const response = await api.post('/customers/payments/record_installment.php', {
+                customer_id: Number(customerId),
+                payment_id: ledger.paymentId,
+                amount,
+                payment_mode: paymentMode,
+                transaction_id: transactionId,
+                payment_date: form.paymentDate,
+                notes: String(form.notes || '').trim(),
+                request_key: form.requestKey
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to record customer payment.');
+            }
+
+            const result = response.data.data;
+            setPendingInstallmentsByVehicle((previous) => ({
+                ...previous,
+                [vehicleId]: [
+                    ...(previous[vehicleId] || []).filter(
+                        (request) => Number(request.id) !== Number(result.submission_id)
+                    ),
+                    {
+                        id: result.submission_id,
+                        amount,
+                        payment_mode: paymentMode,
+                        transaction_id: transactionId || null,
+                        payment_date: form.paymentDate,
+                        status: result.status
+                    }
+                ]
+            }));
+            setInstallmentForms((previous) => ({
+                ...previous,
+                [vehicleId]: {
+                    amount: '',
+                    paymentMode: '',
+                    transactionId: '',
+                    paymentDate: getTodayDate(),
+                    notes: '',
+                    requestKey: createPaymentRequestKey()
+                }
+            }));
+            setSuccess(response.data.message || 'Installment submitted for Admin verification.');
+        } catch (installmentError) {
+            console.error('Customer installment payment error:', installmentError);
+            triggerError(
+                installmentError.response?.data?.message ||
+                installmentError.message ||
+                'Failed to record customer payment.'
+            );
+        } finally {
+            setInstallmentSavingVehicleId(null);
         }
     };
 
@@ -1286,6 +1504,7 @@ const CustomerViewPage = () => {
                             type="button"
                             className="btn btn-primary"
                             onClick={handleAddVehicle}
+                            disabled={saving}
                             style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}
                         >
                             <Plus size={16} />
@@ -1638,6 +1857,7 @@ const CustomerViewPage = () => {
                             )}
 
                             {(!isEditMode || activeEditStep === 5) && (
+                            <>
                             <div style={{ marginTop: '22px', borderTop: '1px solid #e5e7eb', paddingTop: '18px' }}>
                                 <div className="customer-section-title" style={{ marginBottom: '14px' }}>
                                     <Wallet size={18} />
@@ -1683,6 +1903,7 @@ const CustomerViewPage = () => {
                                                 label="Amount Paid"
                                                 value={vehicle.vehicle_amount_paid}
                                                 onChange={(value) => updatePaymentPart2Field(vehicle.id, 'vehicle_amount_paid', value)}
+                                                disabled={(paymentLedgerByVehicle[vehicle.id]?.transactions || []).length > 0}
                                                 {...fieldPresentation('vehicle_amount_paid', activeStepErrors)}
                                             />
                                             <div style={fieldStyle}><strong>Amount Pending</strong><span>{getPaymentPart2Summary(vehicle).amountPending.toFixed(2)}</span></div>
@@ -1712,6 +1933,194 @@ const CustomerViewPage = () => {
                                     )}
                                 </div>
                             </div>
+                            {(!isEditMode || activeEditStep === 5) &&
+                                customerData.customer?.verification_status === 'Approved' &&
+                                Number(vehicle.vehicle_payment_id) > 0 &&
+                                hasCompletedPaymentPart2(vehicle) && (() => {
+                                    const ledger = paymentLedgerByVehicle[vehicle.id] || { transactions: [] };
+                                    const installment = installmentForms[vehicle.id] || {};
+                                    const remaining = normalizeCurrency(vehicle.vehicle_amount_pending);
+                                    return (
+                                        <div className="customer-installments">
+                                            <div className="customer-installments__header">
+                                                <span className="customer-installments__icon"><Wallet size={20} /></span>
+                                                <div>
+                                                    <h3>Payment Installments</h3>
+                                                    <p>Record an installment and submit it for Admin approval.</p>
+                                                </div>
+                                            </div>
+                                            <div className="customer-installments__summary">
+                                                <div className="customer-installments__metric">
+                                                    <span className="customer-installments__metric-label">Total Amount</span>
+                                                    <strong className="customer-installments__metric-value">₹{Number(vehicle.vehicle_total_amount || 0).toLocaleString('en-IN')}</strong>
+                                                </div>
+                                                <div className="customer-installments__metric">
+                                                    <span className="customer-installments__metric-label">Amount Paid</span>
+                                                    <strong className="customer-installments__metric-value">₹{Number(vehicle.vehicle_amount_paid || 0).toLocaleString('en-IN')}</strong>
+                                                </div>
+                                                <div className="customer-installments__metric customer-installments__metric--pending">
+                                                    <span className="customer-installments__metric-label">Pending Amount</span>
+                                                    <strong className="customer-installments__metric-value">₹{remaining.toLocaleString('en-IN')}</strong>
+                                                </div>
+                                                <div className="customer-installments__metric">
+                                                    <span className="customer-installments__metric-label">Payment Status</span>
+                                                    <span className="customer-installments__status">{vehicle.vehicle_payment_status || 'Pending'}</span>
+                                                </div>
+                                            </div>
+
+                                            {installmentLoadErrors[vehicle.id] && (
+                                                <div className="alert alert-danger">{installmentLoadErrors[vehicle.id]}</div>
+                                            )}
+
+                                            {remaining > 0 && (
+                                                <form
+                                                    onSubmit={(event) => {
+                                                        event.preventDefault();
+                                                        handleRecordInstallment(vehicle);
+                                                    }}
+                                                >
+                                                    <div className="customer-installments__form">
+                                                        <h4 className="customer-installments__form-title">Add a payment</h4>
+                                                        <div className="customer-installments__fields">
+                                                        <label className="customer-installments__field">
+                                                            <span>Payment Amount</span>
+                                                            <input
+                                                                type="text"
+                                                                inputMode="decimal"
+                                                                value={installment.amount || ''}
+                                                                onChange={(event) => updateInstallmentField(vehicle.id, 'amount', event.target.value.replace(/[^0-9.]/g, '').slice(0, 12))}
+                                                                disabled={installmentSavingVehicleId === Number(vehicle.id)}
+                                                            />
+                                                        </label>
+                                                        <label className="customer-installments__field">
+                                                            <span>Payment Method</span>
+                                                            <select
+                                                                value={installment.paymentMode || ''}
+                                                                onChange={(event) => updateInstallmentField(vehicle.id, 'paymentMode', event.target.value)}
+                                                                disabled={installmentSavingVehicleId === Number(vehicle.id)}
+                                                            >
+                                                                <option value="">Select Payment Method</option>
+                                                                {PAYMENT_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                                                            </select>
+                                                        </label>
+                                                        <label className="customer-installments__field">
+                                                            <span>Transaction ID / UTR</span>
+                                                            <input
+                                                                type="text"
+                                                                inputMode="numeric"
+                                                                value={installment.transactionId || ''}
+                                                                onChange={(event) => updateInstallmentField(vehicle.id, 'transactionId', event.target.value.replace(/\D/g, '').slice(0, 6))}
+                                                                placeholder={installment.paymentMode === 'Cash' ? 'Optional for cash' : '6-digit transaction ID'}
+                                                                disabled={installmentSavingVehicleId === Number(vehicle.id)}
+                                                            />
+                                                        </label>
+                                                        <label className="customer-installments__field">
+                                                            <span>Payment Date</span>
+                                                            <DateInput
+                                                                value={installment.paymentDate || ''}
+                                                                onChange={(value) => updateInstallmentField(vehicle.id, 'paymentDate', value)}
+                                                                disabled={installmentSavingVehicleId === Number(vehicle.id)}
+                                                            />
+                                                        </label>
+                                                        <label className="customer-installments__field customer-installments__field--wide">
+                                                            <span>Payment Notes <small>(Optional)</small></span>
+                                                            <textarea
+                                                                rows={2}
+                                                                value={installment.notes || ''}
+                                                                onChange={(event) => updateInstallmentField(vehicle.id, 'notes', event.target.value)}
+                                                                disabled={installmentSavingVehicleId === Number(vehicle.id)}
+                                                            />
+                                                        </label>
+                                                        </div>
+                                                    <div className="customer-installments__form-actions">
+                                                        <button
+                                                            type="submit"
+                                                            className="customer-installments__submit"
+                                                            disabled={
+                                                                installmentSavingVehicleId === Number(vehicle.id) ||
+                                                                normalizeCurrency(installment.amount) <= 0 ||
+                                                                normalizeCurrency(installment.amount) > remaining
+                                                            }
+                                                        >
+                                                            {installmentSavingVehicleId === Number(vehicle.id) ? 'Submitting...' : 'Submit Installment for Approval'}
+                                                        </button>
+                                                    </div>
+                                                    </div>
+                                                </form>
+                                            )}
+
+                                            {(pendingInstallmentsByVehicle[vehicle.id] || []).length > 0 && (
+                                                <div className="customer-installments__history">
+                                                    <h4>Awaiting Admin Approval</h4>
+                                                    <div className="customer-installments__table-wrap">
+                                                    <table className="customer-installments__table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Payment Date</th>
+                                                                <th>Amount</th>
+                                                                <th>Method</th>
+                                                                <th>Transaction ID / UTR</th>
+                                                                <th>Verification Status</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {pendingInstallmentsByVehicle[vehicle.id].map((request) => (
+                                                                <tr key={request.id}>
+                                                                    <td>{formatDate(request.payment_date)}</td>
+                                                                    <td>₹{Number(request.amount || 0).toLocaleString('en-IN')}</td>
+                                                                    <td>{request.payment_mode || '—'}</td>
+                                                                    <td>{request.transaction_id || '—'}</td>
+                                                                    <td><span className="customer-installments__badge">{request.status}</span></td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                    </div>
+                                                    <p className="customer-installments__notice customer-installments__notice--pending">
+                                                        Payment totals and transaction history change only after Admin approval.
+                                                    </p>
+                                                </div>
+                                            )}
+
+                                            <div className="customer-installments__history">
+                                                <h4>Payment History</h4>
+                                                <div className="customer-installments__table-wrap">
+                                                <table className="customer-installments__table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Payment Date</th>
+                                                            <th>Payment Amount</th>
+                                                            <th>Payment Method</th>
+                                                            <th>Transaction ID / UTR</th>
+                                                            <th>Status</th>
+                                                            <th>Notes</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {ledger.transactions.length ? ledger.transactions.map((transaction) => (
+                                                            <tr key={transaction.id}>
+                                                                <td>{formatDate(transaction.payment_date)}</td>
+                                                                <td>₹{Number(transaction.amount || 0).toLocaleString('en-IN')}</td>
+                                                                <td>{transaction.payment_mode || '—'}</td>
+                                                                <td>{transaction.transaction_id || '—'}</td>
+                                                                <td>{transaction.payment_status || '—'}</td>
+                                                                <td>{transaction.notes || '—'}</td>
+                                                            </tr>
+                                                        )) : (
+                                                            <tr>
+                                                                <td colSpan="6" className="customer-installments__empty">
+                                                                    No payment transactions recorded yet.
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </>
                             )}
                         </div>
                     ))}

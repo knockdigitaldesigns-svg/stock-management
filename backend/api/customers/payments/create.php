@@ -727,6 +727,55 @@ try {
         writeCreatedFields($conn, $collectionId, 'Customer Cash Collection', ['customer_id' => $customerId, 'payment_id' => $paymentId, 'recipient_type' => $selectedType, 'recipient_id' => $recipientId, 'amount_collected' => $amountCollected, 'amount_remitted' => $amountRemitted, 'pending_amount' => $pendingAmount, 'settlement_status' => $status], $currentUser);
     };
 
+    $recordInitialPayment = static function ($conn, int $paymentId, int $customerId, float $amount, ?string $mode, ?string $transactionId, string $status, array $currentUser): void {
+        if ($amount <= 0) {
+            return;
+        }
+
+        $check = $conn->prepare('SELECT id FROM customer_payment_transactions WHERE payment_id = ? LIMIT 1');
+        if (!$check) {
+            throw new Exception('Failed to check customer payment history.');
+        }
+        $check->bind_param('i', $paymentId);
+        if (!$check->execute()) {
+            $check->close();
+            throw new Exception('Failed to load customer payment history.');
+        }
+        $hasHistory = $check->get_result()->num_rows > 0;
+        $check->close();
+        if ($hasHistory) {
+            return;
+        }
+
+        $insert = $conn->prepare(
+            "INSERT INTO customer_payment_transactions
+                (payment_id, customer_id, request_key, amount, payment_mode, transaction_id, payment_date, payment_status, notes, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), CURDATE(), ?, 'Initial customer payment', ?)"
+        );
+        if (!$insert) {
+            throw new Exception('Failed to prepare initial customer payment history.');
+        }
+        $requestKey = 'initial-' . $paymentId;
+        $paymentMode = $mode ?: 'Cash';
+        $createdBy = (int) ($currentUser['user_id'] ?? 0);
+        $insert->bind_param(
+            'iisdsssi',
+            $paymentId,
+            $customerId,
+            $requestKey,
+            $amount,
+            $paymentMode,
+            $transactionId,
+            $status,
+            $createdBy
+        );
+        if (!$insert->execute()) {
+            $insert->close();
+            throw new Exception('Failed to record initial customer payment history.');
+        }
+        $insert->close();
+    };
+
 
     /*
      * ---------------------------------------------------------------
@@ -891,6 +940,7 @@ if ($existingPaymentId !== null) {
     $updateStmt->close();
     reserveTransactionId($conn, (string) ($transactionIdValue ?? ''), 'customer_payments', (string) $existingPaymentId);
     if ($paymentStep === 2) {
+        $recordInitialPayment($conn, $existingPaymentId, $customerId, $amountPaid, $paymentModeValue, $transactionIdValue, $paymentStatus, $currentUser);
         $syncCashCollection($conn, $customerId, $vehicleId, $existingPaymentId, $totalAmount, $cashToTechnician, $cashToDealer, $cashToEt, $currentUser);
         if (!$isCourierVerification) {
             $completeCustomerStock($conn, $customerId, $vehicleId);
@@ -1001,6 +1051,7 @@ if ($existingPaymentId !== null) {
     ], $currentUser);
 
     if ($paymentStep === 2) {
+        $recordInitialPayment($conn, $paymentId, $customerId, $amountPaid, $paymentModeValue, $transactionIdValue, $paymentStatus, $currentUser);
         $syncCashCollection($conn, $customerId, $vehicleId, $paymentId, $totalAmount, $cashToTechnician, $cashToDealer, $cashToEt, $currentUser);
         if (!$isCourierVerification) {
             $completeCustomerStock($conn, $customerId, $vehicleId);

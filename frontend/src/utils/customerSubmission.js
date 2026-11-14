@@ -89,6 +89,7 @@ export const ensureCustomerSubmissionData = async (stored, customerId) => {
 };
 
 export const buildCustomerSubmission = (stored, paymentPart2 = null) => ({
+    ...(stored.source ? { source: stored.source } : {}),
     customer: stored.step1 || {},
     existing_customer_id: Number(stored.existing_customer_id || 0) || null,
     customer_changed: Boolean(stored.customer_changed),
