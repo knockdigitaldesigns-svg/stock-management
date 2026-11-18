@@ -26,7 +26,7 @@ $statusSql = $status === 'Pending Verification'
     ? "s.status IN ('Pending Verification', 'Applying')"
     : 's.status = ?';
 $page = max(1, (int) ($_GET['page'] ?? 1));
-$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pageSize = min(250, max(1, (int) ($_GET['page_size'] ?? 10)));
 $offset = ($page - 1) * $pageSize;
 $pattern = '%' . $search . '%';
 $countStmt = $conn->prepare(
