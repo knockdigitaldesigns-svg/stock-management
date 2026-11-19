@@ -657,6 +657,7 @@ const CustomerPaymentVerificationPage = () => {
                     totalItems={pagination.total}
                     onPageChange={changePage}
                     onPageSizeChange={updatePageSize}
+                    pageSizeOptions={[10, 25, 50, 100, 250]}
                     itemName="verification requests"
                 />
             </div>
