@@ -20,11 +20,22 @@ import DateInput from '../../components/DateInput';
 import Modal from '../../components/Modal/Modal';
 import { formatDate, getTodayDate } from '../../utils/date';
 
+const CUSTOMER_DETAILS_RETURN_STATE_KEY = 'customer_details_return_state';
+
 const CustomerDetailsPage = () => {
 
     const navigate = useNavigate();
     const location = useLocation();
     const { hasPermission } = useAuth();
+    const [listReturnState] = useState(() => {
+        if (Number(location.state?.customerDetailsPage) > 0) return location.state;
+        try {
+            const savedState = JSON.parse(sessionStorage.getItem(CUSTOMER_DETAILS_RETURN_STATE_KEY) || '{}');
+            return savedState && typeof savedState === 'object' ? savedState : {};
+        } catch {
+            return {};
+        }
+    });
 
     const [customers, setCustomers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -33,7 +44,7 @@ const CustomerDetailsPage = () => {
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [masterLocations, setMasterLocations] = useState([]);
-    const [appliedFilters, setAppliedFilters] = useState({
+    const [appliedFilters, setAppliedFilters] = useState(() => listReturnState.customerDetailsFilters || {
         search: '',
         platform: '',
         location: '',
@@ -48,18 +59,21 @@ const CustomerDetailsPage = () => {
         showGlobalError(msg);
     };
 
-    const [search, setSearch] = useState('');
-    const [platformFilter, setPlatformFilter] = useState('');
-    const [locationFilter, setLocationFilter] = useState('');
-    const [paymentFilter, setPaymentFilter] = useState('');
-    const [dateFrom, setDateFrom] = useState('');
-    const [dateTo, setDateTo] = useState('');
+    const [search, setSearch] = useState(() => listReturnState.customerDetailsSearch ?? listReturnState.customerDetailsFilters?.search ?? '');
+    const [platformFilter, setPlatformFilter] = useState(() => listReturnState.customerDetailsPlatformFilter ?? listReturnState.customerDetailsFilters?.platform ?? '');
+    const [locationFilter, setLocationFilter] = useState(() => listReturnState.customerDetailsLocationFilter ?? listReturnState.customerDetailsFilters?.location ?? '');
+    const [paymentFilter, setPaymentFilter] = useState(() => listReturnState.customerDetailsPaymentFilter ?? listReturnState.customerDetailsFilters?.payment_status ?? '');
+    const [dateFrom, setDateFrom] = useState(() => listReturnState.customerDetailsDateFrom ?? listReturnState.customerDetailsFilters?.date_from ?? '');
+    const [dateTo, setDateTo] = useState(() => listReturnState.customerDetailsDateTo ?? listReturnState.customerDetailsFilters?.date_to ?? '');
 
     const [page, setPage] = useState(() => {
-        const returnPage = Number(location.state?.customerDetailsPage);
+        const returnPage = Number(listReturnState.customerDetailsPage);
         return Number.isInteger(returnPage) && returnPage > 0 ? returnPage : 1;
     });
-    const [pageSize, setPageSize] = useState(10);
+    const [pageSize, setPageSize] = useState(() => {
+        const returnPageSize = Number(listReturnState.customerDetailsPageSize);
+        return Number.isInteger(returnPageSize) && returnPageSize > 0 ? returnPageSize : 10;
+    });
 
     const canAdd =
         hasPermission('customers.add');
@@ -69,6 +83,22 @@ const CustomerDetailsPage = () => {
 
     const canDelete =
         hasPermission('customers.delete');
+
+    useEffect(() => {
+        sessionStorage.removeItem(CUSTOMER_DETAILS_RETURN_STATE_KEY);
+    }, []);
+
+    const getCustomerListReturnState = () => ({
+        customerDetailsPage: page,
+        customerDetailsPageSize: pageSize,
+        customerDetailsFilters: appliedFilters,
+        customerDetailsSearch: search,
+        customerDetailsPlatformFilter: platformFilter,
+        customerDetailsLocationFilter: locationFilter,
+        customerDetailsPaymentFilter: paymentFilter,
+        customerDetailsDateFrom: dateFrom,
+        customerDetailsDateTo: dateTo
+    });
 
     const formatInstallationDates = (value) => {
         const dates = Array.isArray(value)
@@ -260,7 +290,6 @@ const CustomerDetailsPage = () => {
 
     const handlePageSizeChange = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
 
@@ -269,11 +298,9 @@ const CustomerDetailsPage = () => {
     // ============================================================
 
     const handleAddCustomer = () => {
-
-        navigate(
-            '/customer-management/details/add'
-        );
-
+        const returnState = getCustomerListReturnState();
+        sessionStorage.setItem(CUSTOMER_DETAILS_RETURN_STATE_KEY, JSON.stringify(returnState));
+        navigate('/customer-management/details/add', { state: returnState });
     };
 
 
@@ -283,7 +310,7 @@ const CustomerDetailsPage = () => {
 
     const handleView = (id) => {
         navigate(`/customer-management/details/${id}/view`, {
-            state: { customerDetailsPage: page }
+            state: getCustomerListReturnState()
         });
     };
 
@@ -296,7 +323,7 @@ const CustomerDetailsPage = () => {
 
         navigate(
             `/customer-management/details/${id}/edit`,
-            { state: { customerDetailsPage: page } }
+            { state: getCustomerListReturnState() }
         );
 
     };

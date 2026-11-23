@@ -163,7 +163,6 @@ const Dealers = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     return (

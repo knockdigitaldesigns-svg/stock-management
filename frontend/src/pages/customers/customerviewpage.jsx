@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -251,8 +251,10 @@ const CustomerViewPage = () => {
         payment_part1: null,
         payment_part2: null
     });
+    const persistedVehiclesRef = useRef({});
     const [expandedVehicleId, setExpandedVehicleId] = useState(null);
     const [selectedEditVehicleId, setSelectedEditVehicleId] = useState(null);
+    const isIndependentEditMode = isEditMode && verificationDraftId === 0;
     const vehicles = customerData.vehicles || [];
     const selectedEditVehicle = vehicles.find(
         (vehicle) => String(vehicle.id) === String(selectedEditVehicleId)
@@ -324,6 +326,9 @@ const CustomerViewPage = () => {
                     };
                 });
             const allHydratedVehicles = [...hydratedVehicles, ...resumedOnlyVehicles];
+            persistedVehiclesRef.current = Object.fromEntries(
+                vehicles.map((vehicle) => [vehicle.id, vehicle])
+            );
             const paymentHistoryResults = await Promise.all(allHydratedVehicles
                 .filter((vehicle) => Number(vehicle.id) > 0 && Number(vehicle.vehicle_payment_id) > 0)
                 .map(async (vehicle) => {
@@ -558,7 +563,7 @@ const CustomerViewPage = () => {
         onBlur: () => markFieldTouched(field)
     });
 
-    const getActiveStepErrors = () => {
+    const getActiveStepErrors = (paymentHeaderVehicle = null) => {
         const customer = customerData.customer || {};
         const vehicle = selectedEditVehicle || {};
         if (activeEditStep === 1) {
@@ -647,7 +652,8 @@ const CustomerViewPage = () => {
             };
         }
         if (activeEditStep === 5) {
-            const saleAmount = Number(vehicle.vehicle_total_sale_amount) || 0;
+            const persistedVehicle = paymentHeaderVehicle || vehicle;
+            const saleAmount = Number(persistedVehicle.vehicle_total_sale_amount) || 0;
             const chargeFields = [
                 ['vehicle_device_charge', 'Device Charge'],
                 ['vehicle_software_charge', 'Software Charge'],
@@ -676,7 +682,7 @@ const CustomerViewPage = () => {
                     ? `${label} cannot exceed Total Sale Amount of ${saleLabel}.`
                     : ''
             ])));
-            errors.vehicle_amount_paid = vehicle.vehicle_payment_mode
+            errors.vehicle_amount_paid = persistedVehicle.vehicle_payment_mode
                 && (vehicle.vehicle_amount_paid === '' || vehicle.vehicle_amount_paid === null || vehicle.vehicle_amount_paid === undefined)
                     ? 'Please enter Amount Paid.'
                     : amountPaid < 0
@@ -689,7 +695,7 @@ const CustomerViewPage = () => {
         return {};
     };
 
-    const getFirstActiveStepError = () => {
+    const getFirstActiveStepError = (paymentHeaderVehicle = null) => {
         if (activeEditStep === 1) {
             const customer = customerData.customer || {};
             const validationError = validateCustomerForm(customer, true);
@@ -700,7 +706,7 @@ const CustomerViewPage = () => {
             }
             return null;
         }
-        const errors = getActiveStepErrors();
+        const errors = getActiveStepErrors(paymentHeaderVehicle);
         return Object.entries(errors).find(([, message]) => message);
     };
 
@@ -815,13 +821,13 @@ const CustomerViewPage = () => {
 
     const handleBack = () => {
         navigate('/customer-management/details', {
-            state: { customerDetailsPage: location.state?.customerDetailsPage }
+            state: location.state
         });
     };
 
     const handleCancelEdit = () => {
         navigate(`/customer-management/details/${customerId}/view`, {
-            state: { customerDetailsPage: location.state?.customerDetailsPage }
+            state: location.state
         });
     };
 
@@ -1197,7 +1203,7 @@ const CustomerViewPage = () => {
                     setSuccess('Customer details updated successfully.');
                     setTimeout(() => {
                         navigate(`/customer-management/details/${customerId}/view`, {
-                            state: { customerDetailsPage: location.state?.customerDetailsPage }
+                            state: location.state
                         });
                     }, 250);
                 }
@@ -1216,6 +1222,210 @@ const CustomerViewPage = () => {
         }
     };
 
+    const saveIndependentEditSection = async () => {
+        const vehicle = selectedEditVehicle;
+        const vehicleId = Number(vehicle?.vehicle_record_id || vehicle?.id || 0);
+        const changeKeyByStep = {
+            2: 'vehicle',
+            3: 'installation',
+            4: 'paymentPart1',
+            5: 'paymentPart2'
+        };
+        const changeKey = changeKeyByStep[activeEditStep];
+        const hasChanges = activeEditStep === 1
+            ? customerChanged
+            : Boolean(changedVehicles[vehicle?.id]?.[changeKey]);
+
+        setError('');
+        setSuccess('');
+        if (!hasChanges) {
+            setSuccess('No changes to save.');
+            return true;
+        }
+
+        setValidationAttempted(true);
+        const paymentHeaderVehicle = activeEditStep === 5
+            ? persistedVehiclesRef.current[vehicle?.id] || vehicle
+            : null;
+        const firstError = getFirstActiveStepError(paymentHeaderVehicle);
+        if (firstError) {
+            triggerError(firstError[1]);
+            focusInvalidField(firstError[0]);
+            return false;
+        }
+
+        setSaving(true);
+        try {
+            if (activeEditStep === 2) {
+                const errors = await validateVehicleAvailability();
+                setAssetValidationErrors(errors);
+                const assetError = Object.entries(errors).find(([, message]) => message);
+                if (assetError) {
+                    triggerError(assetError[1]);
+                    focusInvalidField(assetError[0]);
+                    return false;
+                }
+            }
+
+            let response;
+            if (activeEditStep === 1) {
+                const customer = customerData.customer || {};
+                response = await api.put('/customers/update.php', {
+                    id: Number(customerId),
+                    platform_id: Number(customer.platform_id || 0),
+                    username: String(customer.username || '').trim(),
+                    primary_mobile_no: String(customer.primary_mobile_no || '').trim(),
+                    secondary_mobile_no: String(customer.secondary_mobile_no || '').trim(),
+                    email: String(customer.email || '').trim(),
+                    location: String(customer.location || '').trim(),
+                    pincode: String(customer.pincode || '').trim(),
+                    status: customer.status || 'Active'
+                });
+            } else {
+                if (vehicleId <= 0) {
+                    throw new Error('A saved vehicle is required to save this section.');
+                }
+
+                if (activeEditStep === 2) {
+                    response = await api.put('/customers/vehicle_details/update.php', {
+                        id: vehicleId,
+                        customer_id: Number(customerId),
+                        vehicle_no: vehicle.vehicle_no,
+                        vehicle_type_id: Number(vehicle.vehicle_type_id),
+                        imei_no: vehicle.imei_no,
+                        sim_no_1: vehicle.sim_no_1,
+                        sim_no_2: vehicle.sim_no_2 || null,
+                        device_model_id: Number(vehicle.device_model_id),
+                        validity_id: Number(vehicle.validity_id || vehicle.validity_months)
+                    });
+                } else if (activeEditStep === 3) {
+                    response = await api.post('/customers/installations/create.php', {
+                        customer_id: Number(customerId),
+                        vehicle_id: vehicleId,
+                        installation_person_type: vehicle.vehicle_installation_type,
+                        installation_person_id: vehicle.vehicle_installation_person_id
+                            ? Number(vehicle.vehicle_installation_person_id)
+                            : null,
+                        lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
+                        installation_date: vehicle.vehicle_installation_date
+                    });
+                } else if (activeEditStep === 4) {
+                    response = await api.post('/customers/payments/create.php', {
+                        customer_id: Number(customerId),
+                        vehicle_id: vehicleId,
+                        payment_step: 1,
+                        total_sale_amount: Number(vehicle.vehicle_total_sale_amount),
+                        transaction_id: vehicle.vehicle_transaction_id || '',
+                        payment_mode: vehicle.vehicle_payment_mode || '',
+                        payment_status: 'Pending'
+                    });
+                } else {
+                    const persistedVehicle = persistedVehiclesRef.current[vehicle.id] || vehicle;
+                    const summary = getPaymentPart2Summary(vehicle);
+                    response = await api.post('/customers/payments/create.php', {
+                        customer_id: Number(customerId),
+                        vehicle_id: vehicleId,
+                        payment_step: 2,
+                        total_sale_amount: Number(persistedVehicle.vehicle_total_sale_amount),
+                        transaction_id: persistedVehicle.vehicle_transaction_id || '',
+                        payment_mode: persistedVehicle.vehicle_payment_mode || '',
+                        device_charge: normalizeCurrency(vehicle.vehicle_device_charge),
+                        software_charge: normalizeCurrency(vehicle.vehicle_software_charge),
+                        technician_charge: normalizeCurrency(vehicle.vehicle_technician_charge),
+                        sim_charge: normalizeCurrency(vehicle.vehicle_sim_charge),
+                        courier_charge: normalizeCurrency(vehicle.vehicle_courier_charge),
+                        cash_to_technician: vehicle.vehicle_cash_recipient_type === 'Technician',
+                        cash_to_dealer: vehicle.vehicle_cash_recipient_type === 'Dealer',
+                        cash_to_et: vehicle.vehicle_cash_recipient_type === 'ET',
+                        total_amount: summary.chargeTotal,
+                        amount_paid: normalizeCurrency(vehicle.vehicle_amount_paid),
+                        amount_pending: summary.amountPending,
+                        payment_status: summary.paymentStatus
+                    });
+                }
+            }
+
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to save customer details.');
+            }
+
+            if (activeEditStep === 1) {
+                setCustomerChanged(false);
+            } else {
+                setChangedVehicles((previous) => ({
+                    ...previous,
+                    [vehicle.id]: {
+                        ...previous[vehicle.id],
+                        [changeKey]: false
+                    }
+                }));
+
+                const persistedVehicle = persistedVehiclesRef.current[vehicle.id] || vehicle;
+                if (activeEditStep === 2) {
+                    persistedVehiclesRef.current[vehicle.id] = {
+                        ...persistedVehicle,
+                        vehicle_no: vehicle.vehicle_no,
+                        vehicle_type_id: vehicle.vehicle_type_id,
+                        imei_no: vehicle.imei_no,
+                        sim_no_1: vehicle.sim_no_1,
+                        sim_no_2: vehicle.sim_no_2,
+                        device_model_id: vehicle.device_model_id,
+                        validity_id: vehicle.validity_id,
+                        validity_months: vehicle.validity_months
+                    };
+                } else if (activeEditStep === 3) {
+                    persistedVehiclesRef.current[vehicle.id] = {
+                        ...persistedVehicle,
+                        vehicle_installation_type: vehicle.vehicle_installation_type,
+                        vehicle_installation_person_id: vehicle.vehicle_installation_person_id,
+                        vehicle_lead_closure_id: vehicle.vehicle_lead_closure_id,
+                        vehicle_installation_date: vehicle.vehicle_installation_date
+                    };
+                } else if (activeEditStep === 4) {
+                    persistedVehiclesRef.current[vehicle.id] = {
+                        ...persistedVehicle,
+                        vehicle_total_sale_amount: vehicle.vehicle_total_sale_amount,
+                        vehicle_transaction_id: vehicle.vehicle_transaction_id,
+                        vehicle_payment_mode: vehicle.vehicle_payment_mode
+                    };
+                    setSavedPaymentModes((previous) => ({
+                        ...previous,
+                        [vehicle.id]: Boolean(String(vehicle.vehicle_payment_mode || '').trim())
+                    }));
+                } else {
+                    persistedVehiclesRef.current[vehicle.id] = {
+                        ...persistedVehicle,
+                        vehicle_device_charge: vehicle.vehicle_device_charge,
+                        vehicle_software_charge: vehicle.vehicle_software_charge,
+                        vehicle_technician_charge: vehicle.vehicle_technician_charge,
+                        vehicle_sim_charge: vehicle.vehicle_sim_charge,
+                        vehicle_courier_charge: vehicle.vehicle_courier_charge,
+                        vehicle_total_amount: vehicle.vehicle_total_amount,
+                        vehicle_amount_paid: vehicle.vehicle_amount_paid,
+                        vehicle_amount_pending: vehicle.vehicle_amount_pending,
+                        vehicle_payment_status: vehicle.vehicle_payment_status
+                    };
+                }
+            }
+
+            setAssetValidationErrors({});
+            setValidationAttempted(false);
+            setTouchedFields({});
+            setSuccess(response.data.message || 'Section saved successfully.');
+            return true;
+        } catch (err) {
+            console.error('Customer section save error:', err);
+            triggerError(
+                err.response?.data?.message ||
+                err.message ||
+                'Failed to save customer details.'
+            );
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handlePreviousStep = async () => {
         if (activeEditStep <= 1) {
             return;
@@ -1223,6 +1433,13 @@ const CustomerViewPage = () => {
         const previousStep = activeEditStep - 1;
         const hasUnsavedChanges = customerChanged || Object.values(changedVehicles)
             .some((changes) => Object.values(changes).some(Boolean));
+        if (isIndependentEditMode) {
+            setActiveEditStep(previousStep);
+            setValidationAttempted(false);
+            setTouchedFields({});
+            setAssetValidationErrors({});
+            return;
+        }
         if (hasUnsavedChanges) {
             await handleSave({ navigateToStep: previousStep });
             return;
@@ -1247,7 +1464,7 @@ const CustomerViewPage = () => {
 
         const hasUnsavedChanges = customerChanged || Object.values(changedVehicles)
             .some((changes) => Object.values(changes).some(Boolean));
-        if (hasUnsavedChanges) {
+        if (hasUnsavedChanges && verificationDraftId > 0) {
             await handleSave({ navigateToStep: step });
             return;
         }
@@ -1331,7 +1548,7 @@ const CustomerViewPage = () => {
                         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                             {hasPermission('customers.edit') && (
                                 <button type="button" className="btn btn-primary" onClick={() => navigate(`/customer-management/details/${customerId}/edit`, {
-                                    state: { customerDetailsPage: location.state?.customerDetailsPage }
+                                    state: location.state
                                 })}>
                                     Edit Customer
                                 </button>
@@ -2143,10 +2360,18 @@ const CustomerViewPage = () => {
                             <button
                                 type="button"
                                 className="btn btn-primary"
-                                onClick={() => handleSave({ advance: activeEditStep < 5 })}
+                                onClick={isIndependentEditMode
+                                    ? saveIndependentEditSection
+                                    : () => handleSave({ advance: activeEditStep < 5 })}
                                 disabled={saving || loading}
                             >
-                                {saving ? 'Saving...' : activeEditStep < 5 ? 'Update & Next' : 'Update Customer'}
+                                {saving
+                                    ? 'Saving...'
+                                    : isIndependentEditMode
+                                        ? 'Save'
+                                        : activeEditStep < 5
+                                            ? 'Update & Next'
+                                            : 'Update Customer'}
                             </button>
                         </div>
                     )}

@@ -401,7 +401,7 @@ const CustomerReportsPage = () => {
                     pageSize={pageSize}
                     totalItems={pageMeta.total}
                     onPageChange={setPage}
-                    onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+                    onPageSizeChange={setPageSize}
                     itemName="entries"
                 />
             </div>

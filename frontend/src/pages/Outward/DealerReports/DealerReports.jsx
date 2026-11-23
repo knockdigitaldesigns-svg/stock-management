@@ -90,7 +90,10 @@ const DealerReports = () => {
         api.get(endpoint, { params })
             .then((response) => {
                 setReportData(response.data.data?.report || []);
-                setTotalItems(response.data.data?.pagination?.total || 0);
+                const nextTotalItems = Number(response.data.data?.pagination?.total || 0);
+                setTotalItems(nextTotalItems);
+                const totalPages = Math.max(1, Math.ceil(nextTotalItems / pageSize));
+                if (page > totalPages) setPage(totalPages);
             })
             .catch((error) => {
                 console.error('Failed to load allocation report', error);
@@ -377,7 +380,6 @@ const DealerReports = () => {
                     onPageChange={setPage}
                     onPageSizeChange={(size) => {
                         setPageSize(size);
-                        setPage(1);
                     }}
                     itemName="allocated records"
                 />
