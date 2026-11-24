@@ -46,10 +46,16 @@ const fieldLabels = {
     validity_id: 'Validity',
     validity_months: 'Validity',
     installation_person_type: 'Installation Person Type',
+    installation_type: 'Installation Person Type',
+    vehicle_installation_type: 'Installation Person Type',
     installation_person_id: 'Installer',
-    installation_person: 'Installer',
+    installation_person: 'Installation Person',
+    vehicle_installation_person: 'Installation Person',
     installation_date: 'Installation Date',
     lead_closure_id: 'Lead Closure',
+    lead_closure: 'Lead Closure',
+    payment_step: 'Payment Step',
+    paymentStep: 'Payment Step',
     total_sale_amount: 'Total Sale Amount',
     totalSaleAmount: 'Total Sale Amount',
     total_amount: 'Total Amount',
@@ -88,7 +94,8 @@ const fieldLabels = {
     step5: 'Payment Details — Part 2',
     notes: 'Notes',
     status: 'Status',
-    cash_recipient_type: 'Cash Collection Recipient'
+    cash_recipient_type: 'Cash Collection Recipient',
+    cash_recipient_name: 'Cash Collection Recipient'
 };
 
 const parseStructuredValue = (value) => {
@@ -328,7 +335,15 @@ const CustomerPaymentVerificationPage = () => {
                     paymentId: Number(submission.linked_payment_id || 0)
                 }
                 : await commitCustomerSubmission(
-                    submission.submission_data,
+                    {
+                        ...submission.submission_data,
+                        linked_customer_id: submission.linked_customer_id
+                            || submission.submission_data?.linked_customer_id,
+                        linked_vehicle_id: submission.linked_vehicle_id
+                            || submission.submission_data?.linked_vehicle_id,
+                        linked_payment_id: submission.linked_payment_id
+                            || submission.submission_data?.linked_payment_id
+                    },
                     submission.id,
                     async (ids) => {
                         const progress = await api.post('/customers/verification/progress.php', {
@@ -627,6 +642,7 @@ const CustomerPaymentVerificationPage = () => {
                             )}
                             <th>Request Type</th>
                             <th>Customer</th>
+                            <th>Vehicle Count</th>
                             <th>Mobile</th>
                             <th>Platform</th>
                             <th>Location</th>
@@ -654,6 +670,7 @@ const CustomerPaymentVerificationPage = () => {
                                 )}
                                 <td>{item.submission_type || 'Customer Payment'}</td>
                                 <td>{item.customer_name || '—'}</td>
+                                <td>{Number(item.vehicle_count || 0)}</td>
                                 <td>{item.primary_mobile_no || '—'}</td>
                                 <td>{item.platform_name || '—'}</td>
                                 <td>{item.location || '—'}</td>
@@ -684,7 +701,7 @@ const CustomerPaymentVerificationPage = () => {
                             </tr>
                         ))}
                         {!loading && submissions.length === 0 && (
-                            <tr><td colSpan={status === 'Pending Verification' ? 12 : 11} className="empty-state">No submissions found.</td></tr>
+                            <tr><td colSpan={status === 'Pending Verification' ? 13 : 12} className="empty-state">No submissions found.</td></tr>
                         )}
                     </tbody>
                 </table>

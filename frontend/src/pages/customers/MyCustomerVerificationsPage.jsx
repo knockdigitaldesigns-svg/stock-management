@@ -174,6 +174,10 @@ const MyCustomerVerificationsPage = () => {
             const data = item?.submission_data || {};
             const correctionStep = getCorrectionStep(item?.rejection_reason);
             const existingCustomerId = Number(item.existing_customer_id || data.existing_customer_id || 0);
+            const linkedCustomerId = Number(item.linked_customer_id || data.linked_customer_id || 0);
+            const linkedVehicleId = Number(item.linked_vehicle_id || data.linked_vehicle_id || 0);
+            const linkedPaymentId = Number(item.linked_payment_id || data.linked_payment_id || 0);
+            const customerRouteId = existingCustomerId || linkedCustomerId;
             sessionStorage.setItem(MY_VERIFICATION_RETURN_STATE_KEY, JSON.stringify({
                 page,
                 pageSize,
@@ -182,10 +186,15 @@ const MyCustomerVerificationsPage = () => {
                 statusFilter,
                 requestTypeFilter
             }));
-            if (Array.isArray(data.vehicles) && existingCustomerId > 0) {
-                const customerRouteId = existingCustomerId;
+            if (
+                customerRouteId > 0 &&
+                (Array.isArray(data.vehicles) || linkedCustomerId > 0)
+            ) {
                 sessionStorage.setItem(`customer_edit_verification_${customerRouteId}`, JSON.stringify({
                     id: Number(item.id),
+                    linked_customer_id: linkedCustomerId || null,
+                    linked_vehicle_id: linkedVehicleId || null,
+                    linked_payment_id: linkedPaymentId || null,
                     rejection_reason: item.rejection_reason || '',
                     submission_data: data
                 }));
@@ -197,10 +206,16 @@ const MyCustomerVerificationsPage = () => {
                 (Array.isArray(data.vehicles) ? data.vehicles[0] : null);
             const installation = data.installation || data.step3 || vehicle?.installation || {};
             const paymentPart1 = data.payment_part1 || data.step4 || vehicle?.payment_part1 || null;
+            const paymentPart2 = data.payment_part2 || data.paymentPart2 || data.step5 ||
+                vehicle?.payment_part2 || null;
             const sessionData = normalized
                 ? {
                     draft_id: Number(item.id),
+                    resumed_verification: true,
                     existing_customer_id: existingCustomerId || null,
+                    linked_customer_id: linkedCustomerId || null,
+                    linked_vehicle_id: linkedVehicleId || null,
+                    linked_payment_id: linkedPaymentId || null,
                     customer_id: existingCustomerId || -Number(item.id),
                     step1: data.customer || data.step1 || {},
                     step2: vehicle ? {
@@ -213,7 +228,9 @@ const MyCustomerVerificationsPage = () => {
                         device_model_id: vehicle.device_model_id || '',
                         validity_id: vehicle.validity_id || vehicle.validity_months || ''
                     } : undefined,
-                    vehicle_record_id: vehicle?.vehicle_record_id || vehicle?.id || null,
+                    vehicle_record_id: vehicle?.vehicle_record_id || vehicle?.id ||
+                        data.vehicle_record_id || data.vehicle_id ||
+                        (Array.isArray(data.vehicles) && data.vehicles.length === 1 ? linkedVehicleId : 0) || null,
                     append_vehicle: Boolean(vehicle?.append_vehicle),
                     new_vehicle_flow: true,
                     step3: installation,
@@ -223,24 +240,32 @@ const MyCustomerVerificationsPage = () => {
                         transactionId: paymentPart1.transactionId || paymentPart1.transaction_id || '',
                         paymentMode: paymentPart1.paymentMode || paymentPart1.payment_mode || ''
                     } : {},
-                    payment_part2: data.payment_part2 || data.paymentPart2 || data.step5 ||
-                        vehicle?.payment_part2 || null
+                    payment_part2: paymentPart2
+                        ? {
+                            ...paymentPart2,
+                            payment_id: paymentPart2.payment_id || paymentPart2.paymentId || linkedPaymentId || null
+                        }
+                        : null
                 }
                 : {
                     ...data,
                     draft_id: Number(item.id),
+                    resumed_verification: true,
                     existing_customer_id: existingCustomerId || null,
+                    linked_customer_id: linkedCustomerId || null,
+                    linked_vehicle_id: linkedVehicleId || null,
+                    linked_payment_id: linkedPaymentId || null,
                     customer_id: existingCustomerId || -Number(item.id),
                     new_vehicle_flow: true
                 };
-            const customerRouteId = existingCustomerId || -Number(item.id);
-            sessionStorage.setItem(`customer_creation_${customerRouteId}`, JSON.stringify(sessionData));
+            const creationRouteId = existingCustomerId || -Number(item.id);
+            sessionStorage.setItem(`customer_creation_${creationRouteId}`, JSON.stringify(sessionData));
             const correctionRoutes = {
-                1: `/customer-management/details/${customerRouteId}`,
-                2: `/customer-management/details/vehicle/${customerRouteId}`,
-                3: `/customer-management/details/installation/${customerRouteId}`,
-                4: `/customer-management/details/payment/${customerRouteId}`,
-                5: `/customer-management/details/payment-details/${customerRouteId}`
+                1: `/customer-management/details/${creationRouteId}`,
+                2: `/customer-management/details/vehicle/${creationRouteId}`,
+                3: `/customer-management/details/installation/${creationRouteId}`,
+                4: `/customer-management/details/payment/${creationRouteId}`,
+                5: `/customer-management/details/payment-details/${creationRouteId}`
             };
             navigate(correctionRoutes[correctionStep]);
         } catch (loadError) {

@@ -337,7 +337,7 @@ try {
             if (!$oldExpiry) {
                 throw new InvalidArgumentException('The previously saved Expiry Date is missing. SIM reactivation cannot calculate the next renewal cycle.');
             }
-            $newExpiry = calculateDealerSimExpiryDate($oldExpiry, $months);
+            $newExpiry = calculateDealerSimReactivationExpiryDate($reactivationDate, $oldExpiry, $months);
             $newStatus = 'Active';
             $newReactivation = $reactivationDate;
             $newValidityId = $reactivationValidityId;

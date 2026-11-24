@@ -11,6 +11,7 @@ import useModalScrollLock from '../../hooks/useModalScrollLock';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { fetchAllPaginated } from '../../utils/fetchAllPaginated';
 
 const PERMISSION_COLUMNS = ['view', 'add', 'assign', 'edit', 'delete', 'import', 'export', 'update', 'approve'];
 
@@ -343,13 +344,13 @@ const closeFeedback = () => {
 };
     const fetchRoles = async () => {
         try {
-            const response = await api.get('/roles/list.php');
-            if (response.data.success) {
-                const list = response.data.data?.roles || [];
-                setRoles(list);
-                if (!selectedRoleId && list.length) {
-                    setSelectedRoleId(String(list[0].id));
-                }
+            const list = await fetchAllPaginated(
+                (page, pageSize) => api.get('/roles/list.php', { params: { page, page_size: pageSize } }),
+                'roles'
+            );
+            setRoles(list);
+            if (!selectedRoleId && list.length) {
+                setSelectedRoleId(String(list[0].id));
             }
         } catch (error) {
             console.error('Failed to fetch roles', error);

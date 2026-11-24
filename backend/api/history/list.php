@@ -163,6 +163,8 @@ $countResult = $countStmt->get_result();
 $total = (int) (($countResult->fetch_assoc()['total'] ?? 0));
 $countStmt->close();
 
+$totalPages = max(1, (int) ceil($total / $pageSize));
+$page = min($page, $totalPages);
 $offset = ($page - 1) * $pageSize;
 $pageGroupsSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, MAX(h.id) AS latest_id'
     . $from . $condition
@@ -291,7 +293,7 @@ sendResponse(true, 'History fetched successfully.', [
         'page' => $page,
         'page_size' => $pageSize,
         'total' => $total,
-        'total_pages' => max(1, (int) ceil($total / $pageSize))
+        'total_pages' => $totalPages
     ],
     'modules' => $modules,
     'users' => $users

@@ -40,6 +40,7 @@ $customerId = isset($data->customer_id)
     ? (int) $data->customer_id
     : 0;
 $vehicleId = isset($data->vehicle_id) ? (int) $data->vehicle_id : 0;
+$requestedPaymentId = max(0, (int) ($data->payment_id ?? 0));
 $verificationSubmissionId = max(0, (int) ($data->verification_submission_id ?? 0));
 $isCourierVerification = false;
 
@@ -783,24 +784,40 @@ try {
      * ---------------------------------------------------------------
      */
 
-    $paymentWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
-    $checkStmt = $conn->prepare(
-        "SELECT id
-         FROM customer_payments
-         WHERE {$paymentWhere}
-         ORDER BY created_at DESC, id DESC
-         LIMIT 1
-         FOR UPDATE"
-    );
+    if ($requestedPaymentId > 0) {
+        $checkStmt = $conn->prepare(
+            'SELECT *
+             FROM customer_payments
+             WHERE id = ? AND customer_id = ?
+               AND (vehicle_id = NULLIF(?, 0) OR vehicle_id IS NULL)
+             LIMIT 1
+             FOR UPDATE'
+        );
+    } else {
+        $paymentWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'vehicle_id IS NULL AND customer_id = ?';
+        $checkStmt = $conn->prepare(
+            "SELECT *
+             FROM customer_payments
+             WHERE {$paymentWhere}
+             " . ($vehicleId > 0 ? 'AND customer_id = ?' : '') . "
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+             FOR UPDATE"
+        );
+    }
 
     if (!$checkStmt) {
         throw new Exception(
             'Failed to prepare existing payment check.'
         );
     }
-
-    $paymentTargetId = $vehicleId > 0 ? $vehicleId : $customerId;
-    $checkStmt->bind_param('i', $paymentTargetId);
+    if ($requestedPaymentId > 0) {
+        $checkStmt->bind_param('iii', $requestedPaymentId, $customerId, $vehicleId);
+    } elseif ($vehicleId > 0) {
+        $checkStmt->bind_param('ii', $vehicleId, $customerId);
+    } else {
+        $checkStmt->bind_param('i', $customerId);
+    }
 
     if (!$checkStmt->execute()) {
         $checkStmt->close();
@@ -814,17 +831,17 @@ try {
         $checkStmt->get_result();
 
     $existingPaymentId = null;
+    $existingRow = null;
 
     if ($existingResult->num_rows > 0) {
-
-        $existingRow =
-            $existingResult->fetch_assoc();
-
-        $existingPaymentId =
-            (int) $existingRow['id'];
+        $existingRow = $existingResult->fetch_assoc();
+        $existingPaymentId = (int) $existingRow['id'];
     }
 
     $checkStmt->close();
+    if ($requestedPaymentId > 0 && $existingPaymentId === null) {
+        throw new Exception('Selected payment record does not belong to this customer and vehicle.');
+    }
 
 
     /*

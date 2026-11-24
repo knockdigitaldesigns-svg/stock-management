@@ -207,6 +207,7 @@ const CustomerViewPage = () => {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const saveRequestRef = useRef(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [validationAttempted, setValidationAttempted] = useState(false);
@@ -299,7 +300,77 @@ const CustomerViewPage = () => {
                 }
             }
             const resumedData = resumedSubmission?.submission_data;
-            const resumedVehicles = Array.isArray(resumedData?.vehicles) ? resumedData.vehicles : [];
+            const resumedDataWithLinks = resumedData ? {
+                ...resumedData,
+                linked_customer_id: resumedSubmission?.linked_customer_id || resumedData.linked_customer_id || null,
+                linked_vehicle_id: resumedSubmission?.linked_vehicle_id || resumedData.linked_vehicle_id || null,
+                linked_payment_id: resumedSubmission?.linked_payment_id || resumedData.linked_payment_id || null
+            } : null;
+            const resumedVehicles = Array.isArray(resumedData?.vehicles)
+                ? resumedData.vehicles.map((vehicle) => ({ ...vehicle }))
+                : [];
+            const linkedVehicleId = Number(resumedDataWithLinks?.linked_vehicle_id || 0);
+            let preferredResumeVehicleId = linkedVehicleId;
+            const rawTopLevelPaymentPart2 = resumedData?.payment_part2
+                || resumedData?.paymentPart2
+                || resumedData?.step5
+                || null;
+            const topLevelPaymentPart2 = rawTopLevelPaymentPart2
+                && typeof rawTopLevelPaymentPart2 === 'object'
+                && !Array.isArray(rawTopLevelPaymentPart2)
+                ? { ...rawTopLevelPaymentPart2 }
+                : null;
+            if (topLevelPaymentPart2) {
+                for (const [field, camelField] of [
+                    ['device_charge', 'deviceCharge'],
+                    ['software_charge', 'softwareCharge'],
+                    ['technician_charge', 'technicianCharge'],
+                    ['sim_charge', 'simCharge'],
+                    ['courier_charge', 'courierCharge'],
+                    ['total_amount', 'totalAmount'],
+                    ['amount_paid', 'amountPaid'],
+                    ['amount_pending', 'amountPending'],
+                    ['payment_status', 'paymentStatus'],
+                    ['payment_mode', 'paymentMode'],
+                    ['transaction_id', 'transactionId']
+                ]) {
+                    if (topLevelPaymentPart2[field] === undefined
+                        && topLevelPaymentPart2[camelField] !== undefined) {
+                        topLevelPaymentPart2[field] = topLevelPaymentPart2[camelField];
+                    }
+                }
+                const linkedPaymentId = Number(
+                    topLevelPaymentPart2.payment_id ||
+                    resumedDataWithLinks?.linked_payment_id ||
+                    0
+                );
+                let paymentTarget = linkedVehicleId > 0
+                    ? resumedVehicles.find((vehicle) =>
+                        Number(vehicle.vehicle_record_id || vehicle.id || 0) === linkedVehicleId
+                    )
+                    : null;
+                if (!paymentTarget && linkedPaymentId > 0) {
+                    paymentTarget = resumedVehicles.find((vehicle) =>
+                        Number(vehicle.vehicle_payment_id || vehicle.payment_id || 0) === linkedPaymentId
+                    );
+                }
+                if (!paymentTarget && resumedVehicles.length === 1) {
+                    [paymentTarget] = resumedVehicles;
+                }
+                if (paymentTarget) {
+                    preferredResumeVehicleId = Number(
+                        paymentTarget.vehicle_record_id || paymentTarget.id || preferredResumeVehicleId
+                    );
+                    paymentTarget.payment_part2 = {
+                        ...(paymentTarget.payment_part2 || {}),
+                        ...topLevelPaymentPart2,
+                        ...(linkedPaymentId > 0 ? { payment_id: linkedPaymentId } : {})
+                    };
+                    if (linkedPaymentId > 0) {
+                        paymentTarget.vehicle_payment_id = linkedPaymentId;
+                    }
+                }
+            }
             const hydratedVehicles = vehicles.map((vehicle) => {
                 const savedVehicle = resumedVehicles.find(
                     (item) => Number(item.vehicle_record_id || item.id) === Number(vehicle.id)
@@ -334,7 +405,14 @@ const CustomerViewPage = () => {
                 .map(async (vehicle) => {
                     try {
                         const historyResponse = await api.get(
-                            `/customers/details.php?customer_id=${encodeURIComponent(customerId)}&vehicle_id=${encodeURIComponent(vehicle.id)}`
+                            '/customers/details.php',
+                            {
+                                params: {
+                                    customer_id: Number(customerId),
+                                    vehicle_id: Number(vehicle.id),
+                                    payment_id: Number(vehicle.vehicle_payment_id)
+                                }
+                            }
                         );
                         if (!historyResponse.data?.success) {
                             throw new Error(historyResponse.data?.message || 'Failed to load payment history.');
@@ -394,10 +472,14 @@ const CustomerViewPage = () => {
                 payment_part1: data.payment_part1 || null,
                 payment_part2: data.payment_part2 || null
             });
+            const linkedVehicle = allHydratedVehicles.find(
+                (vehicle) => Number(vehicle.id) === preferredResumeVehicleId
+            );
             setSelectedEditVehicleId((previous) => (
-                allHydratedVehicles.some((vehicle) => String(vehicle.id) === String(previous))
+                linkedVehicle?.id ??
+                (allHydratedVehicles.some((vehicle) => String(vehicle.id) === String(previous))
                     ? previous
-                    : allHydratedVehicles[0]?.id ?? null
+                    : allHydratedVehicles[0]?.id ?? null)
             ));
             setSavedPaymentModes(Object.fromEntries(
                 allHydratedVehicles.map((vehicle) => [
@@ -420,7 +502,7 @@ const CustomerViewPage = () => {
             setResumedVehicleIds(resumedVehicles.map((vehicle, index) =>
                 Number(vehicle.vehicle_record_id || vehicle.id || 0) || -(index + 1)
             ));
-            setResumedSubmissionData(resumedData || null);
+            setResumedSubmissionData(resumedDataWithLinks);
             setVerificationDraftId(Number(resumedSubmission?.id || 0));
             setVerificationRejectionReason(String(resumedSubmission?.rejection_reason || ''));
             return true;
@@ -462,7 +544,7 @@ const CustomerViewPage = () => {
                     api.get('/device_types/list.php'),
                     api.get('/sim_validities/list.php'),
                     api.get('/technicians/list.php'),
-                    api.get('/dealers/list.php'),
+                    api.get('/dealers/list.php?for_installation=1'),
                     api.get('/lead_closures/list.php')
                 ]);
 
@@ -1048,6 +1130,8 @@ const CustomerViewPage = () => {
             return false;
         }
 
+        if (saveRequestRef.current) return false;
+        saveRequestRef.current = true;
         try {
             setSaving(true);
             setError('');
@@ -1117,6 +1201,9 @@ const CustomerViewPage = () => {
                 });
             const submission = {
                 existing_customer_id: Number(customerId),
+                linked_customer_id: Number(resumedSubmissionData?.linked_customer_id || 0) || null,
+                linked_vehicle_id: Number(resumedSubmissionData?.linked_vehicle_id || 0) || null,
+                linked_payment_id: Number(resumedSubmissionData?.linked_payment_id || 0) || null,
                 customer_changed: customerChanged,
                 customer: {
                     platform_id: Number(customer.platform_id || 0),
@@ -1218,6 +1305,7 @@ const CustomerViewPage = () => {
             );
             return false;
         } finally {
+            saveRequestRef.current = false;
             setSaving(false);
         }
     };

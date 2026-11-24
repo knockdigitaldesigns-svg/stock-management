@@ -114,7 +114,7 @@ const HistoryPage = () => {
 
     return (
         <div className="page-container history-page">
-            <div className="page-header"><div><h2>History</h2><p className="page-subtitle">Global application audit history</p></div><button className="btn btn-outline" type="button" onClick={() => loadHistory()} disabled={loading}><RefreshCw size={16} /> Refresh</button></div>
+            <div className="page-header"><div><h2>History</h2><p className="page-subtitle">Global application audit history</p></div><button className="btn btn-outline" type="button" onClick={() => loadHistory(pagination.page, appliedFilters, pagination.page_size)} disabled={loading}><RefreshCw size={16} /> Refresh</button></div>
             {error && <div className="alert alert-danger">{error}</div>}
             <div className="card">
                 <div className="table-filter-card" style={{ border: 'none', boxShadow: 'none', padding: '20px 22px 20px 22px', borderBottom: '1px solid #e2e8f0', marginBottom: '10px' }}>

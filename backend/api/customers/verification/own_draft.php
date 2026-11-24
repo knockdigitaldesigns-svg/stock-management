@@ -21,7 +21,8 @@ if (!$conn) {
     sendResponse(false, 'Database connection failed.', [], [], 500);
 }
 $stmt = $conn->prepare(
-    'SELECT id, existing_customer_id, status, submission_data, rejection_reason
+    'SELECT id, existing_customer_id, linked_customer_id, linked_vehicle_id,
+            linked_payment_id, status, submission_data, rejection_reason
      FROM customer_payment_verification_submissions
      WHERE id = ? AND submitter_user_id = ? LIMIT 1'
 );
@@ -39,5 +40,7 @@ try {
     sendResponse(false, 'Saved customer draft is invalid.', [], [], 500);
 }
 $row['id'] = (int) $row['id'];
-$row['existing_customer_id'] = $row['existing_customer_id'] !== null ? (int) $row['existing_customer_id'] : null;
+foreach (['existing_customer_id', 'linked_customer_id', 'linked_vehicle_id', 'linked_payment_id'] as $idField) {
+    $row[$idField] = $row[$idField] !== null ? (int) $row[$idField] : null;
+}
 sendResponse(true, 'Customer draft fetched.', ['submission' => $row]);

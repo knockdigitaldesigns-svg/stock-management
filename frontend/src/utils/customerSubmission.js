@@ -92,6 +92,9 @@ export const buildCustomerSubmission = (stored, paymentPart2 = null) => ({
     ...(stored.source ? { source: stored.source } : {}),
     customer: stored.step1 || {},
     existing_customer_id: Number(stored.existing_customer_id || 0) || null,
+    linked_customer_id: Number(stored.linked_customer_id || 0) || null,
+    linked_vehicle_id: Number(stored.linked_vehicle_id || 0) || null,
+    linked_payment_id: Number(stored.linked_payment_id || 0) || null,
     customer_changed: Boolean(stored.customer_changed),
     vehicle: stored.step2
         ? {
@@ -106,8 +109,9 @@ export const buildCustomerSubmission = (stored, paymentPart2 = null) => ({
 });
 
 export const commitCustomerSubmission = async (submission, submissionId, onProgress = null) => {
-    const existingCustomerId = Number(submission.existing_customer_id || 0);
+    const existingCustomerId = Number(submission.existing_customer_id || submission.linked_customer_id || 0);
     let customerId = existingCustomerId;
+    let paymentId = Number(submission.linked_payment_id || 0);
 
     if (customerId > 0 && submission.customer_changed) {
         ensureSuccess(await api.put('/customers/update.php', {
@@ -144,13 +148,13 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
             }]
             : [];
     let vehicleId = 0;
-    let paymentId = 0;
-
-    const savePaymentParts = async (currentVehicleId, paymentPart1, paymentPart2, changed) => {
+    const savePaymentParts = async (currentVehicleId, paymentPart1, paymentPart2, changed, existingPaymentId = 0) => {
+        let currentPaymentId = Number(existingPaymentId || 0);
         if (changed.paymentPart1 && paymentPart1) {
             const part1Result = ensureSuccess(await api.post('/customers/payments/create.php', {
                 customer_id: customerId,
                 vehicle_id: currentVehicleId,
+                payment_id: currentPaymentId,
                 payment_step: 1,
                 total_sale_amount: Number(paymentValue(paymentPart1, 'total_sale_amount', 'totalSaleAmount')),
                 transaction_id: paymentValue(paymentPart1, 'transaction_id', 'transactionId', null),
@@ -158,7 +162,8 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
                 payment_status: 'Pending',
                 verification_submission_id: submissionId
             }), 'Failed to save Payment Part 1.');
-            paymentId = Number(part1Result.payment_id || paymentId || 0);
+            currentPaymentId = Number(part1Result.payment_id || currentPaymentId || 0);
+            paymentId = currentPaymentId;
             await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
         }
 
@@ -166,11 +171,13 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
             const result = ensureSuccess(await api.post('/customers/payments/create.php', {
                 customer_id: customerId,
                 vehicle_id: currentVehicleId,
+                payment_id: currentPaymentId,
                 payment_step: 2,
                 ...buildPaymentPart2Payload(paymentPart1, paymentPart2),
                 verification_submission_id: submissionId
             }), 'Failed to save Payment Part 2.');
-            paymentId = Number(result.payment_id || paymentId || 0);
+            currentPaymentId = Number(result.payment_id || currentPaymentId || 0);
+            paymentId = currentPaymentId;
             await onProgress?.({ customer_id: customerId, vehicle_id: currentVehicleId, payment_id: paymentId });
         }
     };
@@ -233,7 +240,18 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
 
         const paymentPart1 = vehicle.payment_part1 || submission.payment_part1;
         const paymentPart2 = vehicle.payment_part2 || submission.payment_part2;
-        await savePaymentParts(currentVehicleId, paymentPart1, paymentPart2, changed);
+        const linkedVehicleId = Number(submission.linked_vehicle_id || 0);
+        const vehiclePaymentId = Number(
+            vehicle.payment_id ||
+            vehicle.vehicle_payment_id ||
+            paymentPart1?.payment_id ||
+            paymentPart2?.payment_id ||
+            (vehicles.length === 1 || linkedVehicleId === currentVehicleId
+                ? submission.linked_payment_id
+                : 0) ||
+            0
+        );
+        await savePaymentParts(currentVehicleId, paymentPart1, paymentPart2, changed, vehiclePaymentId);
     }
 
     if (vehicles.length === 0) {
@@ -244,7 +262,8 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
             {
                 paymentPart1: Boolean(submission.payment_part1),
                 paymentPart2: Boolean(submission.payment_part2)
-            }
+            },
+            Number(submission.linked_payment_id || 0)
         );
     }
 

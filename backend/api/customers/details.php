@@ -18,6 +18,9 @@ $customerId = isset($_GET['customer_id'])
 $requestedVehicleId = isset($_GET['vehicle_id'])
     ? (int) $_GET['vehicle_id']
     : 0;
+$requestedPaymentId = isset($_GET['payment_id'])
+    ? (int) $_GET['payment_id']
+    : 0;
 
 if ($customerId <= 0) {
     sendResponse(false, 'Customer ID is required.', [], [], 400);
@@ -444,6 +447,7 @@ $installationStmt = $conn->prepare(
         'SELECT
             id,
             customer_id,
+            vehicle_id,
             total_sale_amount,
             transaction_id,
             payment_mode,
@@ -459,7 +463,7 @@ $installationStmt = $conn->prepare(
             created_at,
             updated_at
          FROM customer_payments
-         WHERE id = ?
+         WHERE id = ? AND customer_id = ?
          LIMIT 1'
     );
 
@@ -467,8 +471,10 @@ $installationStmt = $conn->prepare(
         throw new Exception('Failed to prepare payment query.');
     }
 
-    $selectedPaymentId = (int) ($vehicle['vehicle_payment_id'] ?? 0);
-    $paymentStmt->bind_param('i', $selectedPaymentId);
+    $selectedPaymentId = $requestedPaymentId > 0
+        ? $requestedPaymentId
+        : (int) ($vehicle['vehicle_payment_id'] ?? 0);
+    $paymentStmt->bind_param('ii', $selectedPaymentId, $customerId);
     $paymentStmt->execute();
     $paymentResult = $paymentStmt->get_result();
 
@@ -530,6 +536,13 @@ $installationStmt = $conn->prepare(
     }
 
     $paymentStmt->close();
+    if ($requestedPaymentId > 0 && !$payment) {
+        throw new Exception('Payment record was not found for this customer.');
+    }
+    if ($requestedPaymentId > 0 && $requestedVehicleId > 0
+        && (int) ($payment['vehicle_id'] ?? 0) !== $requestedVehicleId) {
+        throw new Exception('Payment record does not belong to the selected vehicle.');
+    }
 
     $collectionStmt = $conn->prepare(
         'SELECT
@@ -549,7 +562,7 @@ $installationStmt = $conn->prepare(
          ORDER BY ccc.created_at DESC, ccc.id DESC
          LIMIT 1'
     );
-    $cashPaymentId = (int) ($vehicle['vehicle_payment_id'] ?? 0);
+    $cashPaymentId = $selectedPaymentId;
     $collectionStmt->bind_param('i', $cashPaymentId);
     $collectionStmt->execute();
     $cashCollection = $collectionStmt->get_result()->fetch_assoc();
@@ -604,8 +617,9 @@ $installationStmt = $conn->prepare(
             ]
             : null;
 
-        $payment = !empty($vehicle['vehicle_payment_id'])
-            ? [
+        if ($requestedPaymentId <= 0) {
+            $payment = !empty($vehicle['vehicle_payment_id'])
+                ? [
                 'id' => $vehicle['vehicle_payment_id'],
                 'customer_id' => $customerId,
                 'vehicle_id' => $vehicle['id'],
@@ -621,18 +635,19 @@ $installationStmt = $conn->prepare(
                 'amount_paid' => $vehicle['vehicle_amount_paid'],
                 'amount_pending' => $vehicle['vehicle_amount_pending'],
                 'payment_status' => $vehicle['vehicle_payment_status']
-            ]
-            : null;
+                ]
+                : null;
 
-        $cashCollection = !empty($vehicle['vehicle_cash_collection_id'])
-            ? [
-                'id' => $vehicle['vehicle_cash_collection_id'],
-                'recipient_type' => $vehicle['vehicle_cash_recipient_type'],
-                'recipient_name' => $vehicle['vehicle_cash_recipient_name'],
-                'payment_mode' => $vehicle['vehicle_cash_payment_mode'],
-                'transaction_id' => $vehicle['vehicle_cash_transaction_id']
-            ]
-            : null;
+            $cashCollection = !empty($vehicle['vehicle_cash_collection_id'])
+                ? [
+                    'id' => $vehicle['vehicle_cash_collection_id'],
+                    'recipient_type' => $vehicle['vehicle_cash_recipient_type'],
+                    'recipient_name' => $vehicle['vehicle_cash_recipient_name'],
+                    'payment_mode' => $vehicle['vehicle_cash_payment_mode'],
+                    'transaction_id' => $vehicle['vehicle_cash_transaction_id']
+                ]
+                : null;
+        }
     }
 
     $customer['vehicles'] = $vehicles;

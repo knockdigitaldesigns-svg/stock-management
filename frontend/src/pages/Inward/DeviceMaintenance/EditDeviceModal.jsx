@@ -12,6 +12,7 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
         purchase_date: device?.purchase_date || '',
         device_model_id: device?.device_model_id || '',
         imei_no: device?.imei_no || '',
+        status: String(device?.status || 'available').toLowerCase(),
         notes: device?.notes || ''
     });
     const [loading, setLoading] = useState(false);
@@ -42,6 +43,7 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
                 purchase_date: formData.purchase_date,
                 device_model_id: Number(formData.device_model_id),
                 imei_no: formData.imei_no,
+                status: formData.status,
                 notes: formData.notes
             });
 
@@ -111,6 +113,16 @@ const EditDeviceModal = ({ device, onClose, onSuccess }) => {
                         maxLength={15}
                         required
                     />
+                </div>
+                <div className="form-group">
+                    <label className="form-label">Status *</label>
+                    <small>Current status: {String(device?.status || 'Available').replace(/\b\w/g, (letter) => letter.toUpperCase())}</small>
+                    <select className="form-control" value={formData.status} onChange={(event) => setFormData((prev) => ({ ...prev, status: event.target.value }))}>
+                        {formData.status === 'reserved' && <option value="reserved">Reserved (Courier workflow)</option>}
+                        {['available', 'allocated', 'used'].map((status) => (
+                            <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>
+                        ))}
+                    </select>
                 </div>
             </form>
         </Modal>
