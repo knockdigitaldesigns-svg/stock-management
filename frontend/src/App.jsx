@@ -6,6 +6,7 @@ import {
 } from 'react-router-dom';
 
 import Login from './pages/Login/Login';
+import OtpVerify from './pages/Login/OtpVerify';
 import AdminLayout from './layouts/AdminLayout/AdminLayout';
 
 import Dashboard from './pages/Dashboard/Dashboard';
@@ -27,6 +28,9 @@ import DealerSimActivation
 
 import Technicians
     from './pages/Outward/Technicians/Technicians';
+
+import InstallationPersonsPage
+    from './pages/InstallationPersons/InstallationPersonsPage';
 
 import DealerReports
     from './pages/Outward/DealerReports/DealerReports';
@@ -76,6 +80,19 @@ import SaleAmountsPage
 import PendingPayments from './pages/Payments/PendingPayments';
 import HistoryPage from './pages/History/HistoryPage';
 import SupportPage from './pages/Support/SupportPage';
+import AttendancePage from './pages/Attendance/AttendancePage';
+import AttendanceSettingsPage from './pages/Attendance/AttendanceSettingsPage';
+import PipelineManagementPage from './pages/CRM/PipelineManagementPage';
+import CampaignManagementPage from './pages/CRM/CampaignManagementPage';
+import CampaignReportPage from './pages/CRM/CampaignReportPage';
+import LeadStatusMasterPage from './pages/CRM/LeadStatusMasterPage';
+import LeadStageMasterPage from './pages/CRM/LeadStageMasterPage';
+import LeadManagementPage from './pages/CRM/LeadManagementPage';
+import LeadDistributionPage from './pages/CRM/LeadDistributionPage';
+import FollowupsPage from './pages/CRM/FollowupsPage';
+import LeadConverterPage from './pages/CRM/LeadConverterPage';
+import FormApprovalPage from './pages/CRM/FormApprovalPage';
+import InstallerJobsPage from './pages/CRM/InstallerJobsPage';
 
 
 // ============================================================
@@ -142,6 +159,10 @@ function App() {
                     path="/login"
                     element={<Login />}
                 />
+                <Route
+                    path="/verify-otp"
+                    element={<OtpVerify />}
+                />
 
 
                 {/* =====================================================
@@ -195,6 +216,15 @@ function App() {
                         element={
                             <ProtectedRoute permission="support.view">
                                 <SupportPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="attendance"
+                        element={
+                            <ProtectedRoute permission={['attendance.view', 'attendance.self.view']}>
+                                <AttendancePage />
                             </ProtectedRoute>
                         }
                     />
@@ -282,6 +312,17 @@ function App() {
                                 permission="outward_reports.view"
                             >
                                 <DealerReports />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="installation-persons"
+                        element={
+                            <ProtectedRoute
+                                permission={['dealers.view', 'technicians.view']}
+                            >
+                                <InstallationPersonsPage />
                             </ProtectedRoute>
                         }
                     />
@@ -388,6 +429,15 @@ function App() {
                     />
 
                     <Route
+                        path="settings/attendance"
+                        element={
+                            <ProtectedRoute permission="attendance.settings">
+                                <AttendanceSettingsPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
                         path="settings/change-password"
                         element={
                             <ProtectedRoute
@@ -421,6 +471,121 @@ function App() {
                                 permission="platforms.view"
                             >
                                 <PlatformPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/pipelines"
+                        element={
+                            <ProtectedRoute
+                                permission="crm_pipelines.view"
+                            >
+                                <PipelineManagementPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/campaigns"
+                        element={
+                            <ProtectedRoute permission="crm_campaigns.view">
+                                <CampaignManagementPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/campaigns/:campaignId"
+                        element={
+                            <ProtectedRoute permission="crm_campaigns.view">
+                                <CampaignReportPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/lead-statuses"
+                        element={
+                            <ProtectedRoute permission="crm_lead_status.view">
+                                <LeadStatusMasterPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/lead-stages"
+                        element={
+                            <ProtectedRoute permission={[
+                                'crm_lead_stage.view',
+                                'crm_lead_stage.add',
+                                'crm_lead_stage.edit',
+                                'crm_lead_stage.activate'
+                            ]}>
+                                <LeadStageMasterPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/leads"
+                        element={
+                            <ProtectedRoute permission="crm_leads.view">
+                                <LeadManagementPage scope="all" />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/my-leads"
+                        element={
+                            <ProtectedRoute permission={['crm_leads.my_view', 'crm_leads.view']}>
+                                <LeadManagementPage scope="my" />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/lead-distribution"
+                        element={
+                            <ProtectedRoute permission="crm_leads.assign">
+                                <LeadDistributionPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/follow-ups"
+                        element={
+                            <ProtectedRoute permission="crm_followups.view">
+                                <FollowupsPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/lead-converter"
+                        element={
+                            <ProtectedRoute permission="crm_closures.add">
+                                <LeadConverterPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/form-approval"
+                        element={
+                            <ProtectedRoute permission="crm_closures.approve">
+                                <FormApprovalPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="/crm/my-installations"
+                        element={
+                            <ProtectedRoute permission="crm_installations.view">
+                                <InstallerJobsPage />
                             </ProtectedRoute>
                         }
                     />

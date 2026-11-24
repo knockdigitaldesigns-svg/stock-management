@@ -50,3 +50,58 @@
     color: #b91c1c;
     border: 1px solid #fecdd3;
 }
+
+.otp-card {
+    max-width: 460px;
+}
+
+.otp-inputs {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.otp-digit {
+    width: 100%;
+    min-width: 0;
+    height: 3.25rem;
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.5rem;
+    background: var(--card-bg);
+    color: var(--text-primary);
+}
+
+.otp-digit:focus {
+    outline: 2px solid #3b82f6;
+    border-color: transparent;
+}
+
+.otp-timer {
+    text-align: center;
+    margin-top: 1rem;
+    color: var(--text-secondary);
+}
+
+.otp-resend {
+    width: 100%;
+    margin-top: 0.75rem;
+}
+
+@media (max-width: 480px) {
+    .login-card {
+        margin: 1rem;
+        padding: 1.5rem;
+    }
+
+    .otp-inputs {
+        gap: 0.35rem;
+    }
+
+    .otp-digit {
+        height: 2.75rem;
+        font-size: 1.1rem;
+    }
+}

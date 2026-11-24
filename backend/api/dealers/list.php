@@ -10,6 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     sendResponse(false, "Method not allowed", [], [], 405);
 }
 
+authenticate();
 requireAnyPermission([
     'dealers.view',
     'stock.view',
@@ -104,7 +105,6 @@ $dealerPaymentStatusSql = "CASE
     WHEN $dealerAmountPaidSql > 0 THEN 'Partially Paid'
     ELSE 'Not Paid'
 END";
-
 if (isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1') {
     $result = $conn->query("
         SELECT
@@ -420,9 +420,11 @@ $sql = "
     SELECT 
         d.id, 
         d.dealer_name, 
+        d.user_id,
         d.mobile_no, 
         d.alternate_mobile_no,
-        d.location, 
+        d.location,
+        d.installation_service_areas,
         d.enrolled_date, 
         d.installation_status,
         d.status,

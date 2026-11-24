@@ -9,6 +9,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { useConfirmation } from '../../components/Modal/useConfirmation';
 import { normalizeCurrency } from '../../utils/paymentValidation';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import DateInput from '../../components/DateInput';
@@ -42,6 +43,7 @@ const PaymentDetailsPart2Page = () => {
     const navigate = useNavigate();
     const { customerId } = useParams();
     const { hasPermission } = useAuth();
+    const { confirm, confirmationDialog } = useConfirmation();
 
     const [form, setForm] = useState(initialForm);
 
@@ -1026,10 +1028,13 @@ const PaymentDetailsPart2Page = () => {
         }
     };
 
-    const handleReset = () => {
-        const confirmed = window.confirm(
-            'Are you sure you want to reset the payment details?'
-        );
+    const handleReset = async () => {
+        const confirmed = await confirm({
+            title: 'Reset Payment Details',
+            message: 'Are you sure you want to reset the payment details?',
+            confirmLabel: 'Reset',
+            confirmClassName: 'btn-danger'
+        });
 
         if (!confirmed) {
             return;
@@ -1814,6 +1819,7 @@ const PaymentDetailsPart2Page = () => {
                 </div>
             )}
 
+            {confirmationDialog}
         </div>
     );
 };

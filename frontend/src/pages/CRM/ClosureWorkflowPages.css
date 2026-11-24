@@ -1,0 +1,460 @@
+.closure-workflow-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 1.25rem;
+}
+
+.closure-workflow-form .form-group > span {
+    display: block;
+    margin-bottom: 0.45rem;
+    font-weight: 500;
+}
+
+.closure-workflow-form .form-group b {
+    color: var(--danger-color);
+}
+
+.closure-workflow-form .form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding-top: 0.5rem;
+}
+
+.closure-workflow-card {
+    margin-bottom: 1rem;
+}
+
+.closure-workflow-card h3 {
+    margin: 0 0 1rem;
+}
+
+.closure-workflow-table {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    table-layout: fixed;
+}
+
+.closure-workflow-table th,
+.closure-workflow-table td {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+}
+
+.closure-workflow-table th {
+    white-space: normal;
+}
+
+.closure-workflow-table small {
+    display: block;
+    margin-top: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.closure-approval-table-scroll {
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+}
+
+.closure-approval-table {
+    min-width: 1200px;
+}
+
+.closure-installer-picker {
+    width: 100%;
+    min-width: 0;
+}
+
+.closure-installer-picker .dropdown-header {
+    min-height: 44px;
+    border-color: var(--border-color);
+    text-align: left;
+}
+
+.closure-installer-picker .dropdown-header.open {
+    border-color: var(--primary-color);
+}
+
+.closure-installer-picker .dropdown-menu {
+    max-height: 320px;
+}
+
+.closure-installer-picker .dropdown-list {
+    max-height: 240px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+.closure-installer-picker .dropdown-item {
+    display: block;
+    height: auto;
+    min-height: 40px;
+    overflow-wrap: anywhere;
+    padding: 0.65rem 0.75rem;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.4;
+}
+
+.closure-installer-picker .dropdown-item.no-results {
+    text-align: center;
+}
+
+.closure-approval-table th:nth-child(1) { width: 8%; }
+.closure-approval-table th:nth-child(2) { width: 8%; }
+.closure-approval-table th:nth-child(3) { width: 8%; }
+.closure-approval-table th:nth-child(4) { width: 10%; }
+.closure-approval-table th:nth-child(5) { width: 20%; }
+.closure-approval-table th:nth-child(6) { width: 8%; }
+.closure-approval-table th:nth-child(7) { width: 10%; }
+.closure-approval-table th:nth-child(8) { width: 7%; }
+.closure-approval-table th:nth-child(9) { width: 21%; }
+
+.closure-reassignment-table th:nth-child(1) { width: 21%; }
+.closure-reassignment-table th:nth-child(2) { width: 15%; }
+.closure-reassignment-table th:nth-child(3) { width: 11%; }
+.closure-reassignment-table th:nth-child(4) { width: 15%; }
+.closure-reassignment-table th:nth-child(5) { width: 26%; }
+.closure-reassignment-table th:nth-child(6) { width: 12%; }
+
+.closure-approval-actions,
+.closure-reassignment-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.closure-approval-actions > *,
+.closure-reassignment-controls > *,
+.closure-reassignment-table td[data-label="Action"] .btn {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.closure-approval-actions .btn,
+.closure-reassignment-table td[data-label="Action"] .btn {
+    justify-content: center;
+    white-space: normal;
+}
+
+.closure-approval-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(140px, 1fr)) auto;
+    align-items: end;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.closure-approval-filters label > span {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.closure-approval-filters .btn {
+    min-height: 38px;
+}
+
+.closure-location-note {
+    margin-bottom: 0.75rem;
+    color: var(--text-muted, #6b7280);
+    font-size: 0.85rem;
+}
+
+.closure-filter-warning {
+    color: var(--danger-color, #b42318);
+}
+
+.closure-completion-form {
+    display: grid;
+    min-width: 340px;
+    gap: 0.65rem;
+}
+
+.closure-completion-form label {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.closure-completion-form textarea {
+    min-height: 58px;
+}
+
+.closure-completion-verified {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem !important;
+}
+
+.installer-job-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.installer-job-card,
+.installer-device-card {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--card-bg);
+}
+
+.installer-job-card {
+    padding: 1rem;
+}
+
+.installer-job-header,
+.installer-device-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.installer-job-header h3,
+.installer-device-header h4 {
+    margin: 0;
+}
+
+.installer-job-header p {
+    margin: 0.35rem 0 0;
+    color: var(--text-secondary);
+}
+
+.installer-job-status {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--background-secondary, #f3f4f6);
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.installer-job-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem 1rem;
+    margin: 1rem 0;
+}
+
+.installer-job-summary > span,
+.installer-device-details > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.installer-start-button {
+    margin-bottom: 1rem;
+}
+
+.installer-shared-username {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+}
+
+.installer-shared-username > label:not(.closure-completion-verified) {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.installer-device-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 0.75rem;
+}
+
+.installer-device-card {
+    padding: 0.85rem;
+}
+
+.installer-device-header {
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.installer-device-header h4 span {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.installer-device-header > strong {
+    font-size: 0.85rem;
+}
+
+.installer-device-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem 0.9rem;
+}
+
+.installer-device-remarks {
+    grid-column: 1 / -1;
+}
+
+.installer-device-pending {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.closure-completion-form.closure-device-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+}
+
+.closure-completion-form label,
+.closure-completion-form .form-control {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.closure-completion-form textarea,
+.closure-completion-form select,
+.closure-completion-form input {
+    width: 100%;
+}
+
+.closure-completion-form .closure-completion-verified,
+.closure-completion-form > button {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+    .closure-workflow-form {
+        grid-template-columns: 1fr;
+    }
+
+    .closure-workflow-form .form-actions {
+        flex-wrap: wrap;
+    }
+
+    .closure-approval-filters {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1024px) {
+    .closure-approval-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .closure-approval-table {
+        min-width: 0;
+    }
+
+    .closure-approval-filters > .btn {
+        width: 100%;
+    }
+
+    .closure-workflow-table,
+    .closure-workflow-table tbody {
+        display: block;
+        width: 100%;
+    }
+
+    .closure-workflow-table thead {
+        display: none;
+    }
+
+    .closure-workflow-table tbody {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .closure-workflow-table tbody tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--card-bg);
+    }
+
+    .closure-workflow-table tbody td {
+        display: block;
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+        overflow-wrap: anywhere;
+    }
+
+    .closure-workflow-table tbody td[data-label]::before {
+        display: block;
+        margin-bottom: 0.3rem;
+        color: var(--text-secondary);
+        content: attr(data-label);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    .closure-workflow-table tbody td[colspan] {
+        grid-column: 1 / -1;
+    }
+
+    .closure-approval-table tbody td[data-label="Customer / Platform"],
+    .closure-approval-table tbody td[data-label="Decision"],
+    .closure-reassignment-table tbody td[data-label="New Assignment"],
+    .closure-reassignment-table tbody td[data-label="Action"] {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 640px) {
+    .closure-approval-filters {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .closure-workflow-card {
+        padding: 1rem;
+    }
+
+    .installer-job-header,
+    .installer-device-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .installer-job-summary,
+    .installer-shared-username,
+    .installer-device-list,
+    .installer-device-details,
+    .closure-completion-form.closure-device-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .installer-device-remarks,
+    .closure-completion-form .closure-completion-verified,
+    .closure-completion-form > button {
+        grid-column: 1;
+    }
+
+    .closure-workflow-table tbody tr {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .closure-workflow-table tbody td,
+    .closure-approval-table tbody td[data-label="Customer / Platform"],
+    .closure-approval-table tbody td[data-label="Decision"],
+    .closure-reassignment-table tbody td[data-label="New Assignment"],
+    .closure-reassignment-table tbody td[data-label="Action"] {
+        grid-column: 1;
+    }
+}

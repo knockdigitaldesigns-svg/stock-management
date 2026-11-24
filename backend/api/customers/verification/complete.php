@@ -4,6 +4,7 @@ require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
 require_once '../../../utils/customer_payment_verification.php';
 require_once '../../../utils/transaction_ids.php';
+require_once '../../../utils/crm_lead_stages.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -231,6 +232,235 @@ try {
             'amount_paid' => $nextPaid,
             'amount_pending' => $nextPending,
             'payment_status' => $paymentStatus
+        ]);
+    }
+
+    if (($submissionData['source'] ?? '') === 'crm_installation') {
+        $closureId = (int) ($submissionData['crm_closure_id'] ?? 0);
+        $installationDeviceId = (int) ($submissionData['installation_device_id'] ?? 0);
+        if ($closureId <= 0 || $installationDeviceId <= 0 || $vehicleId <= 0 || $paymentId <= 0) {
+            throw new RuntimeException('CRM installation verification is missing its device links.');
+        }
+
+        $closureLock = $conn->prepare(
+            'SELECT id, lead_id FROM crm_lead_closure_forms WHERE id = ? LIMIT 1 FOR UPDATE'
+        );
+        if (!$closureLock) {
+            throw new RuntimeException('Unable to prepare CRM installation order lock.');
+        }
+        $closureLock->bind_param('i', $closureId);
+        if (!$closureLock->execute()) {
+            $closureLock->close();
+            throw new RuntimeException('The CRM installation order could not be found.');
+        }
+        $closure = $closureLock->get_result()->fetch_assoc();
+        $closureLock->close();
+        if (!$closure) {
+            throw new RuntimeException('The CRM installation order could not be found.');
+        }
+
+        $deviceStmt = $conn->prepare(
+            'SELECT id, closure_id, device_sequence, installation_status,
+                    customer_id, verification_submission_id, customer_installation_id
+             FROM crm_closure_installation_devices
+             WHERE id = ? AND closure_id = ? LIMIT 1 FOR UPDATE'
+        );
+        if (!$deviceStmt) {
+            throw new RuntimeException('Unable to prepare CRM installation verification lookup.');
+        }
+        $deviceStmt->bind_param('ii', $installationDeviceId, $closureId);
+        if (!$deviceStmt->execute()) {
+            $deviceStmt->close();
+            throw new RuntimeException('Unable to load the CRM installation device for approval.');
+        }
+        $device = $deviceStmt->get_result()->fetch_assoc();
+        $deviceStmt->close();
+        if (
+            !$device ||
+            $device['installation_status'] !== 'Completed' ||
+            (int) $device['customer_id'] !== $customerId ||
+            (int) $device['verification_submission_id'] !== $submissionId
+        ) {
+            throw new RuntimeException('The CRM installation device no longer matches this verification submission.');
+        }
+
+        $vehicleStmt = $conn->prepare(
+            'SELECT id FROM customer_vehicle_details
+             WHERE id = ? AND customer_id = ? LIMIT 1 FOR UPDATE'
+        );
+        if (!$vehicleStmt) {
+            throw new RuntimeException('Unable to prepare CRM customer vehicle verification.');
+        }
+        $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
+        if (!$vehicleStmt->execute() || $vehicleStmt->get_result()->num_rows !== 1) {
+            $vehicleStmt->close();
+            throw new RuntimeException('The CRM installation vehicle does not belong to this customer.');
+        }
+        $vehicleStmt->close();
+
+        $installationId = (int) ($device['customer_installation_id'] ?? 0);
+        $installationStmt = $conn->prepare(
+            'SELECT id FROM customer_installations
+             WHERE id = ? AND customer_id = ? AND vehicle_id = ? LIMIT 1 FOR UPDATE'
+        );
+        if (!$installationStmt) {
+            throw new RuntimeException('Unable to prepare CRM installation record verification.');
+        }
+        $installationStmt->bind_param('iii', $installationId, $customerId, $vehicleId);
+        if (!$installationStmt->execute() || $installationStmt->get_result()->num_rows !== 1) {
+            $installationStmt->close();
+            throw new RuntimeException('The CRM installation record does not match the verified customer vehicle.');
+        }
+        $installationStmt->close();
+
+        $paymentStmt = $conn->prepare(
+            'SELECT id FROM customer_payments
+             WHERE id = ? AND customer_id = ? AND vehicle_id = ? LIMIT 1 FOR UPDATE'
+        );
+        if (!$paymentStmt) {
+            throw new RuntimeException('Unable to prepare CRM installation payment verification.');
+        }
+        $paymentStmt->bind_param('iii', $paymentId, $customerId, $vehicleId);
+        if (!$paymentStmt->execute() || $paymentStmt->get_result()->num_rows !== 1) {
+            $paymentStmt->close();
+            throw new RuntimeException('The CRM installation payment does not match the verified customer vehicle.');
+        }
+        $paymentStmt->close();
+
+        $approveDevice = $conn->prepare(
+            "UPDATE crm_closure_installation_devices
+             SET verification_status = 'Approved', verification_rejection_reason = NULL
+             WHERE id = ? AND closure_id = ? AND verification_submission_id = ?
+               AND installation_status = 'Completed'
+               AND verification_status IN ('Pending Verification', 'Rejected')"
+        );
+        if (!$approveDevice) {
+            throw new RuntimeException('Unable to prepare CRM installation device approval.');
+        }
+        $approveDevice->bind_param('iii', $installationDeviceId, $closureId, $submissionId);
+        if (!$approveDevice->execute() || $approveDevice->affected_rows !== 1) {
+            $approveDevice->close();
+            throw new RuntimeException('The CRM installation device could not be marked approved.');
+        }
+        $approveDevice->close();
+
+        $progressStmt = $conn->prepare(
+            "SELECT COUNT(*) AS total,
+                    SUM(installation_status = 'Completed') AS installed,
+                    SUM(verification_status = 'Approved') AS verified
+             FROM crm_closure_installation_devices
+             WHERE closure_id = ? FOR UPDATE"
+        );
+        if (!$progressStmt) {
+            throw new RuntimeException('Unable to prepare CRM installation approval progress.');
+        }
+        $progressStmt->bind_param('i', $closureId);
+        if (!$progressStmt->execute()) {
+            $progressStmt->close();
+            throw new RuntimeException('Unable to load CRM installation approval progress.');
+        }
+        $progress = $progressStmt->get_result()->fetch_assoc();
+        $progressStmt->close();
+        $totalDevices = (int) ($progress['total'] ?? 0);
+        $verifiedDevices = (int) ($progress['verified'] ?? 0);
+        if ($totalDevices <= 0) {
+            throw new RuntimeException('The CRM installation order has no device progress records.');
+        }
+        $allVerified = $verifiedDevices === $totalDevices;
+        $customerProgressStmt = $conn->prepare(
+            "SELECT COUNT(*) AS total,
+                    SUM(verification_status = 'Approved') AS verified
+             FROM crm_closure_installation_devices
+             WHERE closure_id = ? AND customer_id = ? FOR UPDATE"
+        );
+        if (!$customerProgressStmt) {
+            throw new RuntimeException('Unable to prepare per-customer installation approval progress.');
+        }
+        $customerProgressStmt->bind_param('ii', $closureId, $customerId);
+        if (!$customerProgressStmt->execute()) {
+            $customerProgressStmt->close();
+            throw new RuntimeException('Unable to load per-customer installation approval progress.');
+        }
+        $customerProgress = $customerProgressStmt->get_result()->fetch_assoc();
+        $customerProgressStmt->close();
+        $customerDeviceCount = (int) ($customerProgress['total'] ?? 0);
+        $customerVerifiedCount = (int) ($customerProgress['verified'] ?? 0);
+        $customerVerificationStatus = $customerDeviceCount > 0 &&
+            $customerVerifiedCount === $customerDeviceCount
+            ? 'Approved'
+            : 'Pending';
+        $customerStatusStmt = $conn->prepare(
+            'UPDATE customers SET verification_status = ? WHERE id = ?'
+        );
+        if (!$customerStatusStmt) {
+            throw new RuntimeException('Unable to prepare CRM customer verification status update.');
+        }
+        $customerStatusStmt->bind_param('si', $customerVerificationStatus, $customerId);
+        if (!$customerStatusStmt->execute()) {
+            $customerStatusStmt->close();
+            throw new RuntimeException('Unable to update CRM customer verification status.');
+        }
+        $customerStatusStmt->close();
+
+        $closureStatus = $allVerified ? 'Customer Handoff Completed' : 'Installation In Progress';
+        $closureStmt = $conn->prepare(
+            'UPDATE crm_lead_closure_forms
+             SET customer_id = COALESCE(customer_id, ?), submission_status = ?
+             WHERE id = ?'
+        );
+        if (!$closureStmt) {
+            throw new RuntimeException('Unable to prepare CRM handoff status update.');
+        }
+        $closureStmt->bind_param('isi', $customerId, $closureStatus, $closureId);
+        if (!$closureStmt->execute() || $closureStmt->affected_rows > 1) {
+            $closureStmt->close();
+            throw new RuntimeException('Unable to update CRM handoff verification status.');
+        }
+        $closureStmt->close();
+        if ($allVerified) {
+            crmLeadSetLifecycleStage(
+                $conn,
+                (int) $closure['lead_id'],
+                'Converted Lead',
+                $reviewer
+            );
+        }
+
+        $completeSubmission = $conn->prepare(
+            "UPDATE customer_payment_verification_submissions
+             SET status = 'Approved', linked_customer_id = ?, linked_vehicle_id = ?,
+                 linked_payment_id = ?, decided_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'Applying' AND reviewer_user_id = ?"
+        );
+        if (!$completeSubmission) {
+            throw new RuntimeException('Unable to prepare CRM verification completion.');
+        }
+        $completeSubmission->bind_param('iiiii', $customerId, $vehicleId, $paymentId, $submissionId, $reviewerId);
+        if (!$completeSubmission->execute() || $completeSubmission->affected_rows !== 1) {
+            $completeSubmission->close();
+            throw new RuntimeException('Unable to complete CRM installation verification.');
+        }
+        $completeSubmission->close();
+        insertCustomerPaymentVerificationHistory(
+            $conn,
+            $submissionId,
+            'Applying',
+            'Approved',
+            null,
+            $reviewerId
+        );
+        $conn->commit();
+        $conn->close();
+        sendResponse(true, 'CRM installation device approved.', [
+            'status' => 'Approved',
+            'customer_id' => $customerId,
+            'vehicle_id' => $vehicleId,
+            'payment_id' => $paymentId,
+            'device_sequence' => (int) $device['device_sequence'],
+            'total_devices' => $totalDevices,
+            'verified_devices' => $verifiedDevices,
+            'customer_visible' => $customerVerificationStatus === 'Approved'
         ]);
     }
 

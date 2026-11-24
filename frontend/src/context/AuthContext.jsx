@@ -2,12 +2,19 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import api from '../services/api';
 
 const AuthContext = createContext(null);
-const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 const ACTIVITY_STORAGE_THROTTLE_MS = 250;
 const EXPIRY_RECHECK_GRACE_MS = 250;
 const ACTIVITY_STORAGE_KEY = 'authLastMeaningfulActivity';
 const SESSION_END_STORAGE_KEY = 'authSessionEnded';
-const INACTIVITY_MESSAGE = 'You have been logged out due to 15 minutes of inactivity. Please log in again.';
+const INACTIVITY_MESSAGE = 'Your session expired due to inactivity. Please log in again.';
+
+const getInactivityTimeoutMs = (userData) => {
+    const seconds = Number(userData?.inactivity_timeout_seconds);
+    return Number.isFinite(seconds) && seconds > 0
+        ? seconds * 1000
+        : DEFAULT_INACTIVITY_TIMEOUT_MS;
+};
 
 const getSessionIdentity = (token) => {
     if (!token) return null;
@@ -55,6 +62,33 @@ export const AuthProvider = ({ children }) => {
             localStorage.removeItem('permissions');
         }
     }, [permissions]);
+
+    useEffect(() => {
+        if (!user?.id || !localStorage.getItem('token')) {
+            return undefined;
+        }
+
+        let active = true;
+        const refreshPermissions = async () => {
+            try {
+                const response = await api.get('/auth/permissions.php');
+                const permissionList = response.data?.data?.permissions;
+                if (!response.data?.success || !Array.isArray(permissionList)) {
+                    throw new Error(response.data?.message || 'Invalid permissions response.');
+                }
+                if (active) {
+                    setPermissions(permissionList);
+                }
+            } catch (error) {
+                console.error('Unable to refresh authenticated user permissions.', error);
+            }
+        };
+
+        refreshPermissions();
+        return () => {
+            active = false;
+        };
+    }, [user?.id]);
 
     const login = (userData, permissionList = []) => {
         localStorage.removeItem(SESSION_END_STORAGE_KEY);
@@ -109,6 +143,7 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         if (!user || !localStorage.getItem('token')) return undefined;
 
+        const inactivityTimeoutMs = getInactivityTimeoutMs(user);
         let timeoutId;
         let isEndingSession = false;
         const storedActivity = Number(localStorage.getItem(ACTIVITY_STORAGE_KEY));
@@ -121,7 +156,7 @@ export const AuthProvider = ({ children }) => {
         const endForInactivity = async () => {
             if (isEndingSession) return;
             lastActivityRef.current = getLatestSharedActivity(lastActivityRef.current);
-            if (Date.now() - lastActivityRef.current < INACTIVITY_TIMEOUT_MS) {
+            if (Date.now() - lastActivityRef.current < inactivityTimeoutMs) {
                 scheduleExpiry();
                 return;
             }
@@ -154,7 +189,7 @@ export const AuthProvider = ({ children }) => {
             }
 
             const activityAfterRequest = getLatestSharedActivity(lastActivityRef.current);
-            if (!tokenInvalid && (Date.now() - activityAfterRequest < INACTIVITY_TIMEOUT_MS || endStatus === 'active')) {
+            if (!tokenInvalid && (Date.now() - activityAfterRequest < inactivityTimeoutMs || endStatus === 'active')) {
                 lastActivityRef.current = activityAfterRequest;
                 isEndingSession = false;
                 scheduleExpiry();
@@ -190,7 +225,7 @@ export const AuthProvider = ({ children }) => {
         const scheduleExpiry = () => {
             window.clearTimeout(timeoutId);
             lastActivityRef.current = getLatestSharedActivity(lastActivityRef.current);
-            const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityRef.current);
+            const remaining = inactivityTimeoutMs - (Date.now() - lastActivityRef.current);
             if (remaining <= 0) {
                 timeoutId = window.setTimeout(endForInactivity, EXPIRY_RECHECK_GRACE_MS);
                 return;
@@ -208,7 +243,7 @@ export const AuthProvider = ({ children }) => {
             scheduleExpiry();
             if (now - lastActivitySyncRef.current >= 60_000) {
                 lastActivitySyncRef.current = now;
-                api.post('/auth/activity.php', {}, { skipGlobalError: true, skipAuthLogout: true }).catch((error) => {
+                api.post('/auth/activity.php', { meaningful_activity: true }, { skipGlobalError: true, skipAuthLogout: true }).catch((error) => {
                     if (error.response?.status !== 401) {
                         console.error('Unable to record authenticated user activity.', error);
                     }
@@ -237,7 +272,7 @@ export const AuthProvider = ({ children }) => {
                     || String(endEvent.userId) !== String(identity?.userId)
                 )) return;
                 if (endEvent.reason === 'inactivity'
-                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < INACTIVITY_TIMEOUT_MS) {
+                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < inactivityTimeoutMs) {
                     return;
                 }
                 if (endEvent.message) {
@@ -264,7 +299,7 @@ export const AuthProvider = ({ children }) => {
                 const matchesEndEvent = endEvent.sessionId === oldIdentity?.sessionId
                     && String(endEvent.userId) === String(oldIdentity?.userId);
                 if (matchesEndEvent && endEvent.reason === 'inactivity'
-                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < INACTIVITY_TIMEOUT_MS) {
+                    && Date.now() - getLatestSharedActivity(lastActivityRef.current) < inactivityTimeoutMs) {
                     localStorage.setItem('token', event.oldValue);
                     return;
                 }

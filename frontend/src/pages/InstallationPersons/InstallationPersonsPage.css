@@ -1,0 +1,33 @@
+.installation-personnel-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.installation-personnel-page .installation-personnel-filter {
+    margin-bottom: 1rem;
+}
+
+.installation-personnel-page .card > .table-container {
+    margin-bottom: 1rem;
+}
+
+.installation-personnel-modal-person {
+    margin: 0 0 1rem;
+    font-weight: 600;
+}
+
+.installation-personnel-modal-person span,
+.installation-personnel-deactivate-note {
+    color: #64748b;
+}
+
+@media (max-width: 640px) {
+    .installation-personnel-tabs {
+        width: 100%;
+    }
+
+    .installation-personnel-tabs .btn {
+        flex: 1;
+    }
+}

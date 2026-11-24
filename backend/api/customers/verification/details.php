@@ -562,9 +562,15 @@ foreach ([$customer, $snapshot] as $customerSource) {
         }
     }
 }
-$customerDisplay = [
-    'Username' => $customerName !== '' ? $customerName : null,
-    'Platform' => $platformName !== '' ? $platformName : null
+
+  $customerDisplay = [
+    'Username' => $customerName !== ''
+        ? $customerName
+        : ($existingCustomerId > 0
+            ? 'Existing Customer'
+            : 'New Customer — Pending Approval'),
+    'Platform' => $platformName !== '' ? $platformName : null,
+    'Verification Status' => (string) ($row['status'] ?? '')
 ];
 foreach ([
     'Primary Mobile No' => ['primary_mobile_no', 'primaryMobileNo'],
@@ -584,16 +590,21 @@ foreach ([
 }
 
 $vehicles = $snapshot['vehicles'] ?? [];
+
 if (!is_array($vehicles)) {
     $vehicles = [];
 }
+
 $vehicles = array_values($vehicles);
+
 if (!$vehicles && is_array($snapshot['vehicle'] ?? null)) {
     $vehicles[] = $snapshot['vehicle'];
 }
+
 if (!$vehicles && is_array($snapshot['step2'] ?? null)) {
     $vehicles[] = $snapshot['step2'];
 }
+
 if (!$vehicles && $linkedVehicleId > 0) {
     $vehicles[] = ['vehicle_record_id' => $linkedVehicleId];
 }
@@ -765,56 +776,44 @@ foreach ($vehicles as $vehicle) {
     $displayVehicles[] = $vehicleDisplay;
 
     $installation = $vehicle['installation'] ?? null;
-    if (is_array($installation)) {
-        $installation = customerVerificationMergeMissing($installation, [
-            'installation_person_type' => $installation['installationPersonType'] ?? null,
-            'installation_type' => $installation['installationType'] ?? null,
-            'installation_person_id' => $installation['installationPersonId'] ?? null,
-            'installation_person' => $installation['installationPerson'] ?? null,
-            'lead_closure_id' => $installation['leadClosureId'] ?? null,
-            'lead_closure' => $installation['leadClosure'] ?? null,
-            'installation_date' => $installation['installationDate'] ?? null
-        ]);
-    }
-    if (!is_array($installation) && (
-        !empty($vehicle['vehicle_installation_date'])
-        || !empty($vehicle['vehicle_installation_person_type'])
-        || !empty($vehicle['vehicle_installation_person'])
-    )) {
-        $installation = [
-            'installation_type' => $vehicle['vehicle_installation_type'] ?? null,
-            'installation_person_type' => $vehicle['vehicle_installation_type'] ?? '',
-            'installation_person_id' => $vehicle['vehicle_installation_person_id'] ?? 0,
-            'installation_person' => $vehicle['vehicle_installation_person'] ?? null,
-            'lead_closure_id' => $vehicle['vehicle_lead_closure_id'] ?? 0,
-            'lead_closure' => $vehicle['vehicle_lead_closure'] ?? null,
-            'installation_date' => $vehicle['vehicle_installation_date'] ?? null
-        ];
-    }
-    if (!is_array($installation) && $customerId > 0 && $vehicleId > 0) {
-        $installation = customerVerificationLoadInstallation($conn, $customerId, $vehicleId);
-        if (!$installation) {
-            if ($legacyInstallationMap === null) {
-                $legacyInstallationMap = customerVerificationLoadLegacyInstallationMap($conn, $customerId);
-            }
-            $installation = $legacyInstallationMap[$vehicleId] ?? null;
-        }
-    } elseif (is_array($installation) && $customerId > 0 && $vehicleId > 0) {
-        $actualInstallation = customerVerificationLoadInstallation($conn, $customerId, $vehicleId);
-        if (!$actualInstallation) {
-            if ($legacyInstallationMap === null) {
-                $legacyInstallationMap = customerVerificationLoadLegacyInstallationMap($conn, $customerId);
-            }
-            $actualInstallation = $legacyInstallationMap[$vehicleId] ?? null;
-        }
-        if ($actualInstallation) {
-            foreach (['installation_person_id', 'lead_closure_id'] as $identifierField) {
-                if ((int) ($installation[$identifierField] ?? 0) <= 0) {
-                    $installation[$identifierField] = $actualInstallation[$identifierField] ?? null;
-                }
-            }
-            $installation = customerVerificationMergeMissing($installation, $actualInstallation);
-        }
+
+
+// Handle missing or empty installation data
+if (!is_array($installation) || !$installation) {
+    $installation = null;
+}
+
+// Normalize installation fields
+if (is_array($installation)) {
+    $installation = customerVerificationMergeMissing($installation, [
+        'installation_person_type' => $installation['installationPersonType'] ?? null,
+        'installation_type' => $installation['installationType'] ?? null,
+        'installation_person_id' => $installation['installationPersonId'] ?? null,
+        'installation_person' => $installation['installationPerson'] ?? null,
+        'lead_closure_id' => $installation['leadClosureId'] ?? null,
+        'lead_closure' => $installation['leadClosure'] ?? null,
+        'installation_date' => $installation['installationDate'] ?? null
+    ]);
+}
+
+// Fallback to legacy vehicle installation fields
+if (!is_array($installation) && (
+    !empty($vehicle['vehicle_installation_date']) ||
+    !empty($vehicle['vehicle_installation_person_type']) ||
+    !empty($vehicle['vehicle_installation_person'])
+)) {
+    $installation = [
+        'installation_type' => $vehicle['vehicle_installation_type'] ?? null,
+        'installation_person_type' => $vehicle['vehicle_installation_person_type'] ?? '',
+        'installation_person_id' => $vehicle['vehicle_installation_person_id'] ?? 0,
+        'installation_person' => $vehicle['vehicle_installation_person'] ?? null,
+        'lead_closure_id' => $vehicle['vehicle_lead_closure_id'] ?? 0,
+        'lead_closure' => $vehicle['vehicle_lead_closure'] ?? null,
+        'installation_date' => $vehicle['vehicle_installation_date'] ?? null
+    ];
+}
+    if (!is_array($installation) && $vehicle === ($snapshot['vehicle'] ?? null) && is_array($snapshot['installation'] ?? null)) {
+        $installation = $snapshot['installation'];
     }
     if (is_array($installation)) {
         $personType = trim((string) ($installation['installation_person_type'] ?? ''));
@@ -829,93 +828,37 @@ foreach ($vehicles as $vehicle) {
         $personTable = stripos($personType, 'dealer') !== false ? 'dealers' : 'technicians';
         $personLabelColumn = $personTable === 'dealers' ? 'dealer_name' : 'technician_name';
         $installationPerson = trim((string) ($installation['installation_person'] ?? ''));
-        if ($installationPerson === '') {
-            $installationPerson = strcasecmp($personType, 'Direct') === 0
-                ? 'Not applicable'
-                : customerVerificationLookup($conn, $personTable, $personLabelColumn, $personId);
-        }
-        $leadClosure = trim((string) ($installation['lead_closure'] ?? ''));
-        if ($leadClosure === '') {
-            $leadClosure = customerVerificationLookup(
-                $conn,
-                'lead_closures',
-                'lead_closure_name',
-                (int) ($installation['lead_closure_id'] ?? 0)
-            );
-        }
+
+if ($installationPerson === '') {
+    $installationPerson = strcasecmp($personType, 'Direct') === 0
+        ? 'Not applicable'
+        : (customerVerificationLookup(
+            $conn,
+            $personTable,
+            $personLabelColumn,
+            $personId
+        ) ?? '');
+}
+
+$leadClosure = trim((string) ($installation['lead_closure'] ?? ''));
+
+if ($leadClosure === '') {
+    $leadClosure = customerVerificationLookup(
+        $conn,
+        'lead_closures',
+        'lead_closure_name',
+        (int) ($installation['lead_closure_id'] ?? 0)
+    ) ?? '';
+}
         $displayInstallations[] = [
             'Vehicle' => $vehicleLabel,
-            'Installation Person Type' => $displayPersonType !== '' ? $displayPersonType : null,
-            'Installation Person' => $installationPerson !== '' ? $installationPerson : null,
-            'Lead Closure' => $leadClosure !== '' ? $leadClosure : null,
-            'Installation Date' => $installation['installation_date'] ?? null
+            
         ];
     }
 
-    $payment1 = is_array($vehicle['payment_part1'] ?? null)
-        ? customerVerificationNormalizePayment($vehicle['payment_part1'])
-        : null;
-    $payment2 = is_array($vehicle['payment_part2'] ?? null)
-        ? customerVerificationNormalizePayment($vehicle['payment_part2'])
-        : null;
-    $paymentId = 0;
-    foreach ([
-        $vehicle['payment_id'] ?? null,
-        $vehicle['vehicle_payment_id'] ?? null,
-        $vehicle['vehiclePaymentId'] ?? null,
-        is_array($payment2) ? ($payment2['payment_id'] ?? null) : null,
-        is_array($payment2) ? ($payment2['paymentId'] ?? null) : null,
-        is_array($payment2) ? ($payment2['id'] ?? null) : null
-    ] as $paymentIdCandidate) {
-        if (is_numeric($paymentIdCandidate) && (int) $paymentIdCandidate > 0) {
-            $paymentId = (int) $paymentIdCandidate;
-            break;
-        }
-    }
-    if ($paymentId <= 0 && count($vehicles) === 1) {
-        $paymentId = $linkedPaymentId;
-    }
-    $actualPayment = null;
-    if ($source !== 'payment_installment' && $source !== 'courier' && $customerId > 0) {
-        if ($linkedPayment && (
-            (int) ($linkedPayment['vehicle_id'] ?? 0) === $vehicleId
-            || (count($vehicles) === 1 && (int) ($linkedPayment['vehicle_id'] ?? 0) === 0)
-        )) {
-            $actualPayment = $linkedPayment;
-        } elseif ($paymentId > 0) {
-            $actualPayment = customerVerificationLoadPayment($conn, $customerId, $paymentId, $vehicleId);
-        }
-        if (!$actualPayment && $vehicleId > 0 && $source !== 'customer_vehicle_addition') {
-            $actualPayment = customerVerificationLoadPayment($conn, $customerId, 0, $vehicleId);
-        }
-    }
-    if ($actualPayment) {
-        $payment1 = customerVerificationMergeMissing(
-            is_array($payment1) ? $payment1 : [],
-            [
-                'total_sale_amount' => $actualPayment['total_sale_amount'] ?? null,
-                'transaction_id' => $actualPayment['transaction_id'] ?? null,
-                'payment_mode' => $actualPayment['payment_mode'] ?? null
-            ]
-        );
-        $payment2 = customerVerificationMergeMissing(
-            is_array($payment2) ? $payment2 : [],
-            [
-                'payment_mode' => $actualPayment['payment_mode'] ?? null,
-                'transaction_id' => $actualPayment['transaction_id'] ?? null,
-                'device_charge' => $actualPayment['device_charge'] ?? null,
-                'software_charge' => $actualPayment['software_charge'] ?? null,
-                'technician_charge' => $actualPayment['technician_charge'] ?? null,
-                'sim_charge' => $actualPayment['sim_charge'] ?? null,
-                'courier_charge' => $actualPayment['courier_charge'] ?? null,
-                'total_amount' => $actualPayment['total_amount'] ?? null,
-                'amount_paid' => $actualPayment['amount_paid'] ?? null,
-                'amount_pending' => $actualPayment['amount_pending'] ?? null,
-                'payment_status' => $actualPayment['payment_status'] ?? null,
-                'cash_recipient_type' => $actualPayment['cash_recipient_type'] ?? null,
-                'cash_recipient_name' => $actualPayment['cash_recipient_name'] ?? null
-            ]
-        );
+    $payment1 = $vehicle['payment_part1'] ?? null;
+    if (!is_array($payment1) && $vehicle === ($snapshot['vehicle'] ?? null) && is_array($snapshot['payment_part1'] ?? null)) {
+        $payment1 = $snapshot['payment_part1'];
     }
     if (is_array($payment1) || $actualPayment) {
         $displayPaymentPart1[] = customerVerificationPayment($payment1, $vehicleLabel, false);
@@ -1026,6 +969,8 @@ if (($snapshot['source'] ?? '') === 'courier') {
     $row['submission_type'] = 'Payment Installment';
 } elseif (($snapshot['source'] ?? '') === 'customer_vehicle_addition') {
     $row['submission_type'] = 'Additional Customer Vehicle';
+} elseif (($snapshot['source'] ?? '') === 'crm_installation') {
+    $row['submission_type'] = 'CRM Installation Device';
 }
 $row['is_own_submission'] = $reviewerId > 0
     && (int) $row['submitter_user_id'] === $reviewerId;

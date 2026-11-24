@@ -20,6 +20,7 @@ function validateDealerFields($input, $rowNumber = null) {
     $rawMobile = (string) ($input['mobile_no'] ?? $input['Mobile No'] ?? '');
     $rawAlternateMobile = (string) ($input['alternate_mobile_no'] ?? $input['Alternate Mobile No'] ?? '');
     $location = trim((string) ($input['location'] ?? $input['Location'] ?? ''));
+    $installationServiceAreas = trim((string) ($input['installation_service_areas'] ?? ''));
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $installationStatus = trim((string) ($input['installation_status'] ?? $input['Installation Status'] ?? ''));
     $notes = trim((string) ($input['notes'] ?? $input['Notes'] ?? ''));
@@ -42,6 +43,9 @@ function validateDealerFields($input, $rowNumber = null) {
     // 3. Location
     if ($location === '') {
         $errors[] = "{$prefix}Location is required.";
+    }
+    if (mb_strlen($installationServiceAreas) > 2000) {
+        $errors[] = "{$prefix}Installation service areas cannot exceed 2,000 characters.";
     }
 
     // 4. Enrolled Date
@@ -108,6 +112,7 @@ function validateDealerFields($input, $rowNumber = null) {
             'raw_mobile' => $rawMobile,
             'alternate_mobile_no' => $rawAlternateMobile !== '' ? $rawAlternateMobile : null,
             'location' => $location,
+            'installation_service_areas' => $installationServiceAreas,
             'enrolled_date' => $isoDate,
             'installation_status' => $normalizedStatus,
             'notes' => $notes,

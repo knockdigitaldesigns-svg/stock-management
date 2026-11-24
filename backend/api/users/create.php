@@ -5,6 +5,8 @@ require_once '../../middleware/auth.php';
 require_once '../../utils/user_identity.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/user_credential_crypto.php';
+require_once '../../utils/user_creation.php';
+require_once '../../utils/installation_personnel.php';
 
 handlePreflight();
 
@@ -77,8 +79,11 @@ if ($roleResult->num_rows === 0) {
 }
 $role = $roleResult->fetch_assoc();
 $roleCheck->close();
+if (isInstallationPersonnelRoleName((string) $role['role_name'])) {
+    $conn->close();
+    sendResponse(false, 'Dealer and Technician login accounts must be created from their linked personnel records.', [], [], 403);
+}
 
-$hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 try {
     getUserCredentialEncryptionKey();
 } catch (Throwable $error) {
@@ -86,40 +91,16 @@ try {
 }
 $conn->begin_transaction();
 try {
-    $insert = $conn->prepare('INSERT INTO users (employee_name, mobile_no, username, password, role, role_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    if (!$insert) {
-        throw new RuntimeException('Failed to prepare user creation.');
-    }
-    $insert->bind_param('sssssis', $employeeName, $mobileNo, $username, $hashedPassword, $role['role_name'], $roleId, $status);
-    if (!$insert->execute()) {
-        $duplicate = $conn->errno === 1062 || $insert->errno === 1062;
-        $insert->close();
-        if ($duplicate) {
-            throw new DomainException('Username already exists. Please use a different employee name.');
-        }
-        throw new RuntimeException('Failed to create user.');
-    }
-    $insert->close();
-    $userId = $conn->insert_id;
-    $credential = encryptUserCredential($password, $userId);
-    $credentialStmt = $conn->prepare('UPDATE users SET credential_ciphertext = ?, credential_nonce = ?, credential_tag = ? WHERE id = ?');
-    if (!$credentialStmt) {
-        throw new RuntimeException('Failed to prepare encrypted credential storage.');
-    }
-    $credentialStmt->bind_param('sssi', $credential['ciphertext'], $credential['nonce'], $credential['tag'], $userId);
-    if (!$credentialStmt->execute()) {
-        $credentialStmt->close();
-        throw new RuntimeException('Failed to store encrypted user credential.');
-    }
-    $credentialStmt->close();
-
-    writeCreatedFields($conn, $userId, 'User', [
-        'employee_name' => $employeeName,
-        'mobile_no' => $mobileNo,
-        'username' => $username,
-        'role_id' => $roleId,
-        'status' => $status
-    ], $currentUser);
+    $createdUser = createUserAccountInTransaction(
+        $conn,
+        $employeeName,
+        $mobileNo,
+        $password,
+        $roleId,
+        $role['role_name'],
+        $status,
+        $currentUser
+    );
     $conn->commit();
 } catch (Throwable $error) {
     $conn->rollback();
@@ -138,7 +119,7 @@ $conn->close();
 sendResponse(true, 'User created successfully', ['user' => [
     'employee_name' => $employeeName,
     'mobile_no' => $mobileNo,
-    'username' => $username,
+    'username' => $createdUser['username'],
     'role_id' => $roleId,
     'role' => $role['role_name'],
     'status' => $status

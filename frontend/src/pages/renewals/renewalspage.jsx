@@ -80,6 +80,8 @@ const RenewalsPage = () => {
     const [modal, setModal] = useState(null);
     const [selected, setSelected] = useState(null);
     const [history, setHistory] = useState([]);
+    const [historyPagination, setHistoryPagination] = useState({ page: 1, page_size: 10, total: 0 });
+    const [historyLoading, setHistoryLoading] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
     const [exporting, setExporting] = useState(false);
@@ -287,10 +289,41 @@ const RenewalsPage = () => {
             setModal('edit');
         } catch (error) { showGlobalError(error.response?.data?.message || 'Failed to load renewal for editing.'); }
     };
-    const openHistory = async () => {
-        try { const response = await api.get(`/renewals/history.php?renewal_id=${selected.id}`); setHistory(response.data?.data?.history || []); setModal('history'); }
-        catch (error) { showGlobalError(error.response?.data?.message || 'Failed to load renewal history.'); }
+    const openHistory = () => {
+        setHistoryPagination((current) => ({ ...current, page: 1 }));
+        setModal('history');
     };
+
+    useEffect(() => {
+        if (modal !== 'history' || !selected?.id) return undefined;
+        let active = true;
+        const loadHistory = async () => {
+            setHistoryLoading(true);
+            try {
+                const response = await api.get('/renewals/history.php', {
+                    params: {
+                        renewal_id: selected.id,
+                        page: historyPagination.page,
+                        page_size: historyPagination.page_size
+                    }
+                });
+                if (!active) return;
+                setHistory(response.data?.data?.history || []);
+                setHistoryPagination((current) => ({
+                    ...current,
+                    ...(response.data?.data?.pagination || {})
+                }));
+            } catch (error) {
+                if (active) showGlobalError(error.response?.data?.message || 'Failed to load renewal history.');
+            } finally {
+                if (active) setHistoryLoading(false);
+            }
+        };
+        loadHistory();
+        return () => {
+            active = false;
+        };
+    }, [modal, selected?.id, historyPagination.page, historyPagination.page_size]);
     const undoRenewal = async () => {
         if (!undoTarget || !undoReason.trim() || undoing) return;
         try {
@@ -597,7 +630,7 @@ const RenewalsPage = () => {
         {selected && <><InfoSection title="Customer Details" record={selected} fields={[['Username', 'username'], ['Mobile No', 'primary_mobile_no'], ['Secondary Mobile No', 'secondary_mobile_no'], ['Email', 'email'], ['Location', 'location'], ['Pincode', 'pincode'], ['Platform', 'platform_name']]} /><InfoSection title="Vehicle / SIM Details" record={selected} fields={[['Vehicle No', 'vehicle_no'], ['Vehicle Type', 'vehicle_type'], ['IMEI No', 'imei_no'], ['SIM No', 'sim_no_1'], ['SIM No 2', 'sim_no_2'], ['Device Model', 'device_model'], ['Validity', 'validity_months']]} /><InfoSection title="Installation Details" record={selected} fields={[['Installation Person', 'installation_person'], ['Installation Person Type', 'installation_person_type'], ['Lead Closure', 'lead_closure'], ['Installation Date', 'installation_date', true]]} /><InfoSection title="Renewal Details" record={selected} fields={renewalDetailFields} /></>}
     </Modal>
 
-    <Modal isOpen={modal === 'history'} onClose={() => setModal('view')} title="Renewal History" maxWidth="1450px"><div className="table-container"><table><thead><tr>{['Date', 'Action', 'Old Status', 'New Status', 'Old Validity', 'New Validity', 'Old Renewal Date', 'New Renewal Date', 'Amount', 'Paid', 'Pending', 'Payment Mode', 'Payment Date', 'Transaction ID', 'Changed By', 'Undone At', 'Undone By', 'Undo Reason'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{history.length ? history.map((item) => <tr key={item.id}><td>{formatDateTime(item.created_at || item.action_date)}</td><td>{item.action_type}</td><td>{display(item.old_status)}</td><td>{display(item.new_status)}</td><td>{display(item.old_validity_months)}</td><td>{display(item.new_validity_months)}</td><td>{formatDate(item.old_renewal_date)}</td><td>{formatDate(item.new_renewal_date)}</td><td>{display(item.payment_amount)}</td><td>{display(item.amount_paid)}</td><td>{display(item.amount_pending)}</td><td>{display(item.payment_mode)}</td><td>{formatDate(item.payment_date)}</td><td>{display(item.transaction_id)}</td><td>{display(item.changed_by_name)}</td><td>{formatDateTime(item.undone_at)}</td><td>{display(item.undone_by_name)}</td><td>{display(item.undo_reason)}</td></tr>) : <tr><td colSpan="18">No history found.</td></tr>}</tbody></table></div></Modal>
+    <Modal isOpen={modal === 'history'} onClose={() => setModal('view')} title="Renewal History" maxWidth="1450px"><div className="table-container"><table><thead><tr>{['Date', 'Action', 'Old Status', 'New Status', 'Old Validity', 'New Validity', 'Old Renewal Date', 'New Renewal Date', 'Amount', 'Paid', 'Pending', 'Payment Mode', 'Payment Date', 'Transaction ID', 'Changed By', 'Undone At', 'Undone By', 'Undo Reason'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{historyLoading ? <tr><td colSpan="18">Loading renewal history...</td></tr> : history.length ? history.map((item) => <tr key={item.id}><td>{formatDateTime(item.created_at || item.action_date)}</td><td>{item.action_type}</td><td>{display(item.old_status)}</td><td>{display(item.new_status)}</td><td>{display(item.old_validity_months)}</td><td>{display(item.new_validity_months)}</td><td>{formatDate(item.old_renewal_date)}</td><td>{formatDate(item.new_renewal_date)}</td><td>{display(item.payment_amount)}</td><td>{display(item.amount_paid)}</td><td>{display(item.amount_pending)}</td><td>{display(item.payment_mode)}</td><td>{formatDate(item.payment_date)}</td><td>{display(item.transaction_id)}</td><td>{display(item.changed_by_name)}</td><td>{formatDateTime(item.undone_at)}</td><td>{display(item.undone_by_name)}</td><td>{display(item.undo_reason)}</td></tr>) : <tr><td colSpan="18">No history found.</td></tr>}</tbody></table></div><Pagination currentPage={historyPagination.page} totalItems={historyPagination.total} pageSize={historyPagination.page_size} onPageChange={(page) => setHistoryPagination((current) => ({ ...current, page }))} onPageSizeChange={(page_size) => setHistoryPagination((current) => ({ ...current, page: 1, page_size }))} itemName="history records" /></Modal>
 
     <Modal isOpen={modal === 'edit'} onClose={closeActionModal} title={`Renewal Action - ${selected?.username || ''}`} maxWidth="1100px" className="renewal-edit-modal" footer={<><button className="btn" type="button" onClick={closeActionModal}>Cancel</button><button className="btn btn-primary" type="button" disabled={saving} onClick={executeAction}>{saving ? 'Saving...' : 'Save Action'}</button></>}>
         {selected && <>

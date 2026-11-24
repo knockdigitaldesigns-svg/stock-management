@@ -37,6 +37,12 @@ const Login = () => {
             });
 
             if (response.data.success) {
+                if (response.data.data?.otp_required) {
+                    sessionStorage.setItem('otpPendingToken', response.data.data.pending_token);
+                    sessionStorage.setItem('otpExpiresIn', String(response.data.data.expires_in || 300));
+                    navigate('/verify-otp');
+                    return;
+                }
                 const userData = response.data.data.user || response.data.data;
                 const permissions = response.data.data.permissions || response.data.data.user?.permissions || [];
                 localStorage.setItem('token', response.data.data.token);

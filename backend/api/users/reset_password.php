@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../middleware/auth.php';
 require_once '../../utils/user_credential_crypto.php';
+require_once '../../utils/installation_personnel.php';
 
 handlePreflight();
 
@@ -35,6 +36,17 @@ try {
 $conn = (new Database())->getConnection();
 if (!$conn) {
     sendResponse(false, 'Database connection failed', [], [], 500);
+}
+
+try {
+    if (isInstallationPersonnelAccount($conn, $id)) {
+        $conn->close();
+        sendResponse(false, 'Installation person passwords must be reset from Installation Persons.', [], [], 403);
+    }
+} catch (Throwable $error) {
+    $conn->close();
+    error_log('Installation person password access check failed: ' . $error->getMessage());
+    sendResponse(false, 'Unable to verify account type.', [], [], 500);
 }
 
 $passwordHash = password_hash($password, PASSWORD_DEFAULT);

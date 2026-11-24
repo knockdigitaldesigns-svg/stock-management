@@ -151,9 +151,11 @@ $sql = "
     SELECT 
         t.id, 
         t.technician_name, 
+        t.user_id,
         t.mobile_no, 
         t.alternate_mobile_no,
         t.location, 
+        t.installation_service_areas,
         t.enrolled_date, 
         t.status,
         t.notes,

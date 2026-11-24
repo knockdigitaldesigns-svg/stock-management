@@ -18,7 +18,8 @@ ensurePermissionDefinitions([
     'dealer_sim_activation.view', 'dealer_sim_activation.edit', 'dealer_sim_activation.delete',
     'dealer_sim_activation.import', 'dealers.import', 'technicians.import',
     'support.view', 'support.add', 'support.edit', 'support.delete',
-    'support.assign', 'support.close', 'support.qa.view', 'support.qa.manage'
+    'support.assign', 'support.close', 'support.qa.view', 'support.qa.manage',
+    'crm_leads.transfer', 'crm_leads.transfer_bulk', 'crm_leads.transfer_history'
 ]);
 
 $db = new Database();

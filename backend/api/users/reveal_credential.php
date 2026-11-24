@@ -3,6 +3,7 @@ require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/user_credential_crypto.php';
+require_once '../../utils/installation_personnel.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -26,6 +27,17 @@ if ($userId <= 0) {
 $conn = (new Database())->getConnection();
 if (!$conn) {
     sendResponse(false, 'Database connection failed.', [], [], 500);
+}
+
+try {
+    if (isInstallationPersonnelAccount($conn, $userId)) {
+        $conn->close();
+        sendResponse(false, 'Installation person credentials are managed in Installation Persons.', [], [], 403);
+    }
+} catch (Throwable $error) {
+    $conn->close();
+    error_log('Installation person credential access check failed: ' . $error->getMessage());
+    sendResponse(false, 'Unable to verify account type.', [], [], 500);
 }
 
 $transactionStarted = false;

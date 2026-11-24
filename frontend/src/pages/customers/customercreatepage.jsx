@@ -16,8 +16,12 @@ import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import Modal from '../../components/Modal/Modal';
 import { saveCustomerDraft } from '../../utils/customerSubmission';
-import { getCustomerFieldErrors, sanitizeCustomerField, validateCustomerForm } from '../../utils/customerValidation';
-
+import {
+    getCustomerFieldErrors,
+    sanitizeCustomerField,
+    validateCustomerForm
+} from '../../utils/customerValidation';
+import { useConfirmation } from '../../components/Modal/useConfirmation';
 const initialForm = {
     platform_id: '',
     username: '',
@@ -47,6 +51,7 @@ const emptyCustomerDetails = {
 const CustomerCreatePage = () => {
     const navigate = useNavigate();
     const { customerId } = useParams();
+    const { confirm, confirmationDialog } = useConfirmation();
 
     const { hasPermission } = useAuth();
 
@@ -799,10 +804,13 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const handleReset = () => {
-        const confirmed = window.confirm(
-            'Are you sure you want to reset the customer details?'
-        );
+    const handleReset = async () => {
+        const confirmed = await confirm({
+            title: 'Reset Customer Details',
+            message: 'Are you sure you want to reset the customer details?',
+            confirmLabel: 'Reset',
+            confirmClassName: 'btn-danger'
+        });
 
         if (!confirmed) {
             return;
@@ -1521,6 +1529,7 @@ const loadCustomer = async () => {
                 </div>
             )}
 
+            {confirmationDialog}
         </div>
     );
 };

@@ -1,0 +1,184 @@
+.lead-status-message {
+    margin-bottom: 1rem;
+}
+
+.lead-status-filters .table-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lead-status-table-container {
+    margin: 0;
+}
+
+.lead-status-table {
+    width: 100%;
+    min-width: 820px;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--text-primary);
+}
+
+.lead-status-table thead th {
+    padding: 0.85rem 0.9rem;
+    background: #f3f7fc;
+    color: #64748b;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.lead-status-table tbody td {
+    padding: 0.85rem 0.9rem;
+    background: #fff;
+    border-bottom: 1px solid #e8edf4;
+    font-size: 0.82rem;
+    vertical-align: middle;
+}
+
+.lead-status-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.lead-status-table tbody tr:hover td {
+    background: #f8fafc;
+}
+
+.lead-status-table-empty {
+    height: 108px;
+    color: #64748b;
+    text-align: center;
+}
+
+.lead-status-name {
+    min-width: 150px;
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.lead-status-color {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: #475569;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+}
+
+.lead-status-color-swatch {
+    width: 18px;
+    height: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.15);
+    border-radius: 50%;
+}
+
+.lead-status-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
+}
+
+.lead-status-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.lead-status-action-btn.edit {
+    color: #2563eb;
+}
+
+.lead-status-action-btn.edit:hover {
+    background: #eff6ff;
+}
+
+.lead-status-action-btn.deactivate {
+    color: #d97706;
+}
+
+.lead-status-action-btn.activate {
+    color: #16a34a;
+}
+
+.lead-status-action-btn.deactivate:hover,
+.lead-status-action-btn.activate:hover {
+    background: #f1f5f9;
+}
+
+.lead-status-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.2rem;
+}
+
+.lead-status-form-group {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.lead-status-form-wide {
+    grid-column: 1 / -1;
+}
+
+.lead-status-form-group > label {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.lead-status-form-group .form-control {
+    width: 100%;
+}
+
+.lead-status-form-group .required {
+    color: #dc2626;
+}
+
+.lead-status-color-input {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 42px;
+}
+
+.lead-status-color-input input {
+    width: 46px;
+    height: 38px;
+    padding: 2px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    cursor: pointer;
+}
+
+.lead-status-color-input span {
+    color: #475569;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+}
+
+.lead-status-modal-error {
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 560px) {
+    .lead-status-filters .table-filter-grid,
+    .lead-status-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .lead-status-form-wide {
+        grid-column: auto;
+    }
+}

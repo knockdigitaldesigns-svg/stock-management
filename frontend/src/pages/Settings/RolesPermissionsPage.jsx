@@ -13,7 +13,20 @@ import Modal from '../../components/Modal/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { fetchAllPaginated } from '../../utils/fetchAllPaginated';
 
-const PERMISSION_COLUMNS = ['view', 'add', 'assign', 'edit', 'delete', 'import', 'export', 'update', 'approve'];
+const PERMISSION_COLUMNS = [
+    'view',
+    'add',
+    'assign',
+    'edit',
+    'delete',
+    'import',
+    'export',
+    'update',
+    'approve',
+    'activate',
+    'transfer',
+    'bulk_transfer'
+];
 
 const PERMISSION_COLUMN_LABELS = {
     view: 'View',
@@ -24,7 +37,10 @@ const PERMISSION_COLUMN_LABELS = {
     import: 'Bulk Upload',
     export: 'Export',
     update: 'Update',
-    approve: 'Approve'
+    approve: 'Approve',
+    activate: 'Activate',
+    transfer: 'Transfer',
+    bulk_transfer: 'Bulk Transfer'
 };
 
 const EXACT_MODULE_PERMISSIONS = [
@@ -265,8 +281,60 @@ const EXACT_MODULE_PERMISSIONS = [
             view: ['sim_lifecycle.view'],
             add: ['sim_lifecycle.add', 'sim_lifecycle.edit']
         }
+    },
+    {
+        name: 'My Leads',
+        actions: {
+            view: ['crm_leads.my_view'],
+            add: ['crm_leads.add'],
+            edit: ['crm_leads.edit'],
+            delete: ['crm_leads.delete'],
+            transfer: ['crm_leads.transfer'],
+            bulk_transfer: ['crm_leads.transfer_bulk']
+        }
+    },
+    {
+        name: 'Lead Transfer History',
+        actions: {
+            view: ['crm_leads.transfer_history']
+        }
+    },
+    {
+        name: 'Lead Stage Master',
+        actions: {
+            view: ['crm_lead_stage.view'],
+            add: ['crm_lead_stage.add'],
+            edit: ['crm_lead_stage.edit'],
+            activate: ['crm_lead_stage.activate']
+        }
+    },
+    {
+        name: 'Follow-ups',
+        actions: {
+            view: ['crm_followups.view'],
+            add: ['crm_followups.add'],
+            edit: ['crm_followups.edit']
+        }
+    },
+    {
+        name: 'Lead Converter & Form Approval',
+        actions: {
+            add: ['crm_closures.add'],
+            approve: ['crm_closures.approve']
+        }
+    },
+    {
+        name: 'Installation Assignments',
+        actions: {
+            view: ['crm_installations.view'],
+            edit: ['crm_installations.assign']
+        }
     }
 ];
+
+const VISIBLE_PERMISSION_COLUMNS = PERMISSION_COLUMNS.filter((column) =>
+    EXACT_MODULE_PERMISSIONS.some((module) => module.actions[column])
+);
 
 const buildPermissionMatrix = (definitions = [], assigned = []) => {
     const defKeys = new Set((definitions || []).map((d) => d.permission_key));
@@ -768,7 +836,7 @@ const deleteRole = async () => {
                                 <thead>
                                     <tr>
                                         <th style={{ width: '220px', minWidth: '180px' }}>Module</th>
-                                        {PERMISSION_COLUMNS.map((column) => (
+                                        {VISIBLE_PERMISSION_COLUMNS.map((column) => (
                                             <th key={column} style={{ textAlign: 'center', minWidth: '85px' }}>
                                                 {PERMISSION_COLUMN_LABELS[column] || column.charAt(0).toUpperCase() + column.slice(1)}
                                             </th>
@@ -778,7 +846,7 @@ const deleteRole = async () => {
                                 <tbody>
                                     {matrix.length === 0 ? (
                                         <tr>
-                                            <td colSpan={PERMISSION_COLUMNS.length + 1} className="text-center empty-state">
+                                            <td colSpan={VISIBLE_PERMISSION_COLUMNS.length + 1} className="text-center empty-state">
                                                 No permissions found.
                                             </td>
                                         </tr>
@@ -786,7 +854,7 @@ const deleteRole = async () => {
                                         matrix.map((row, rowIndex) => (
                                             <tr key={row.module}>
                                                 <td style={{ fontWeight: 500 }}>{row.module}</td>
-                                                {PERMISSION_COLUMNS.map((column) => {
+                                                {VISIBLE_PERMISSION_COLUMNS.map((column) => {
                                                     const isSupported = Boolean(row.supportedActions && row.supportedActions[column]);
                                                     return (
                                                         <td key={column} style={{ textAlign: 'center' }}>

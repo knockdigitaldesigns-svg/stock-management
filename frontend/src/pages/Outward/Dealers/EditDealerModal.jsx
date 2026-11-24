@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Trash2 } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
+import PersonnelCredentialNotice from '../../../components/PersonnelCredentialNotice';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
 import { formatDate } from '../../../utils/date';
 import { showGlobalError } from '../../../context/ErrorContext';
@@ -28,6 +29,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
         mobile_no: dealer?.mobile_no || '',
         alternate_mobile_no: dealer?.alternate_mobile_no || '',
         location: dealer?.location || '',
+        installation_service_areas: dealer?.installation_service_areas || '',
         enrolled_date: dealer?.enrolled_date || '',
         installation_status: dealer?.installation_status || 'Onsite',
         status: dealer?.status || 'active',
@@ -37,7 +39,13 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
     });
     const [softwareOpen, setSoftwareOpen] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [accountLoading, setAccountLoading] = useState(false);
     const [error, setError] = useState('');
+    const [accountPassword, setAccountPassword] = useState('');
+    const [confirmAccountPassword, setConfirmAccountPassword] = useState('');
+    const [showAccountPassword, setShowAccountPassword] = useState(false);
+    const [showConfirmAccountPassword, setShowConfirmAccountPassword] = useState(false);
+    const [credentials, setCredentials] = useState(null);
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
     const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
@@ -156,22 +164,59 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
         }
     };
 
+    const createLoginAccount = async () => {
+        setError('');
+        if (accountPassword.length < 8) {
+            return triggerError('Password must be at least 8 characters long.');
+        }
+        if (accountPassword !== confirmAccountPassword) {
+            return triggerError('Passwords do not match.');
+        }
+        if (!/^[6-9][0-9]{9}$/.test(String(dealer?.mobile_no || ''))) {
+            return triggerError('The saved dealer mobile number must be a valid 10-digit mobile number.');
+        }
+
+        setAccountLoading(true);
+        try {
+            const response = await api.post('/dealers/create.php', {
+                link_existing_id: Number(dealer.id),
+                password: accountPassword,
+                confirm_password: confirmAccountPassword
+            });
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Unable to create dealer login account.');
+            }
+            setCredentials({
+                username: response.data.data?.user?.username || String(dealer.dealer_name || '').trim().replace(/\s+/g, '').toLowerCase(),
+                role: response.data.data?.user?.role || 'Dealer',
+                password: accountPassword
+            });
+        } catch (accountError) {
+            triggerError(accountError.response?.data?.message || accountError.message || 'Unable to create dealer login account.');
+        } finally {
+            setAccountLoading(false);
+        }
+    };
+
     return (
         <>
             <Modal
                 isOpen={Boolean(dealer)}
-                onClose={onClose}
-                title="Edit Dealer"
+                onClose={credentials ? onSuccess : onClose}
+                title={credentials ? 'Dealer Login Created' : 'Edit Dealer'}
                 maxWidth="560px"
-                footer={
+                footer={credentials ? null : (
                     <>
-                        <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
-                        <button type="submit" form="edit-dealer-form" className="btn btn-primary" disabled={loading}>
+                        <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading || accountLoading}>Cancel</button>
+                        <button type="submit" form="edit-dealer-form" className="btn btn-primary" disabled={loading || accountLoading}>
                             {loading ? 'Saving...' : 'Save Changes'}
                         </button>
                     </>
-                }
+                )}
             >
+            {credentials ? (
+                <PersonnelCredentialNotice credentials={credentials} onDone={onSuccess} />
+            ) : (
             <form id="edit-dealer-form" onSubmit={handleSubmit}>
                 {error && <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>{error}</div>}
 
@@ -197,6 +242,11 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
                 <div className="form-group">
                     <label className="form-label">Location *</label>
                     <input type="text" className="form-control" value={formData.location} onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                    <label className="form-label">Installation Service Areas</label>
+                    <textarea className="form-control" rows="2" value={formData.installation_service_areas} onChange={(e) => setFormData((prev) => ({ ...prev, installation_service_areas: e.target.value }))} placeholder="Coimbatore, Pollachi, Mettupalayam" />
+                    <small>Enter only cities/areas this dealer explicitly serves, separated by commas or new lines.</small>
                 </div>
 
                 <div className="form-group">
@@ -283,6 +333,49 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
                 </div>
 
                 <hr />
+                <h4>Login Account</h4>
+                {dealer?.user_id ? (
+                    <p>This dealer is linked to login account #{dealer.user_id}. Ordinary profile updates do not change the linked account.</p>
+                ) : (
+                    <>
+                        <p>Create a separate account using the saved employee name and mobile number. The Dealer role is assigned automatically.</p>
+                        <div className="form-group">
+                            <label className="form-label">Employee Name</label>
+                            <input className="form-control" value={dealer?.dealer_name || ''} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Mobile Number</label>
+                            <input className="form-control" value={dealer?.mobile_no || ''} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Generated Username</label>
+                            <input className="form-control" value={String(dealer?.dealer_name || '').trim().replace(/\s+/g, '').toLowerCase()} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input type={showAccountPassword ? 'text' : 'password'} className="form-control" autoComplete="new-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} />
+                                <button type="button" className="btn btn-outline" aria-label={showAccountPassword ? 'Hide password' : 'Show password'} onClick={() => setShowAccountPassword((visible) => !visible)}>
+                                    {showAccountPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Confirm Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input type={showConfirmAccountPassword ? 'text' : 'password'} className="form-control" autoComplete="new-password" value={confirmAccountPassword} onChange={(event) => setConfirmAccountPassword(event.target.value)} />
+                                <button type="button" className="btn btn-outline" aria-label={showConfirmAccountPassword ? 'Hide confirmation password' : 'Show confirmation password'} onClick={() => setShowConfirmAccountPassword((visible) => !visible)}>
+                                    {showConfirmAccountPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" className="btn btn-outline" onClick={createLoginAccount} disabled={loading || accountLoading}>
+                            {accountLoading ? 'Creating Login...' : 'Create Login Account'}
+                        </button>
+                    </>
+                )}
+
+                <hr />
                 <h4>Dealer Information</h4>
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={dealer?.total_amount > 0 ? dealer?.payment_status : 'No Payment Required'} readOnly /></div>
                 <hr />
@@ -323,6 +416,7 @@ const EditDealerModal = ({ dealer, onClose, onSuccess, onStockUpdated }) => {
                     </div>
                 )}
             </form>
+            )}
             </Modal>
             {deleteTarget && (
                 <Modal

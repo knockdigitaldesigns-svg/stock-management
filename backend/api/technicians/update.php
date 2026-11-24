@@ -49,7 +49,9 @@ if (!empty($dbErrors)) {
     sendResponse(false, $dbErrors[0], ['errors' => $dbErrors], [], 400);
 }
 
-$oldStmt = $conn->prepare('SELECT technician_name, mobile_no, alternate_mobile_no, location, enrolled_date, status, notes FROM technicians WHERE id = ? LIMIT 1');
+$oldStmt = $conn->prepare(
+    'SELECT technician_name, mobile_no, alternate_mobile_no, location, installation_service_areas, enrolled_date, status, notes FROM technicians WHERE id = ? LIMIT 1'
+);
 $oldStmt->bind_param('i', $id);
 $oldStmt->execute();
 $oldTechnician = $oldStmt->get_result()->fetch_assoc();
@@ -62,8 +64,23 @@ $conn->begin_transaction();
 try {
 writeChangedFields($conn, $id, 'Technician', $oldTechnician, $validData, $currentUser);
 
-$stmt = $conn->prepare('UPDATE technicians SET technician_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, enrolled_date = ?, status = ?, notes = ? WHERE id = ?');
-$stmt->bind_param('sssssssi', $validData['technician_name'], $validData['mobile_no'], $validData['alternate_mobile_no'], $validData['location'], $validData['enrolled_date'], $status, $validData['notes'], $id);
+
+$stmt = $conn->prepare(
+    'UPDATE technicians SET technician_name = ?, mobile_no = ?, alternate_mobile_no = ?, location = ?, installation_service_areas = ?, enrolled_date = ?, status = ?, notes = ? WHERE id = ?'
+);
+
+$stmt->bind_param(
+    'ssssssssi',
+    $validData['technician_name'],
+    $validData['mobile_no'],
+    $validData['alternate_mobile_no'],
+    $validData['location'],
+    $validData['installation_service_areas'],
+    $validData['enrolled_date'],
+    $status,
+    $validData['notes'],
+    $id
+);
 
 if ($stmt->execute()) {
     $stmt->close();

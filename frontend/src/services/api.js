@@ -9,6 +9,16 @@ const api = axios.create({
     }
 });
 
+const getInactivityTimeoutMs = () => {
+    try {
+        const user = JSON.parse(localStorage.getItem('user') || 'null');
+        const seconds = Number(user?.inactivity_timeout_seconds);
+        return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 15 * 60 * 1000;
+    } catch {
+        return 15 * 60 * 1000;
+    }
+};
+
 api.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('token');
@@ -47,12 +57,12 @@ api.interceptors.response.use(
             const isInactivityResponse = error.response?.data?.message?.toLowerCase().includes('inactivity');
             const sharedActivityAt = Number(localStorage.getItem('authLastMeaningfulActivity'));
             const hasRecentSharedActivity = Number.isFinite(sharedActivityAt)
-                && Date.now() - sharedActivityAt < 15 * 60 * 1000;
+                && Date.now() - sharedActivityAt < getInactivityTimeoutMs();
             if (isInactivityResponse && hasRecentSharedActivity) {
                 return Promise.reject(error);
             }
             const inactivityMessage = isInactivityResponse
-                ? 'You have been logged out due to 15 minutes of inactivity. Please log in again.'
+                ? 'Your session expired due to inactivity. Please log in again.'
                 : '';
             sessionStorage.setItem('authLogoutMessage', inactivityMessage);
             const identity = (() => {
