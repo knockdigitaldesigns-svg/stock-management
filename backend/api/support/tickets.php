@@ -49,6 +49,8 @@ if ($method === 'GET') {
     if (!$countStmt->execute()) { $countStmt->close(); $conn->close(); sendResponse(false, 'Failed to count support tickets.', [], [], 500); }
     $total = (int) ($countStmt->get_result()->fetch_assoc()['total'] ?? 0);
     $countStmt->close();
+    $totalPages = max(1, (int) ceil($total / $pageSize));
+    $page = min($page, $totalPages);
     $query = $listSql . $whereSql . ' ORDER BY st.updated_at DESC, st.id DESC LIMIT ? OFFSET ?';
     $listParams = $params;
     $listParams[] = $pageSize;
@@ -67,7 +69,7 @@ if ($method === 'GET') {
             'total' => $total,
             'page' => $page,
             'page_size' => $pageSize,
-            'total_pages' => max(1, (int) ceil($total / $pageSize))
+            'total_pages' => $totalPages
         ]
     ]);
 }

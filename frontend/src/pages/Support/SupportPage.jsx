@@ -27,7 +27,7 @@ const SupportPage = () => {
     const [tickets, setTickets] = useState([]);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
-    const [totalItems, setTotalItems] = useState(0);
+    const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [queueFilters, setQueueFilters] = useState({ search: '', date_from: '', date_to: '', status: '' });
     const [users, setUsers] = useState([]);
     const [issue, setIssue] = useState('');
@@ -51,7 +51,14 @@ const SupportPage = () => {
                 api.get('/support/users.php')
             ]);
             setTickets(ticketResponse.data?.data?.tickets || []);
-            setTotalItems(ticketResponse.data?.data?.pagination?.total || 0);
+            const nextPagination = ticketResponse.data?.data?.pagination || {
+                total: 0,
+                page: 1,
+                page_size: pageSize,
+                total_pages: 1
+            };
+            setPagination(nextPagination);
+            if (nextPagination.page !== page) setPage(nextPagination.page);
             setUsers(userResponse.data?.data?.users || []);
         } catch (requestError) { fail(requestError.response?.data?.message || 'Unable to load support task queue.'); }
     };
@@ -143,7 +150,7 @@ const SupportPage = () => {
             <div className="customer-section-title"><LifeBuoy size={20} /><h3>Support Task Queue</h3></div>
             <TableFilterBar filters={queueFilters} onChange={(nextFilters) => { setQueueFilters(nextFilters); setPage(1); }} onReset={() => { setQueueFilters({ search: '', date_from: '', date_to: '', status: '' }); setPage(1); }} items={tickets} dateKeys={['created_at']} showStatus statusOptions={statuses} searchPlaceholder="Search tickets..." />
             <div className="table-container"><table><thead><tr><th>Ticket ID</th><th>Customer</th><th>Mobile No</th><th>Issue</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{tickets.length === 0 ? <tr><td colSpan="9" className="text-center">No support tickets found.</td></tr> : tickets.map((ticket) => <tr key={ticket.id}><td>{ticket.ticket_id}</td><td>{ticket.username}</td><td>{ticket.mobile_no}</td><td className="truncate-cell" title={ticket.issue}>{ticket.issue}</td><td>{ticket.priority}</td><td>{ticket.assigned_to || '-'}</td><td><span className={`badge ${ticket.status === 'Closed' ? 'badge-success' : ticket.status === 'In Progress' ? 'badge-warning' : 'badge-info'}`}>{ticket.status}</span></td><td>{formatDate(ticket.created_at)}</td><td><button className="icon-btn view" type="button" title="Update ticket" onClick={() => openTicket(ticket)}><Save size={16} /></button></td></tr>)}</tbody></table></div>
-            <Pagination currentPage={page} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} itemName="tickets" />
+            <Pagination currentPage={page} totalItems={pagination.total} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} itemName="tickets" />
         </div>
 
         {isSuperAdmin && <div className="card" style={{ marginTop: 20 }}><div className="customer-section-title"><ShieldQuestion size={20} /><h3>Manage Support Questions</h3></div><form onSubmit={saveQuestion}><div className="form-group"><label className="form-label">Question</label><input className="form-control" value={questionForm.question} onChange={(event) => setQuestionForm({ ...questionForm, question: event.target.value })} required /></div><div className="form-group"><label className="form-label">Answer</label><textarea className="form-control" rows="3" value={questionForm.answer} onChange={(event) => setQuestionForm({ ...questionForm, answer: event.target.value })} required /></div><button className="btn btn-primary" disabled={saving}>{questionForm.id ? 'Update Question' : 'Add Question'}</button></form><div className="table-container" style={{ marginTop: 16 }}><table><thead><tr><th>Question</th><th>Answer</th><th>Actions</th></tr></thead><tbody>{questions.map((question) => <tr key={question.id}><td>{question.question}</td><td>{question.answer}</td><td><button className="btn btn-outline" type="button" onClick={() => setQuestionForm({ ...question, is_active: Boolean(Number(question.is_active)) })}>Edit</button> <button className="btn btn-danger" type="button" onClick={() => deleteQuestion(question.id)}>Delete</button></td></tr>)}</tbody></table></div></div>}

@@ -12,6 +12,7 @@ import Modal from '../../components/Modal/Modal';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
 import { useAuth } from '../../context/AuthContext';
+import { fetchAllPaginated } from '../../utils/fetchAllPaginated';
 
 const UsersPage = () => {
     const { user: currentUser } = useAuth();
@@ -80,8 +81,11 @@ const UsersPage = () => {
 
     const fetchUsers = async () => {
         try {
-            const response = await api.get('/users/list.php');
-            if (response.data.success) setUsers(response.data.data?.users || []);
+            const list = await fetchAllPaginated(
+                (page, pageSize) => api.get('/users/list.php', { params: { page, page_size: pageSize } }),
+                'users'
+            );
+            setUsers(list);
         } catch (err) {
             console.error('Failed to fetch users', err);
         } finally {
@@ -91,10 +95,11 @@ const UsersPage = () => {
 
     const fetchRoles = async () => {
         try {
-            const response = await api.get('/roles/list.php');
-            if (response.data.success) {
-                setRoles((response.data.data?.roles || []).filter((role) => role.status === 'active'));
-            }
+            const list = await fetchAllPaginated(
+                (page, pageSize) => api.get('/roles/list.php', { params: { page, page_size: pageSize } }),
+                'roles'
+            );
+            setRoles(list.filter((role) => role.status === 'active'));
         } catch (err) {
             console.error('Failed to fetch roles', err);
         }

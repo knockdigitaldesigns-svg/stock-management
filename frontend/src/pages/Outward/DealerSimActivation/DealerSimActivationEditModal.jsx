@@ -177,6 +177,14 @@ const DealerSimActivationEditModal = ({
         return formatDate(`${targetYear}-${String(normalizedMonth).padStart(2, '0')}-${String(normalizedDay).padStart(2, '0')}`);
     };
 
+    const calculateReactivationExpiry = () => {
+        if (!allocation?.expiry_date || !form.reactivation_date || !form.reactivation_validity_id) return '-';
+        if (form.reactivation_date <= allocation.expiry_date) {
+            return formatDate(allocation.expiry_date);
+        }
+        return calculateExpiry(form.reactivation_date, form.reactivation_validity_id);
+    };
+
     const handleSave = async () => {
         if (!allocation || !form) return;
         setError('');
@@ -837,7 +845,7 @@ const DealerSimActivationEditModal = ({
                                         {simValidities.filter((validity) => !validity.status || String(validity.status).toLowerCase() === 'active').map((validity) => <option key={validity.id} value={validity.id}>{validity.months} Months</option>)}
                                     </select>
                                 </div>
-                                <div className="form-group"><label className="form-label">Next Expiry / Renewal Date</label><input className="form-control" value={calculateExpiry(allocation.expiry_date, form.reactivation_validity_id)} readOnly /></div>
+                                <div className="form-group"><label className="form-label">Next Expiry / Renewal Date</label><input className="form-control" value={calculateReactivationExpiry()} readOnly /></div>
                             </>
                         )}
                         {lifecycleAction === 'safe_custody' && (

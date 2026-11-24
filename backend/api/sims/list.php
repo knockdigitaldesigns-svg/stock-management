@@ -218,24 +218,74 @@ try {
            AND sa.owner_type = "technician"
     ';
 
+   if ($forAllocation) {
+
+    // Simple query for Allocate Stock SIM dropdown
+    $sql = "
+        SELECT
+            s.id,
+            s.sim_no,
+            s.sim_type,
+            s.status
+        FROM sims s
+        WHERE s.deleted_at IS NULL
+          AND s.status = 'available'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM stock_allocations sa
+              WHERE sa.sim_id = s.id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM customer_vehicle_details cvd
+              WHERE cvd.sim_id_1 = s.id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM customer_vehicle_details cvd
+              WHERE cvd.sim_id_2 = s.id
+          )
+        ORDER BY s.created_at DESC, s.id DESC
+    ";
+
+    // No parameters for this query
+    $params = [];
+    $types = '';
+
+} else {
+
+    // Normal SIM list query
     $sql = $sqlBase . $whereSql . ' ORDER BY s.created_at DESC, s.id DESC';
-    if (!$forAllocation) {
-        $sql .= ' LIMIT ? OFFSET ?';
-        $params[] = $pageSize;
-        $params[] = $offset;
-        $types .= 'ii';
-    }
+
+    $sql .= ' LIMIT ? OFFSET ?';
+    $params[] = $pageSize;
+    $params[] = $offset;
+    $types .= 'ii';
+}
     $sims = [];
     $queryStartedAt = microtime(true);
+    
+    error_log("FOR ALLOCATION SQL: " . $sql);
+error_log("FOR ALLOCATION PARAMS: " . json_encode($params));
+    
+    
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         sendResponse(false, 'Failed to prepare SIM query.', [], [], 500);
     }
-    if (!$stmt->bind_param($types, ...$params) || !$stmt->execute()) {
+    if (!empty($params)) {
+    if (!$stmt->bind_param($types, ...$params)) {
         $error = $stmt->error;
         $stmt->close();
-        sendResponse(false, 'Failed to fetch SIMs: ' . $error, [], [], 500);
+        sendResponse(false, 'Failed to bind SIM query parameters: ' . $error, [], [], 500);
     }
+}
+
+if (!$stmt->execute()) {
+    $error = $stmt->error;
+    $stmt->close();
+    sendResponse(false, 'Failed to fetch SIMs: ' . $error, [], [], 500);
+}
     $result = $stmt->get_result();
     if (!$result) {
         $stmt->close();
