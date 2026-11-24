@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, RefreshCw, RotateCcw, Search, X } from 'lucide-react';
+import { Eye, RefreshCw, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
+import { useAuth } from '../../context/AuthContext';
 import { formatDateValue } from '../../utils/date';
 import './CustomerPaymentVerificationPage.css';
 
@@ -15,6 +16,7 @@ const detailSections = [
     ['payment_part1', 'Payment Part 1'],
     ['payment_part2', 'Payment Part 2']
 ];
+const MY_VERIFICATION_RETURN_STATE_KEY = 'my_verification_return_state';
 
 const getSectionData = (data, key) => {
     if (key === 'customer') return data.customer || data.step1;
@@ -59,6 +61,19 @@ const getCorrectionStep = (reason) => {
 
 const MyCustomerVerificationsPage = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const roleName = typeof user?.role === 'string'
+        ? user.role
+        : user?.role?.name || user?.role_name || '';
+    const isSuperAdmin = String(roleName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') === 'superadmin';
+    const [listReturnState] = useState(() => {
+        try {
+            const savedState = JSON.parse(sessionStorage.getItem(MY_VERIFICATION_RETURN_STATE_KEY) || '{}');
+            return savedState && typeof savedState === 'object' ? savedState : {};
+        } catch {
+            return {};
+        }
+    });
     const [submissions, setSubmissions] = useState([]);
     const [statusCounts, setStatusCounts] = useState({
         Draft: 0,
@@ -66,16 +81,20 @@ const MyCustomerVerificationsPage = () => {
         Approved: 0,
         Rejected: 0
     });
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+    const [page, setPage] = useState(() => Number.isInteger(Number(listReturnState.page)) && Number(listReturnState.page) > 0 ? Number(listReturnState.page) : 1);
+    const [pageSize, setPageSize] = useState(() => Number.isInteger(Number(listReturnState.pageSize)) && Number(listReturnState.pageSize) > 0 ? Number(listReturnState.pageSize) : 10);
     const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [selected, setSelected] = useState(null);
-    const [search, setSearch] = useState('');
-    const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState('');
-    const [requestTypeFilter, setRequestTypeFilter] = useState('');
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleteError, setDeleteError] = useState('');
+    const [deleting, setDeleting] = useState(false);
+    const [search, setSearch] = useState(() => listReturnState.search || '');
+    const [debouncedSearch, setDebouncedSearch] = useState(() => listReturnState.debouncedSearch || '');
+    const [statusFilter, setStatusFilter] = useState(() => listReturnState.statusFilter || '');
+    const [requestTypeFilter, setRequestTypeFilter] = useState(() => listReturnState.requestTypeFilter || '');
     const requestSequence = useRef(0);
     const searchTimer = useRef(null);
 
@@ -119,7 +138,6 @@ const MyCustomerVerificationsPage = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     const updateFilter = (setter, value) => {
@@ -139,6 +157,10 @@ const MyCustomerVerificationsPage = () => {
         return () => window.clearTimeout(timer);
     }, [loadSubmissions]);
 
+    useEffect(() => {
+        sessionStorage.removeItem(MY_VERIFICATION_RETURN_STATE_KEY);
+    }, []);
+
     useEffect(() => () => window.clearTimeout(searchTimer.current), []);
 
     const resumeDraft = async (id) => {
@@ -152,6 +174,14 @@ const MyCustomerVerificationsPage = () => {
             const data = item?.submission_data || {};
             const correctionStep = getCorrectionStep(item?.rejection_reason);
             const existingCustomerId = Number(item.existing_customer_id || data.existing_customer_id || 0);
+            sessionStorage.setItem(MY_VERIFICATION_RETURN_STATE_KEY, JSON.stringify({
+                page,
+                pageSize,
+                search,
+                debouncedSearch,
+                statusFilter,
+                requestTypeFilter
+            }));
             if (Array.isArray(data.vehicles) && existingCustomerId > 0) {
                 const customerRouteId = existingCustomerId;
                 sessionStorage.setItem(`customer_edit_verification_${customerRouteId}`, JSON.stringify({
@@ -231,6 +261,39 @@ const MyCustomerVerificationsPage = () => {
         }
     };
 
+    const closeDeleteModal = () => {
+        if (deleting) return;
+        setDeleteTarget(null);
+        setDeleteError('');
+    };
+
+    const deleteDraft = async () => {
+        if (!deleteTarget || deleting) return;
+        try {
+            setDeleting(true);
+            setDeleteError('');
+            setError('');
+            setSuccess('');
+            const response = await api.post('/customers/verification/delete_draft.php', {
+                submission_id: Number(deleteTarget.id)
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to delete the draft verification request.');
+            }
+            setDeleteTarget(null);
+            setSuccess(response.data.message || 'Draft verification request deleted successfully.');
+            await loadSubmissions();
+        } catch (deleteError) {
+            setDeleteError(
+                deleteError.response?.data?.message ||
+                deleteError.message ||
+                'Failed to delete the draft verification request.'
+            );
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div className="page-container verification-page my-verification-page">
             <div className="page-header">
@@ -243,6 +306,7 @@ const MyCustomerVerificationsPage = () => {
                 </button>
             </div>
             {error && <div className="alert alert-danger">{error}</div>}
+            {success && <div className="alert alert-success">{success}</div>}
             <div className="my-verification-status-counts" aria-label="Verification request counts">
                 {[
                     ['Pending Verification', statusCounts['Pending Verification'], 'pending'],
@@ -354,9 +418,25 @@ const MyCustomerVerificationsPage = () => {
                                 <td>
                                     <div className="my-verification-actions">
                                     {item.status === 'Draft' ? (
-                                        <button type="button" className="btn btn-secondary" onClick={() => resumeDraft(item.id)}>
-                                            <RotateCcw size={16} /> Continue
-                                        </button>
+                                        <>
+                                            <button type="button" className="btn btn-secondary" onClick={() => resumeDraft(item.id)}>
+                                                <RotateCcw size={16} /> Continue
+                                            </button>
+                                            {isSuperAdmin && (
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-danger"
+                                                    onClick={() => {
+                                                        setDeleteError('');
+                                                        setDeleteTarget(item);
+                                                    }}
+                                                    aria-label="Delete draft verification request"
+                                                    title="Delete draft verification request"
+                                                >
+                                                    <Trash2 size={16} /> Delete
+                                                </button>
+                                            )}
+                                        </>
                                     ) : (
                                         <>
                                             <button type="button" className="btn btn-secondary" onClick={() => viewDetails(item.id)}>
@@ -442,6 +522,25 @@ const MyCustomerVerificationsPage = () => {
                         })}
                     </div>
                 )}
+            </Modal>
+            <Modal
+                isOpen={Boolean(deleteTarget)}
+                onClose={closeDeleteModal}
+                title="Delete Draft Verification Request"
+                maxWidth="520px"
+                footer={
+                    <>
+                        <button type="button" className="btn btn-secondary" onClick={closeDeleteModal} disabled={deleting}>
+                            Cancel
+                        </button>
+                        <button type="button" className="btn btn-danger" onClick={deleteDraft} disabled={deleting}>
+                            {deleting ? 'Deleting...' : 'Delete'}
+                        </button>
+                    </>
+                }
+            >
+                <p>Are you sure you want to permanently delete this draft verification request?</p>
+                {deleteError && <div className="alert alert-danger">{deleteError}</div>}
             </Modal>
         </div>
     );

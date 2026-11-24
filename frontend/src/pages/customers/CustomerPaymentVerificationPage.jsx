@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Eye, Search, ShieldCheck, X } from 'lucide-react';
+import { Check, Eye, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import api from '../../services/api';
 import Modal from '../../components/Modal/Modal';
 import Pagination from '../../components/Pagination/Pagination';
@@ -228,6 +228,8 @@ const CustomerPaymentVerificationPage = () => {
     const [error, setError] = useState('');
     const [decisionError, setDecisionError] = useState('');
     const [notice, setNotice] = useState('');
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleteProcessing, setDeleteProcessing] = useState(false);
     const [selectedSubmissionIds, setSelectedSubmissionIds] = useState(() => new Set());
     const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
     const [bulkProcessing, setBulkProcessing] = useState(false);
@@ -281,7 +283,6 @@ const CustomerPaymentVerificationPage = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
         setSelectedSubmissionIds(new Set());
     };
 
@@ -434,6 +435,29 @@ const CustomerPaymentVerificationPage = () => {
             await loadQueue();
         } finally {
             setSaving(false);
+        }
+    };
+
+    const deleteRejectedSubmission = async () => {
+        if (!deleteTarget?.can_delete || deleteTarget.status !== 'Rejected') return;
+        try {
+            setDeleteProcessing(true);
+            setError('');
+            setNotice('');
+            const response = await api.post('/customers/verification/delete.php', {
+                submission_id: deleteTarget.id
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Unable to delete verification record.');
+            }
+            setDeleteTarget(null);
+            setNotice(response.data.message || 'Rejected verification record deleted successfully.');
+            await loadQueue();
+        } catch (deleteError) {
+            setDeleteTarget(null);
+            setError(deleteError.response?.data?.message || deleteError.message || 'Unable to delete verification record.');
+        } finally {
+            setDeleteProcessing(false);
         }
     };
 
@@ -639,9 +663,23 @@ const CustomerPaymentVerificationPage = () => {
                                 <td>{formatDateValue(item.submitted_at)}</td>
                                 <td>{item.status}</td>
                                 <td>
-                                    <button type="button" className="btn btn-secondary" onClick={() => viewDetails(item.id)} disabled={bulkProcessing}>
-                                        <Eye size={16} /> View Details
-                                    </button>
+                                    <div className="action-buttons">
+                                        <button type="button" className="btn btn-secondary" onClick={() => viewDetails(item.id)} disabled={bulkProcessing}>
+                                            <Eye size={16} /> View Details
+                                        </button>
+                                        {item.status === 'Rejected' && item.can_delete && (
+                                            <button
+                                                type="button"
+                                                className="icon-btn delete"
+                                                aria-label={`Delete rejected verification record ${item.id}`}
+                                                title="Delete"
+                                                onClick={() => setDeleteTarget(item)}
+                                                disabled={deleteProcessing}
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -724,6 +762,35 @@ const CustomerPaymentVerificationPage = () => {
                             ))}
                     </div>
                 )}
+            </Modal>
+
+            <Modal
+                isOpen={Boolean(deleteTarget)}
+                onClose={() => !deleteProcessing && setDeleteTarget(null)}
+                title="Delete Rejected Verification"
+                maxWidth="460px"
+                footer={(
+                    <>
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={deleteProcessing}
+                            onClick={() => setDeleteTarget(null)}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-danger"
+                            disabled={deleteProcessing}
+                            onClick={deleteRejectedSubmission}
+                        >
+                            {deleteProcessing ? 'Deleting…' : 'Delete'}
+                        </button>
+                    </>
+                )}
+            >
+                <p>Are you sure you want to delete this rejected verification record?</p>
             </Modal>
 
             <Modal

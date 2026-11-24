@@ -10,6 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 $reviewer = requireCustomerPaymentVerificationReviewer();
 $canDecide = isSuperAdminUser((int) ($reviewer['user_id'] ?? 0));
+$canDelete = $canDecide;
 
 $status = trim((string) ($_GET['status'] ?? 'Pending Verification'));
 $search = trim((string) ($_GET['search'] ?? ''));
@@ -166,7 +167,8 @@ while ($row = $result->fetch_assoc()) {
         'reviewed_by' => (string) ($row['reviewed_by'] ?? ''),
         'submitted_at' => $row['submitted_at'] ?? $row['created_at'],
         'rejection_reason' => $row['rejection_reason'],
-        'can_decide' => $canDecide && in_array($row['status'], ['Pending Verification', 'Applying'], true)
+        'can_decide' => $canDecide && in_array($row['status'], ['Pending Verification', 'Applying'], true),
+        'can_delete' => $canDelete && $row['status'] === 'Rejected'
     ];
 }
 $stmt->close();

@@ -49,7 +49,9 @@ const SimMaintenance = () => {
             });
             if (response.data.success) {
                 setSims(response.data.data.sims || []);
-                setPagination(response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 });
+                const nextPagination = response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (targetPage > nextPagination.total_pages) setPage(Math.max(1, nextPagination.total_pages));
                 setLoadError('');
             } else {
                 setLoadError(response.data.message || 'Failed to fetch SIMs.');
@@ -103,7 +105,6 @@ const SimMaintenance = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     const getStatusBadge = (status) => {

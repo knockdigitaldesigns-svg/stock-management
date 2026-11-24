@@ -129,7 +129,6 @@ const InwardReports = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     const fetchAllReportRows = async () => {

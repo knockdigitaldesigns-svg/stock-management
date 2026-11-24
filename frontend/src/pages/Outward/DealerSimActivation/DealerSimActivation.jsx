@@ -156,7 +156,10 @@ const DealerSimActivation = () => {
                 setSims(response.data.data?.sims || []);
                 setSummaryCounts(response.data.data?.summary_counts || null);
                 setDateYears(response.data.data?.date_years || { expiry_date: [] });
-                setTotalRecords(response.data.data?.pagination?.total_records || 0);
+                const nextTotalRecords = Number(response.data.data?.pagination?.total_records || 0);
+                setTotalRecords(nextTotalRecords);
+                const totalPages = Math.max(1, Math.ceil(nextTotalRecords / pageSize));
+                if (page > totalPages) setPage(totalPages);
             } else {
                 setError(response.data.message || 'Failed to load SIMs');
             }

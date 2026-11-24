@@ -91,7 +91,6 @@ const StockManagement = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     const deleteOwnerStock = async () => {

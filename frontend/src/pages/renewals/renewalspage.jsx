@@ -105,8 +105,17 @@ const RenewalsPage = () => {
             const params = { page, page_size: pageSize, ...Object.fromEntries(Object.entries(nextFilters).filter(([, value]) => value !== '')) };
             const response = await api.get('/renewals/list.php', { params });
             const data = response.data?.data || {};
+            const nextPagination = data.pagination || { page, page_size: pageSize, total: 0 };
+            const totalPages = Math.max(
+                1,
+                Number(nextPagination.total_pages) || Math.ceil(Number(nextPagination.total || 0) / pageSize)
+            );
+            if (page > totalPages) {
+                await load(totalPages, nextFilters, pageSize);
+                return;
+            }
             setRows(Array.isArray(data.renewals) ? data.renewals : []);
-            setPagination(data.pagination || { page, page_size: pageSize, total: 0 });
+            setPagination(nextPagination);
             setValidities(Array.isArray(data.validities) ? data.validities : []);
             setYears(Array.isArray(data.years) ? data.years : []);
             setCustomers(Array.isArray(data.customers) ? data.customers : []);
@@ -156,6 +165,10 @@ const RenewalsPage = () => {
     }, [form.action, form.installation_date, form.validity_months, selected?.next_renewal_date]);
 
     const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+    const updatePageSize = (nextPageSize) => {
+        const totalPages = Math.max(1, Math.ceil(pagination.total / nextPageSize));
+        load(Math.min(pagination.page, totalPages), filters, nextPageSize);
+    };
     const exportRenewals = async (fileType) => {
         setExportMenuOpen(false);
         setExportNotice('');
@@ -577,7 +590,7 @@ const RenewalsPage = () => {
             </div>
         </div>
         <div className="table-container"><table><thead><tr>{['Installation Date', 'Username', 'Mobile No', 'Vehicle No', 'IMEI No', 'SIM No', 'Device Model', 'Next Renewal Date', 'Platform', 'Validity', 'Total Amount', 'Amount Paid', 'Pending Amount', 'Payment Status', 'SIM Status', 'Actions'].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{loading ? <tr><td colSpan="16">Loading renewals...</td></tr> : rows.length === 0 ? <tr><td colSpan="16">No renewal records found.</td></tr> : rows.map((row) => <tr key={row.id}><td>{formatDate(row.installation_date)}</td><td>{display(row.username)}</td><td>{display(row.primary_mobile_no)}</td><td>{display(row.vehicle_no)}</td><td>{display(row.imei_no)}</td><td>{display(row.sim_no_1)}</td><td>{display(row.device_model)}</td><td>{formatDate(row.next_renewal_date)}</td><td>{display(row.platform_name)}</td><td>{display(row.validity_months)} Months</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_payment_amount).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_paid).toFixed(2)}` : '-'}</td><td>{Number(row.total_payment_amount || 0) > 0 ? `₹${Number(row.total_amount_pending).toFixed(2)}` : '-'}</td><td>{row.payment_status ? <span className={`badge ${row.payment_status === 'Paid' ? 'badge-success' : row.payment_status === 'Partially Paid' ? 'badge-warning' : 'badge-danger'}`}>{row.payment_status}</span> : '-'}</td><td><span className="badge">{display(row.sim_status)}</span></td><td><div style={{ display: 'flex', gap: 6 }}><button className="btn" type="button" title="View" onClick={() => openView(row)}><Eye size={16} /></button><button className="btn" type="button" title="Edit" onClick={() => openEdit(row)}><Pencil size={16} /></button>{isSuperAdmin && row.undo_history_id && <button className="btn" type="button" title="Undo Renewal" aria-label={`Undo renewal for ${row.vehicle_no}`} onClick={() => { setUndoTarget(row); setUndoReason(''); }}><Undo2 size={16} /></button>}<button className="btn btn-danger" type="button" title="Delete" onClick={() => { setDeleteTarget(row); setModal('delete'); }}><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>
-        <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => load(page, filters)} onPageSizeChange={(size) => load(1, filters, size)} itemName="renewals" />
+        <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => load(page, filters)} onPageSizeChange={updatePageSize} itemName="renewals" />
     </div>
 
     <Modal isOpen={modal === 'view'} onClose={() => setModal(null)} title="Renewal Details" maxWidth="900px" footer={<><button className="btn" type="button" onClick={openHistory}><History size={16} /> View History</button><button className="btn btn-primary" type="button" onClick={() => openEdit(selected)}>Edit</button></>}>

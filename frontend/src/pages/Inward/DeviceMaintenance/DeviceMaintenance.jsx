@@ -51,7 +51,9 @@ const DeviceMaintenance = () => {
             });
             if (response.data.success) {
                 setDevices(response.data.data.devices || []);
-                setPagination(response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 });
+                const nextPagination = response.data.data.pagination || { total: 0, page: targetPage, page_size: targetPageSize, total_pages: 1 };
+                setPagination(nextPagination);
+                if (targetPage > nextPagination.total_pages) setPage(Math.max(1, nextPagination.total_pages));
                 setLoadError('');
             } else {
                 setLoadError(response.data.message || 'Failed to fetch devices.');
@@ -91,7 +93,6 @@ const DeviceMaintenance = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
-        setPage(1);
     };
 
     const getStatusBadge = (status) => {
