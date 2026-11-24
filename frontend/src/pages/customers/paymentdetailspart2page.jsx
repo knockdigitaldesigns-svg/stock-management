@@ -74,6 +74,7 @@ const PaymentDetailsPart2Page = () => {
     const [paymentTransactions, setPaymentTransactions] = useState([]);
     const [pendingInstallmentRequests, setPendingInstallmentRequests] = useState([]);
     const [paymentCanReceiveInstallments, setPaymentCanReceiveInstallments] = useState(false);
+    const [allowInvalidAmountCorrection, setAllowInvalidAmountCorrection] = useState(false);
     const [installmentSaving, setInstallmentSaving] = useState(false);
     const [installment, setInstallment] = useState({
         amount: '',
@@ -136,6 +137,7 @@ const PaymentDetailsPart2Page = () => {
             amountPending,
             paymentStatus: paymentPart2.payment_status || 'Pending'
         });
+        setAllowInvalidAmountCorrection(totalAmount > 0 && amountPaid > totalAmount);
 
         return { totalAmount, amountPaid, amountPending };
     };
@@ -144,6 +146,18 @@ const PaymentDetailsPart2Page = () => {
         if (!customerId) {
             return;
         }
+
+        setPaymentId(null);
+        setPaymentTransactions([]);
+        setPendingInstallmentRequests([]);
+        setPaymentCanReceiveInstallments(false);
+        setAllowInvalidAmountCorrection(false);
+        setPaymentSummary({
+            totalAmount: 0,
+            amountPaid: 0,
+            amountPending: 0,
+            paymentStatus: 'Pending'
+        });
 
         try {
             setLoading(true);
@@ -154,10 +168,48 @@ const PaymentDetailsPart2Page = () => {
                 customerId
             );
 
+            if (stored.append_vehicle && !stored.resumed_verification) {
+                setIsEditMode(false);
+                const storedStep4 = stored.step4 || {};
+                setTotalSaleAmount(normalizeCurrency(storedStep4.totalSaleAmount));
+                setForm({
+                    ...initialForm,
+                    paymentMode: storedStep4.paymentMode || '',
+                    transactionId: storedStep4.transactionId || ''
+                });
+                return;
+            }
+
             if (stored.payment_part2) {
                 const savedPart2 = stored.payment_part2;
                 const existingCustomerId = Number(stored.existing_customer_id || 0);
+                const savedTotalAmount = normalizeCurrency(savedPart2.total_amount);
+                const savedAmountPaid = normalizeCurrency(savedPart2.amount_paid);
+                const requestedPaymentId = Number(
+                    savedPart2.payment_id ||
+                    savedPart2.paymentId ||
+                    stored.linked_payment_id ||
+                    0
+                );
+                const requestedVehicleId = Number(
+                    stored.vehicle_record_id ||
+                    stored.linked_vehicle_id ||
+                    stored.step2?.vehicle_record_id ||
+                    stored.step2?.vehicle_id ||
+                    stored.step2?.id ||
+                    0
+                );
                 setIsEditMode(existingCustomerId > 0);
+                setPaymentId(requestedPaymentId || null);
+                setAllowInvalidAmountCorrection(
+                    savedTotalAmount > 0 && savedAmountPaid > savedTotalAmount
+                );
+                setPaymentSummary({
+                    totalAmount: savedTotalAmount,
+                    amountPaid: savedAmountPaid,
+                    amountPending: normalizeCurrency(savedPart2.amount_pending),
+                    paymentStatus: savedPart2.payment_status || 'Pending'
+                });
                 setTotalSaleAmount(normalizeCurrency(
                     stored.step4?.totalSaleAmount || savedPart2.total_sale_amount
                 ));
@@ -176,20 +228,107 @@ const PaymentDetailsPart2Page = () => {
                     cashToEt: Boolean(savedPart2.cash_to_et)
                 });
                 if (existingCustomerId > 0) {
-                    const response = await api.get(
-                        `/customers/details.php?customer_id=${encodeURIComponent(customerId)}`
-                    );
-                    if (!response.data?.success) {
-                        throw new Error('Failed to load customer payment history.');
+                    const shouldLoadHistory = !stored.resumed_verification
+                        || requestedPaymentId > 0
+                        || requestedVehicleId > 0;
+                    if (shouldLoadHistory) {
+                        const response = await api.get('/customers/details.php', {
+                            params: {
+                                customer_id: Number(customerId),
+                                ...(requestedPaymentId > 0 ? { payment_id: requestedPaymentId } : {}),
+                                ...(requestedVehicleId > 0 ? { vehicle_id: requestedVehicleId } : {})
+                            }
+                        });
+                        if (!response.data?.success) {
+                            throw new Error('Failed to load customer payment history.');
+                        }
+                        if (stored.resumed_verification) {
+                            const historyData = response.data.data || {};
+                            const savedOrLoadedValue = (field, camelField, loadedValue) => {
+                                const savedValue = savedPart2[field] ?? savedPart2[camelField];
+                                return savedValue !== undefined && savedValue !== null && savedValue !== ''
+                                    ? savedValue
+                                    : loadedValue;
+                            };
+                            const loadedPayment = historyData.payment_part2 || {};
+                            const loadedDeviceCharge = savedOrLoadedValue(
+                                'device_charge',
+                                'deviceCharge',
+                                loadedPayment.device_charge
+                            );
+                            const loadedSoftwareCharge = savedOrLoadedValue(
+                                'software_charge',
+                                'softwareCharge',
+                                loadedPayment.software_charge
+                            );
+                            const loadedTechnicianCharge = savedOrLoadedValue(
+                                'technician_charge',
+                                'technicianCharge',
+                                loadedPayment.technician_charge
+                            );
+                            const loadedSimCharge = savedOrLoadedValue(
+                                'sim_charge',
+                                'simCharge',
+                                loadedPayment.sim_charge
+                            );
+                            const loadedCourierCharge = savedOrLoadedValue(
+                                'courier_charge',
+                                'courierCharge',
+                                loadedPayment.courier_charge
+                            );
+                            const loadedTotalAmount = normalizeCurrency(savedOrLoadedValue(
+                                'total_amount',
+                                'totalAmount',
+                                loadedPayment.total_amount
+                            ));
+                            const loadedAmountPaid = normalizeCurrency(savedOrLoadedValue(
+                                'amount_paid',
+                                'amountPaid',
+                                loadedPayment.amount_paid
+                            ));
+                            const loadedAmountPending = Math.max(
+                                loadedTotalAmount - loadedAmountPaid,
+                                0
+                            );
+                            setForm((previous) => ({
+                                ...previous,
+                                deviceCharge: String(loadedDeviceCharge ?? 0),
+                                softwareCharge: String(loadedSoftwareCharge ?? 0),
+                                technicianCharge: String(loadedTechnicianCharge ?? 0),
+                                simCharge: String(loadedSimCharge ?? 0),
+                                courierCharge: String(loadedCourierCharge ?? 0),
+                                amountPaid: String(loadedAmountPaid)
+                            }));
+                            setPaymentSummary({
+                                totalAmount: loadedTotalAmount,
+                                amountPaid: loadedAmountPaid,
+                                amountPending: loadedAmountPending,
+                                paymentStatus: loadedAmountPaid >= loadedTotalAmount && loadedAmountPaid > 0
+                                    ? 'Paid'
+                                    : loadedAmountPaid > 0
+                                        ? 'Partially Paid'
+                                        : (savedPart2.payment_status || 'Not Paid')
+                            });
+                            setPaymentId(
+                                requestedPaymentId ||
+                                Number(historyData.payment_part2?.payment_id || 0) ||
+                                null
+                            );
+                            setPaymentTransactions(historyData.payment_transactions || []);
+                            setPendingInstallmentRequests(historyData.payment_installment_requests || []);
+                            setPaymentCanReceiveInstallments(
+                                historyData.customer?.verification_status === 'Approved'
+                            );
+                        } else {
+                            const { amountPaid } = applyPaymentHistory(response.data.data);
+                            setForm((previous) => ({ ...previous, amountPaid: String(amountPaid) }));
+                        }
                     }
-                    const { amountPaid } = applyPaymentHistory(response.data.data);
-                    setForm((previous) => ({ ...previous, amountPaid: String(amountPaid) }));
                 }
                 return;
             }
 
-            const isAddingVehicle = stored.append_vehicle || (stored.new_vehicle_flow && !stored.existing_customer_id);
-            if (Number(customerId) < 0 || isAddingVehicle) {
+            if (Number(customerId) < 0 || (stored.new_vehicle_flow && !stored.existing_customer_id)) {
                 setIsEditMode(false);
                 const storedStep4 = stored.step4 || {};
                 setTotalSaleAmount(normalizeCurrency(storedStep4.totalSaleAmount));
@@ -589,7 +728,7 @@ const PaymentDetailsPart2Page = () => {
 
     const isAmountPaidDisabled =
         saving ||
-        (paymentId && paymentTransactions.length > 0) ||
+        (paymentId && paymentTransactions.length > 0 && !allowInvalidAmountCorrection) ||
         totalSaleAmountMismatch ||
         totalSaleAmount <= 0;
 
@@ -716,6 +855,8 @@ const PaymentDetailsPart2Page = () => {
             const paymentPayload = {
                 customer_id:
                     Number(customerId),
+                payment_id:
+                    paymentId ? Number(paymentId) : null,
 
                 vehicle_id:
                     stored.new_vehicle_flow

@@ -23,12 +23,12 @@ if (!$conn) {
 }
 
 $stmt = $conn->prepare(
-    'SELECT DISTINCT TRIM(username) AS username
+    'SELECT id, platform_id, TRIM(username) AS username
      FROM customers
      WHERE platform_id = ?
        AND TRIM(username) LIKE ?
        AND TRIM(username) <> \'\'
-     ORDER BY username ASC
+     ORDER BY username ASC, id ASC
      LIMIT 10'
 );
 if (!$stmt) {
@@ -46,10 +46,22 @@ if (!$stmt->execute()) {
 
 $result = $stmt->get_result();
 $usernames = [];
+$customers = [];
 while ($row = $result->fetch_assoc()) {
-    $usernames[] = (string) $row['username'];
+    $username = (string) $row['username'];
+    if (!in_array($username, $usernames, true)) {
+        $usernames[] = $username;
+    }
+    $customers[] = [
+        'id' => (int) $row['id'],
+        'platform_id' => (int) $row['platform_id'],
+        'username' => $username
+    ];
 }
 
 $stmt->close();
 $conn->close();
-sendResponse(true, 'Username suggestions fetched.', ['usernames' => $usernames]);
+sendResponse(true, 'Username suggestions fetched.', [
+    'usernames' => $usernames,
+    'customers' => $customers
+]);

@@ -10,6 +10,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
         purchase_date: sim?.purchase_date || '',
         sim_no: sim?.sim_no || '',
         sim_type: sim?.sim_type || '',
+        status: String(sim?.status || 'available').toLowerCase(),
         // sim_validity_id: sim?.sim_validity_id || '',
         notes: sim?.notes || ''
     });
@@ -44,6 +45,7 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
                 purchase_date: formData.purchase_date,
                 sim_no: formData.sim_no,
                 sim_type: formData.sim_type,
+                status: formData.status,
                 // sim_validity_id: Number(formData.sim_validity_id),
                 notes: formData.notes
             });
@@ -96,6 +98,16 @@ const EditSimModal = ({ sim, onClose, onSuccess }) => {
                         <option value="">Select SIM Type</option>
                         <option value="Voice">Voice</option>
                         <option value="Non Voice">Non Voice</option>
+                    </select>
+                </div>
+                <div className="form-group">
+                    <label className="form-label">Status *</label>
+                    <small>Current status: {String(sim?.status || 'Available').replace(/\b\w/g, (letter) => letter.toUpperCase())}</small>
+                    <select className="form-control" value={formData.status} onChange={(event) => setFormData((prev) => ({ ...prev, status: event.target.value }))}>
+                        {formData.status === 'reserved' && <option value="reserved">Reserved (Courier workflow)</option>}
+                        {['available', 'allocated', 'used'].map((status) => (
+                            <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>
+                        ))}
                     </select>
                 </div>
                 {/* <div className="form-group">

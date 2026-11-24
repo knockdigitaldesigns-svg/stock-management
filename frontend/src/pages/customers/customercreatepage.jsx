@@ -28,6 +28,22 @@ const initialForm = {
     pincode: ''
 };
 
+const customerDetailFields = [
+    'primary_mobile_no',
+    'secondary_mobile_no',
+    'email',
+    'location',
+    'pincode'
+];
+
+const emptyCustomerDetails = {
+    primary_mobile_no: '',
+    secondary_mobile_no: '',
+    email: '',
+    location: '',
+    pincode: ''
+};
+
 const CustomerCreatePage = () => {
     const navigate = useNavigate();
     const { customerId } = useParams();
@@ -53,8 +69,12 @@ const CustomerCreatePage = () => {
     const [usernameSuggestionsOpen, setUsernameSuggestionsOpen] = useState(false);
     const [usernameSuggestionsLoading, setUsernameSuggestionsLoading] = useState(false);
     const [usernameSuggestionError, setUsernameSuggestionError] = useState('');
+    const [selectedCustomer, setSelectedCustomer] = useState(null);
+    const [customerDetailsLoading, setCustomerDetailsLoading] = useState(false);
+    const [customerDetailsError, setCustomerDetailsError] = useState('');
     const usernameFieldRef = useRef(null);
     const usernameSearchSequence = useRef(0);
+    const customerLookupSequence = useRef(0);
 
     const triggerError = (msg) => {
         setError(msg);
@@ -277,8 +297,8 @@ const loadCustomer = async () => {
                     throw new Error(response.data?.message || 'Failed to load username suggestions.');
                 }
                 if (requestId === usernameSearchSequence.current) {
-                    const matches = response.data.data?.usernames || [];
-                    setUsernameSuggestions([...new Set(matches)]);
+                    const matches = response.data.data?.customers || [];
+                    setUsernameSuggestions(Array.isArray(matches) ? matches : []);
                 }
             } catch (suggestionError) {
                 if (requestId === usernameSearchSequence.current) {
@@ -316,6 +336,10 @@ const loadCustomer = async () => {
         };
     }, []);
 
+    useEffect(() => () => {
+        customerLookupSequence.current += 1;
+    }, []);
+
     /*
     |--------------------------------------------------------------------------
     | CHANGE
@@ -339,6 +363,113 @@ const loadCustomer = async () => {
         setSuccess('');
     };
 
+    const clearSelectedCustomer = () => {
+        customerLookupSequence.current += 1;
+        setSelectedCustomer(null);
+        setCustomerDetailsLoading(false);
+        setCustomerDetailsError('');
+    };
+
+    const handleUsernameChange = (event) => {
+        const updatedValue = sanitizeCustomerField('username', event.target.value);
+        const hadSelectedCustomer = Boolean(selectedCustomer || customerDetailsLoading);
+        clearSelectedCustomer();
+        setForm((previous) => ({
+            ...previous,
+            username: updatedValue,
+            ...(hadSelectedCustomer ? emptyCustomerDetails : {})
+        }));
+        setUsernameSuggestionsOpen(true);
+        setError('');
+        setSuccess('');
+    };
+
+    const handlePlatformChange = (event) => {
+        const updatedValue = sanitizeCustomerField('platform_id', event.target.value);
+        const hadSelectedCustomer = Boolean(selectedCustomer || customerDetailsLoading);
+        clearSelectedCustomer();
+        setForm((previous) => ({
+            ...previous,
+            platform_id: updatedValue,
+            ...(hadSelectedCustomer
+                ? { username: '', ...emptyCustomerDetails }
+                : {})
+        }));
+        setUsernameSuggestions([]);
+        setUsernameSuggestionError('');
+        setError('');
+        setSuccess('');
+    };
+
+    const handleUsernameSuggestionSelect = async (customer) => {
+        const customerId = Number(customer?.id || 0);
+        const platformId = Number(customer?.platform_id || 0);
+        if (customerId <= 0 || platformId <= 0) {
+            setCustomerDetailsError('The selected customer could not be identified.');
+            return;
+        }
+
+        const requestId = ++customerLookupSequence.current;
+        setSelectedCustomer(null);
+        setCustomerDetailsLoading(true);
+        setCustomerDetailsError('');
+        setUsernameSuggestionsOpen(false);
+        setUsernameSuggestions([]);
+        setForm((previous) => ({
+            ...previous,
+            platform_id: String(platformId),
+            username: String(customer.username || ''),
+            ...emptyCustomerDetails
+        }));
+
+        try {
+            const response = await api.get('/customers/lookup.php', {
+                params: { customer_id: customerId, platform_id: platformId }
+            });
+            if (!response.data?.success) {
+                throw new Error(response.data?.message || 'Failed to load customer details.');
+            }
+            if (requestId !== customerLookupSequence.current) {
+                return;
+            }
+
+            const details = response.data.data?.customer;
+            if (!details
+                || Number(details.id) !== customerId
+                || Number(details.platform_id) !== platformId) {
+                throw new Error('The selected customer does not match the current platform.');
+            }
+
+            const customerForm = {
+                platform_id: String(details.platform_id),
+                username: String(details.username || customer.username || '')
+            };
+            customerDetailFields.forEach((field) => {
+                const value = details[field];
+                if (value !== null && value !== undefined && String(value).trim() !== '') {
+                    customerForm[field] = String(value);
+                }
+            });
+            setForm((previous) => ({ ...previous, ...customerForm }));
+            setSelectedCustomer({
+                id: customerId,
+                originalForm: { ...initialForm, ...customerForm }
+            });
+        } catch (lookupError) {
+            if (requestId === customerLookupSequence.current) {
+                setCustomerDetailsError(
+                    lookupError.response?.data?.message ||
+                    lookupError.message ||
+                    'Failed to load customer details.'
+                );
+            }
+        } finally {
+            if (requestId === customerLookupSequence.current) {
+                setCustomerDetailsLoading(false);
+            }
+        }
+    };
+
     /*
     |--------------------------------------------------------------------------
     | VALIDATION
@@ -353,7 +484,7 @@ const loadCustomer = async () => {
     |--------------------------------------------------------------------------
     */
 
-    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false, customData = null, draftId = 0, existingCustomerId = 0) => {
+    const saveStep1Session = (id, newVehicleFlow = false, appendVehicle = false, customData = null, draftId = 0, existingCustomerId = 0, customerChanged = false) => {
         try {
             const existing = JSON.parse(
                 sessionStorage.getItem(
@@ -368,10 +499,10 @@ const loadCustomer = async () => {
                 new_vehicle_flow: newVehicleFlow,
                 draft_id: Number(draftId || existing.draft_id || 0),
                 existing_customer_id: Number(existingCustomerId || existing.existing_customer_id || 0) || null,
-                customer_changed: Boolean(existing.customer_changed || (isEditMode && Number(existingCustomerId || id) > 0))
+                customer_changed: Boolean(existing.customer_changed || customerChanged || (isEditMode && Number(existingCustomerId || id) > 0))
             };
 
-            if (appendVehicle) {
+            if (appendVehicle && !existing.resumed_verification) {
                 delete nextSession.vehicle_record_id;
                 delete nextSession.existing_vehicle_imei;
                 delete nextSession.existing_vehicle_sim_1;
@@ -379,6 +510,9 @@ const loadCustomer = async () => {
                 delete nextSession.step2;
                 delete nextSession.step3;
                 delete nextSession.step4;
+                delete nextSession.payment_part2;
+                delete nextSession.linked_vehicle_id;
+                delete nextSession.linked_payment_id;
             }
 
             const step1Data = customData || {
@@ -426,6 +560,15 @@ const loadCustomer = async () => {
 
         setError('');
         setSuccess('');
+
+        if (customerDetailsLoading) {
+            triggerError('Please wait while the selected customer details load.');
+            return;
+        }
+        if (customerDetailsError) {
+            triggerError('Unable to load the selected customer. Select the username again or enter a different username.');
+            return;
+        }
 
         const validationError =
             validateForm();
@@ -485,6 +628,61 @@ const loadCustomer = async () => {
             };
 
             const stored = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+            if (!isEditMode && selectedCustomer) {
+                const existingCustomerId = selectedCustomer.id;
+                const isResumingVerification = Boolean(stored.resumed_verification);
+                const reusableDraftId = isResumingVerification &&
+                    Number(stored.existing_customer_id || 0) === existingCustomerId
+                    ? Number(stored.draft_id || 0)
+                    : 0;
+                const customerChanged = customerDetailFields.some(
+                    (field) => String(payload[field] || '').trim()
+                        !== String(selectedCustomer.originalForm[field] || '').trim()
+                );
+                const appendDraftData = {
+                    ...stored,
+                    existing_customer_id: existingCustomerId,
+                    customer_changed: customerChanged,
+                    append_vehicle: true,
+                    step1: payload
+                };
+                if (!isResumingVerification) {
+                    for (const field of [
+                        'vehicle_record_id',
+                        'existing_vehicle_imei',
+                        'existing_vehicle_sim_1',
+                        'existing_vehicle_sim_2',
+                        'step2',
+                        'step3',
+                        'step4',
+                        'payment_part2',
+                        'linked_vehicle_id',
+                        'linked_payment_id'
+                    ]) {
+                        delete appendDraftData[field];
+                    }
+                }
+                const draftId = await saveCustomerDraft(
+                    reusableDraftId,
+                    existingCustomerId,
+                    appendDraftData
+                );
+                saveStep1Session(
+                    existingCustomerId,
+                    true,
+                    true,
+                    payload,
+                    draftId,
+                    existingCustomerId,
+                    customerChanged
+                );
+                setSuccess('Existing customer selected. Continuing to add vehicle...');
+                setTimeout(() => {
+                    navigate(`/customer-management/details/vehicle/${existingCustomerId}?mode=add`);
+                }, 250);
+                return;
+            }
+
             const draftId = await saveCustomerDraft(
                 stored.draft_id,
                 isEditMode ? Number(customerId) : 0,
@@ -611,6 +809,9 @@ const loadCustomer = async () => {
         }
 
         setForm(initialForm);
+        clearSelectedCustomer();
+        setUsernameSuggestions([]);
+        setUsernameSuggestionError('');
 
         setError('');
         setSuccess('');
@@ -908,11 +1109,7 @@ const loadCustomer = async () => {
                                     value={
                                         form.platform_id
                                     }
-                                    onChange={(event) => {
-                                        handleChange(event);
-                                        setUsernameSuggestions([]);
-                                        setUsernameSuggestionError('');
-                                    }}
+                                    onChange={handlePlatformChange}
                                     className="form-control"
                                     disabled={
                                         loadingPlatforms ||
@@ -963,7 +1160,7 @@ const loadCustomer = async () => {
                                         name="username"
                                         value={form.username}
                                         onFocus={() => setUsernameSuggestionsOpen(true)}
-                                        onChange={handleChange}
+                                        onChange={handleUsernameChange}
                                         className="form-control"
                                         placeholder="Enter username"
                                         maxLength={100}
@@ -1006,17 +1203,13 @@ const loadCustomer = async () => {
                                                     {usernameSuggestionError}
                                                 </div>
                                             ) : usernameSuggestions.length ? (
-                                                usernameSuggestions.map((username) => (
+                                                usernameSuggestions.map((customer) => (
                                                     <button
-                                                        key={username}
+                                                        key={customer.id}
                                                         type="button"
                                                         role="option"
-                                                        aria-selected={username === form.username}
-                                                        onClick={() => {
-                                                            setForm((previous) => ({ ...previous, username }));
-                                                            setUsernameSuggestionsOpen(false);
-                                                            setUsernameSuggestions([]);
-                                                        }}
+                                                        aria-selected={Number(selectedCustomer?.id) === Number(customer.id)}
+                                                        onClick={() => handleUsernameSuggestionSelect(customer)}
                                                         style={{
                                                             display: 'block',
                                                             width: '100%',
@@ -1028,7 +1221,7 @@ const loadCustomer = async () => {
                                                             cursor: 'pointer'
                                                         }}
                                                     >
-                                                        {username}
+                                                        {customer.username}
                                                     </button>
                                                 ))
                                             ) : (
@@ -1039,6 +1232,16 @@ const loadCustomer = async () => {
                                         </div>
                                     )}
                                 </div>
+                                {customerDetailsLoading && (
+                                    <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>
+                                        Loading selected customer details...
+                                    </small>
+                                )}
+                                {customerDetailsError && (
+                                    <small role="alert" style={{ color: '#b91c1c', display: 'block', marginTop: '4px' }}>
+                                        {customerDetailsError}
+                                    </small>
+                                )}
                                 {fieldErrors.username && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {fieldErrors.username}</small>}
 
                             </div>

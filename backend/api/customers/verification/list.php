@@ -57,7 +57,13 @@ $stmt = $conn->prepare(
     'SELECT s.id, s.submitter_user_id, s.existing_customer_id, s.status, s.submission_data,
             s.submitted_at, s.created_at, s.rejection_reason,
             submitter.employee_name AS submitted_by,
-            reviewer.employee_name AS reviewed_by
+            reviewer.employee_name AS reviewed_by,
+            (
+                SELECT COUNT(DISTINCT cv.id)
+                FROM customer_vehicle_details cv
+                WHERE cv.customer_id IN (s.existing_customer_id, s.linked_customer_id)
+                   OR cv.verification_submission_id = s.id
+            ) AS vehicle_count
      FROM customer_payment_verification_submissions s
      INNER JOIN users submitter ON submitter.id = s.submitter_user_id
      LEFT JOIN users reviewer ON reviewer.id = s.reviewer_user_id
@@ -119,6 +125,16 @@ while ($row = $result->fetch_assoc()) {
             $paymentStatus = (string) ($detail['payment_status'] ?? 'Pending');
         }
     }
+    $vehicleCount = (int) ($row['vehicle_count'] ?? 0);
+    if ($vehicleCount === 0) {
+        $submittedVehicles = $detail['vehicles'] ?? null;
+        if (!is_array($submittedVehicles) || !$submittedVehicles) {
+            $submittedVehicles = is_array($detail['vehicle'] ?? null)
+                ? [$detail['vehicle']]
+                : [];
+        }
+        $vehicleCount = count(array_filter($submittedVehicles, 'is_array'));
+    }
     $payment = is_array($payment) ? $payment : [];
     $platformName = trim((string) ($customer['platform_name'] ?? ''));
     if ($platformName === '' && (int) ($customer['platform_id'] ?? 0) > 0) {
@@ -155,6 +171,7 @@ while ($row = $result->fetch_assoc()) {
         'status' => $row['status'],
         'customer_name' => (string) ($customer['username'] ?? $customer['customer_name'] ?? '—'),
         'primary_mobile_no' => (string) ($customer['primary_mobile_no'] ?? ''),
+        'vehicle_count' => $vehicleCount,
         'platform_name' => $platformName,
         'location' => (string) ($customer['location'] ?? ''),
         'payment_status' => $paymentStatus,

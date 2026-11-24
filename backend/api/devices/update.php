@@ -4,6 +4,7 @@ require_once '../../utils/response.php';
 require_once '../../utils/date.php';
 require_once '../../utils/validation.php';
 require_once '../../utils/audit.php';
+require_once '../../utils/inventory_status.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -26,6 +27,10 @@ $purchase_date = trim((string) ($data->purchase_date ?? ''));
 $device_model_id = (int) ($data->device_model_id ?? 0);
 $imei_no = trim((string) ($data->imei_no ?? ''));
 $notes = trim((string) ($data->notes ?? ''));
+$statusProvided = property_exists($data, 'status');
+$requestedStatus = $statusProvided
+    ? strtolower(trim((string) $data->status))
+    : null;
 
 if ($purchase_date === '') {
     sendResponse(false, 'Purchase date is required', [], [], 400);
@@ -66,32 +71,90 @@ if ($checkResult->num_rows > 0) {
 }
 $checkStmt->close();
 
-$oldStmt = $conn->prepare('SELECT purchase_date, device_model_id, imei_no, notes FROM devices WHERE id = ? AND deleted_at IS NULL LIMIT 1');
-$oldStmt->bind_param('i', $id);
-$oldStmt->execute();
-$oldDevice = $oldStmt->get_result()->fetch_assoc();
-$oldStmt->close();
-if (!$oldDevice) sendResponse(false, 'Device not found', [], [], 404);
-
-$newDevice = ['purchase_date' => $purchase_date, 'device_model_id' => $device_model_id, 'imei_no' => $imei_no, 'notes' => $notes];
 $conn->begin_transaction();
+$stmt = null;
 try {
-writeChangedFields($conn, $id, 'Device', $oldDevice, $newDevice, $currentUser);
+    $oldStmt = $conn->prepare('SELECT purchase_date, device_model_id, imei_no, notes, status FROM devices WHERE id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE');
+    if (!$oldStmt) {
+        throw new RuntimeException('Failed to prepare device lookup.');
+    }
+    $oldStmt->bind_param('i', $id);
+    if (!$oldStmt->execute()) {
+        $error = $oldStmt->error;
+        $oldStmt->close();
+        throw new RuntimeException('Failed to load device: ' . $error);
+    }
+    $oldDevice = $oldStmt->get_result()->fetch_assoc();
+    $oldStmt->close();
+    if (!$oldDevice) {
+        throw new OutOfBoundsException('Device not found.');
+    }
 
-$stmt = $conn->prepare('UPDATE devices SET purchase_date = ?, device_model_id = ?, imei_no = ?, notes = ? WHERE id = ?');
-$stmt->bind_param('sissi', $purchase_date, $device_model_id, $imei_no, $notes, $id);
+    $statusContext = lockInventoryStatusContext($conn, 'device', $id);
+    if (!$statusContext) {
+        throw new OutOfBoundsException('Device not found.');
+    }
+    $currentStatus = $statusContext['effective_status'];
+    if ($statusProvided
+        && !in_array($requestedStatus, ['available', 'allocated', 'used'], true)
+        && !($requestedStatus === 'reserved' && $currentStatus === 'reserved')) {
+        throw new InvalidArgumentException('Status must be Available, Allocated, or Used.');
+    }
 
-if ($stmt->execute()) {
+    $statusChanged = $statusProvided && $requestedStatus !== $currentStatus;
+    if ($statusChanged) {
+        $statusBlocker = inventoryStatusChangeBlocker(
+            $conn,
+            'device',
+            $id,
+            (string) $oldDevice['imei_no'],
+            $statusContext['stored_status']
+        );
+        if ($statusBlocker !== null) {
+            throw new DomainException($statusBlocker);
+        }
+    }
+
+    $newDevice = [
+        'purchase_date' => $purchase_date,
+        'device_model_id' => $device_model_id,
+        'imei_no' => $imei_no,
+        'notes' => $notes,
+        'status' => $statusChanged ? $requestedStatus : $statusContext['stored_status']
+    ];
+    writeChangedFields($conn, $id, 'Device', $oldDevice, $newDevice, $currentUser);
+
+    $stmt = $conn->prepare('UPDATE devices SET purchase_date = ?, device_model_id = ?, imei_no = ?, notes = ?, status = ? WHERE id = ?');
+    if (!$stmt) {
+        throw new RuntimeException('Failed to prepare device update.');
+    }
+    $stmt->bind_param('sisssi', $purchase_date, $device_model_id, $imei_no, $notes, $newDevice['status'], $id);
+
+    if (!$stmt->execute()) {
+        throw new RuntimeException('Failed to update device: ' . $stmt->error);
+    }
     $stmt->close();
     $conn->commit();
     $conn->close();
-    sendResponse(true, 'Device updated successfully');
-}
-
-throw new RuntimeException('Failed to update device');
+    sendResponse(true, 'Device updated successfully', ['status' => $newDevice['status']]);
+} catch (OutOfBoundsException $e) {
+    $conn->rollback();
+    if ($stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 404);
+} catch (InvalidArgumentException $e) {
+    $conn->rollback();
+    if ($stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 400);
+} catch (DomainException $e) {
+    $conn->rollback();
+    if ($stmt instanceof mysqli_stmt) $stmt->close();
+    $conn->close();
+    sendResponse(false, $e->getMessage(), [], [], 409);
 } catch (Throwable $e) {
     $conn->rollback();
-    $stmt->close();
+    if ($stmt instanceof mysqli_stmt) $stmt->close();
     $conn->close();
     sendResponse(false, $e->getMessage(), [], [], 500);
 }
