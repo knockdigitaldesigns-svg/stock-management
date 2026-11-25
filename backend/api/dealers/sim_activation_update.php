@@ -329,23 +329,17 @@ try {
                 throw new Exception('Reactivation date cannot be before deactivation date');
             }
             
-            $reactivationValidityId = (int) ($data['reactivation_validity_id'] ?? 0);
-            if ($reactivationValidityId <= 0) {
-                throw new InvalidArgumentException('Reactivation validity is required.');
-            }
-            $months = getValidityMonths($conn, $reactivationValidityId, true);
             if (!$oldExpiry) {
-                throw new InvalidArgumentException('The previously saved Expiry Date is missing. SIM reactivation cannot calculate the next renewal cycle.');
+                throw new InvalidArgumentException('The previously saved Expiry Date is missing. SIM reactivation cannot preserve it.');
             }
-            $newExpiry = calculateDealerSimReactivationExpiryDate($reactivationDate, $oldExpiry, $months);
+            $newExpiry = preserveDealerSimExpiryDate($oldExpiry);
             $newStatus = 'Active';
             $newReactivation = $reactivationDate;
-            $newValidityId = $reactivationValidityId;
+            $newValidityId = $oldValidityId;
             
             $actionTypeLog = 'Reactivate SIM';
             $logActionDate = $reactivationDate;
             $logNewRenewalDate = $newExpiry;
-            $logNewValidityMonths = $months;
             
         } elseif ($action === 'update') {
             $activationDate = trim((string) ($data['activation_date'] ?? ''));
@@ -570,6 +564,9 @@ try {
             $vRow = $vStmt->get_result()->fetch_assoc();
             $vStmt->close();
             if ($vRow) $oldValidityMonths = (int) $vRow['months'];
+        }
+        if ($action === 'reactivate') {
+            $logNewValidityMonths = $oldValidityMonths;
         }
         
         $undoResultState = $undoPreviousState !== null

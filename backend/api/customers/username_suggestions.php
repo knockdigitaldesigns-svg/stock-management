@@ -13,7 +13,15 @@ requireAnyPermission(['customers.add', 'customers.edit']);
 
 $platformId = (int) ($_GET['platform_id'] ?? 0);
 $query = trim((string) ($_GET['query'] ?? ''));
-if ($platformId <= 0 || $query === '') {
+$mobile = trim((string) ($_GET['primary_mobile_no'] ?? ''));
+
+if ($platformId <= 0) {
+    sendResponse(false, 'A valid platform is required.', [], [], 400);
+}
+if ($mobile !== '' && !preg_match('/^[0-9]{10}$/', $mobile)) {
+    sendResponse(false, 'Primary mobile number must contain exactly 10 digits.', [], [], 400);
+}
+if ($mobile === '' && $query === '') {
     sendResponse(true, 'Username suggestions fetched.', ['usernames' => []]);
 }
 
@@ -22,22 +30,37 @@ if (!$conn) {
     sendResponse(false, 'Database connection failed.', [], [], 500);
 }
 
-$stmt = $conn->prepare(
-    'SELECT id, platform_id, TRIM(username) AS username
-     FROM customers
-     WHERE platform_id = ?
-       AND TRIM(username) LIKE ?
-       AND TRIM(username) <> \'\'
-     ORDER BY username ASC, id ASC
-     LIMIT 10'
-);
-if (!$stmt) {
-    $conn->close();
-    sendResponse(false, 'Unable to prepare username suggestions query.', [], [], 500);
+if ($mobile !== '') {
+    $stmt = $conn->prepare(
+        'SELECT id, platform_id, TRIM(username) AS username
+         FROM customers
+         WHERE platform_id = ?
+           AND TRIM(primary_mobile_no) = ?
+           AND TRIM(username) <> \'\'
+         ORDER BY username ASC, id ASC'
+    );
+    if (!$stmt) {
+        $conn->close();
+        sendResponse(false, 'Unable to prepare mobile username query.', [], [], 500);
+    }
+    $stmt->bind_param('is', $platformId, $mobile);
+} else {
+    $stmt = $conn->prepare(
+        'SELECT id, platform_id, TRIM(username) AS username
+         FROM customers
+         WHERE platform_id = ?
+           AND TRIM(username) LIKE ?
+           AND TRIM(username) <> \'\'
+         ORDER BY username ASC, id ASC
+         LIMIT 10'
+    );
+    if (!$stmt) {
+        $conn->close();
+        sendResponse(false, 'Unable to prepare username suggestions query.', [], [], 500);
+    }
+    $pattern = '%' . $query . '%';
+    $stmt->bind_param('is', $platformId, $pattern);
 }
-
-$pattern = '%' . $query . '%';
-$stmt->bind_param('is', $platformId, $pattern);
 if (!$stmt->execute()) {
     $stmt->close();
     $conn->close();

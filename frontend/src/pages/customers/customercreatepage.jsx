@@ -74,11 +74,15 @@ const CustomerCreatePage = () => {
     const [usernameSuggestionsOpen, setUsernameSuggestionsOpen] = useState(false);
     const [usernameSuggestionsLoading, setUsernameSuggestionsLoading] = useState(false);
     const [usernameSuggestionError, setUsernameSuggestionError] = useState('');
+    const [mobileUsernameSuggestions, setMobileUsernameSuggestions] = useState([]);
+    const [mobileUsernameSuggestionsLoading, setMobileUsernameSuggestionsLoading] = useState(false);
+    const [mobileUsernameSuggestionError, setMobileUsernameSuggestionError] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState(null);
     const [customerDetailsLoading, setCustomerDetailsLoading] = useState(false);
     const [customerDetailsError, setCustomerDetailsError] = useState('');
     const usernameFieldRef = useRef(null);
     const usernameSearchSequence = useRef(0);
+    const mobileUsernameSearchSequence = useRef(0);
     const customerLookupSequence = useRef(0);
 
     const triggerError = (msg) => {
@@ -91,6 +95,11 @@ const CustomerCreatePage = () => {
 
     const fieldErrors = getCustomerFieldErrors(form, showValidation);
     const usernameQuery = String(form.username || '').trim();
+    const mobileUsernameSearchActive = !isEditMode
+        && /^[0-9]{10}$/.test(String(form.primary_mobile_no || '').trim());
+    const filteredMobileUsernameSuggestions = mobileUsernameSuggestions.filter((customer) =>
+        String(customer.username || '').toLowerCase().includes(usernameQuery.toLowerCase())
+    );
 
     const storageKey = customerId
         ? `customer_creation_${customerId}`
@@ -277,6 +286,12 @@ const loadCustomer = async () => {
         if (!usernameSuggestionsOpen) {
             return undefined;
         }
+        if (!isEditMode && form.primary_mobile_no) {
+            setUsernameSuggestions([]);
+            setUsernameSuggestionsLoading(false);
+            setUsernameSuggestionError('');
+            return undefined;
+        }
         if (!form.platform_id) {
             setUsernameSuggestions([]);
             setUsernameSuggestionsLoading(false);
@@ -325,7 +340,50 @@ const loadCustomer = async () => {
             window.clearTimeout(timer);
             usernameSearchSequence.current += 1;
         };
-    }, [form.platform_id, usernameQuery, usernameSuggestionsOpen]);
+    }, [form.platform_id, form.primary_mobile_no, usernameQuery, usernameSuggestionsOpen, isEditMode]);
+
+    useEffect(() => {
+        const mobile = String(form.primary_mobile_no || '').trim();
+        if (isEditMode || !form.platform_id || !/^[0-9]{10}$/.test(mobile)) {
+            return undefined;
+        }
+
+        const requestId = ++mobileUsernameSearchSequence.current;
+        setMobileUsernameSuggestionsLoading(true);
+        setMobileUsernameSuggestionError('');
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await api.get('/customers/username_suggestions.php', {
+                    params: { platform_id: form.platform_id, primary_mobile_no: mobile }
+                });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Failed to load usernames for this mobile number.');
+                }
+                if (requestId === mobileUsernameSearchSequence.current) {
+                    const matches = response.data.data?.customers || [];
+                    setMobileUsernameSuggestions(Array.isArray(matches) ? matches : []);
+                }
+            } catch (suggestionError) {
+                if (requestId === mobileUsernameSearchSequence.current) {
+                    setMobileUsernameSuggestions([]);
+                    setMobileUsernameSuggestionError(
+                        suggestionError.response?.data?.message ||
+                        suggestionError.message ||
+                        'Failed to load usernames for this mobile number.'
+                    );
+                }
+            } finally {
+                if (requestId === mobileUsernameSearchSequence.current) {
+                    setMobileUsernameSuggestionsLoading(false);
+                }
+            }
+        }, 250);
+
+        return () => {
+            window.clearTimeout(timer);
+            mobileUsernameSearchSequence.current += 1;
+        };
+    }, [form.platform_id, form.primary_mobile_no, isEditMode]);
 
     useEffect(() => {
         const closeSuggestions = (event) => {
@@ -343,6 +401,7 @@ const loadCustomer = async () => {
 
     useEffect(() => () => {
         customerLookupSequence.current += 1;
+        mobileUsernameSearchSequence.current += 1;
     }, []);
 
     /*
@@ -356,6 +415,28 @@ const loadCustomer = async () => {
             name,
             value
         } = event.target;
+
+        if (name === 'primary_mobile_no') {
+            const updatedValue = sanitizeCustomerField(name, value);
+            const hadSelectedCustomer = Boolean(selectedCustomer || customerDetailsLoading);
+            clearSelectedCustomer();
+            mobileUsernameSearchSequence.current += 1;
+            setMobileUsernameSuggestions([]);
+            setMobileUsernameSuggestionsLoading(false);
+            setMobileUsernameSuggestionError('');
+            setUsernameSuggestionsOpen(
+                !isEditMode && /^[0-9]{10}$/.test(updatedValue)
+            );
+            setForm((previous) => ({
+                ...previous,
+                ...(hadSelectedCustomer ? emptyCustomerDetails : {}),
+                primary_mobile_no: updatedValue,
+                username: ''
+            }));
+            setError('');
+            setSuccess('');
+            return;
+        }
 
         const updatedValue = sanitizeCustomerField(name, value);
 
@@ -381,10 +462,12 @@ const loadCustomer = async () => {
         clearSelectedCustomer();
         setForm((previous) => ({
             ...previous,
-            username: updatedValue,
-            ...(hadSelectedCustomer ? emptyCustomerDetails : {})
+            ...(hadSelectedCustomer
+                ? { ...emptyCustomerDetails, primary_mobile_no: previous.primary_mobile_no }
+                : {}),
+            username: updatedValue
         }));
-        setUsernameSuggestionsOpen(true);
+        setUsernameSuggestionsOpen(Boolean(form.platform_id));
         setError('');
         setSuccess('');
     };
@@ -393,12 +476,16 @@ const loadCustomer = async () => {
         const updatedValue = sanitizeCustomerField('platform_id', event.target.value);
         const hadSelectedCustomer = Boolean(selectedCustomer || customerDetailsLoading);
         clearSelectedCustomer();
+        mobileUsernameSearchSequence.current += 1;
+        setMobileUsernameSuggestions([]);
+        setMobileUsernameSuggestionsLoading(false);
+        setMobileUsernameSuggestionError('');
+        setUsernameSuggestionsOpen(false);
         setForm((previous) => ({
             ...previous,
             platform_id: updatedValue,
-            ...(hadSelectedCustomer
-                ? { username: '', ...emptyCustomerDetails }
-                : {})
+            username: '',
+            ...(hadSelectedCustomer ? emptyCustomerDetails : {})
         }));
         setUsernameSuggestions([]);
         setUsernameSuggestionError('');
@@ -1167,17 +1254,17 @@ const loadCustomer = async () => {
                                         type="text"
                                         name="username"
                                         value={form.username}
-                                        onFocus={() => setUsernameSuggestionsOpen(true)}
+                                        onFocus={() => form.platform_id && setUsernameSuggestionsOpen(true)}
                                         onChange={handleUsernameChange}
                                         className="form-control"
                                         placeholder="Enter username"
                                         maxLength={100}
-                                        disabled={saving}
+                                        disabled={!form.platform_id || saving}
                                         autoComplete="off"
                                         aria-autocomplete="list"
-                                        aria-expanded={usernameSuggestionsOpen}
+                                        aria-expanded={usernameSuggestionsOpen && (!form.primary_mobile_no || mobileUsernameSearchActive || isEditMode)}
                                     />
-                                    {usernameSuggestionsOpen && (
+                                    {usernameSuggestionsOpen && (!form.primary_mobile_no || mobileUsernameSearchActive || isEditMode) && (
                                         <div
                                             role="listbox"
                                             style={{
@@ -1198,7 +1285,43 @@ const loadCustomer = async () => {
                                                 <div style={{ padding: '10px 12px', color: '#64748b' }}>
                                                     Select a platform to see username suggestions.
                                                 </div>
-                                            ) : !usernameQuery ? (
+                                            ) : mobileUsernameSearchActive && mobileUsernameSuggestionsLoading ? (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    Searching usernames for this mobile number...
+                                                </div>
+                                            ) : mobileUsernameSearchActive && mobileUsernameSuggestionError ? (
+                                                <div role="alert" style={{ padding: '10px 12px', color: '#b91c1c' }}>
+                                                    {mobileUsernameSuggestionError}
+                                                </div>
+                                            ) : mobileUsernameSearchActive && filteredMobileUsernameSuggestions.length ? (
+                                                filteredMobileUsernameSuggestions.map((customer) => (
+                                                    <button
+                                                        key={customer.id}
+                                                        type="button"
+                                                        role="option"
+                                                        aria-selected={Number(selectedCustomer?.id) === Number(customer.id)}
+                                                        onClick={() => handleUsernameSuggestionSelect(customer)}
+                                                        style={{
+                                                            display: 'block',
+                                                            width: '100%',
+                                                            padding: '10px 12px',
+                                                            border: 0,
+                                                            background: '#fff',
+                                                            color: '#1e293b',
+                                                            textAlign: 'left',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        {customer.username}
+                                                    </button>
+                                                ))
+                                            ) : mobileUsernameSearchActive ? (
+                                                <div style={{ padding: '10px 12px', color: '#64748b' }}>
+                                                    {usernameQuery
+                                                        ? 'No matching existing username for this mobile number. Continue with the new username.'
+                                                        : 'No existing usernames for this platform and mobile number. Enter a new username to continue.'}
+                                                </div>
+                                            ) : !form.primary_mobile_no && !usernameQuery ? (
                                                 <div style={{ padding: '10px 12px', color: '#64748b' }}>
                                                     Start typing to search usernames.
                                                 </div>
@@ -1210,7 +1333,7 @@ const loadCustomer = async () => {
                                                 <div role="alert" style={{ padding: '10px 12px', color: '#b91c1c' }}>
                                                     {usernameSuggestionError}
                                                 </div>
-                                            ) : usernameSuggestions.length ? (
+                                            ) : !form.primary_mobile_no && usernameSuggestions.length ? (
                                                 usernameSuggestions.map((customer) => (
                                                     <button
                                                         key={customer.id}
@@ -1234,7 +1357,9 @@ const loadCustomer = async () => {
                                                 ))
                                             ) : (
                                                 <div style={{ padding: '10px 12px', color: '#64748b' }}>
-                                                    No matching usernames found.
+                                                    {!form.primary_mobile_no
+                                                        ? 'No matching usernames found.'
+                                                        : 'Enter a valid mobile number to find its usernames, or continue with a new username.'}
                                                 </div>
                                             )}
                                         </div>
@@ -1278,7 +1403,7 @@ const loadCustomer = async () => {
                                     className="form-control"
                                     placeholder="Enter 10 digit mobile number"
                                     maxLength={10}
-                                    disabled={saving}
+                                    disabled={!form.platform_id || saving}
                                 />
                                 {fieldErrors.primary_mobile_no && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {fieldErrors.primary_mobile_no}</small>}
 

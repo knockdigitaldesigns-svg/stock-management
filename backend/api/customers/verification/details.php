@@ -860,10 +860,41 @@ if ($leadClosure === '') {
     if (!is_array($payment1) && $vehicle === ($snapshot['vehicle'] ?? null) && is_array($snapshot['payment_part1'] ?? null)) {
         $payment1 = $snapshot['payment_part1'];
     }
-    if (is_array($payment1) || $actualPayment) {
+    $payment2 = $vehicle['payment_part2'] ?? null;
+    if (!is_array($payment2) && $vehicle === ($snapshot['vehicle'] ?? null) && is_array($snapshot['payment_part2'] ?? null)) {
+        $payment2 = $snapshot['payment_part2'];
+    }
+
+    $actualPayment = null;
+    if ($customerId > 0
+        && $source !== 'payment_installment'
+        && $source !== 'courier'
+        && (!is_array($payment1) || !is_array($payment2))) {
+        if ($vehicleId > 0) {
+            $actualPayment = customerVerificationLoadPayment($conn, $customerId, 0, $vehicleId);
+        }
+        if (!$actualPayment && $linkedPayment) {
+            $linkedPaymentVehicleId = (int) ($linkedPayment['vehicle_id'] ?? 0);
+            if ($linkedPaymentVehicleId === $vehicleId
+                || (count($vehicles) === 1 && $linkedPaymentVehicleId === 0)) {
+                $actualPayment = $linkedPayment;
+            }
+        }
+    }
+    if ($actualPayment) {
+        $payment1 = customerVerificationMergeMissing(
+            is_array($payment1) ? $payment1 : [],
+            $actualPayment
+        );
+        $payment2 = customerVerificationMergeMissing(
+            is_array($payment2) ? $payment2 : [],
+            $actualPayment
+        );
+    }
+    if (is_array($payment1)) {
         $displayPaymentPart1[] = customerVerificationPayment($payment1, $vehicleLabel, false);
     }
-    if (is_array($payment2) || $actualPayment) {
+    if (is_array($payment2)) {
         $displayPaymentPart2[] = customerVerificationPayment($payment2, $vehicleLabel, true);
     }
 }

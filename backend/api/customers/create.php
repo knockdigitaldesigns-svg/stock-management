@@ -393,37 +393,6 @@ if ($existingSameMobile) {
     );
 }
 
-// A mobile number can belong to only one username within the selected platform.
-$stmt = $conn->prepare(
-    "SELECT id
-     FROM customers
-     WHERE platform_id = ?
-       AND TRIM(primary_mobile_no) = ?
-       AND LOWER(TRIM(username)) <> LOWER(?)
-     ORDER BY id ASC
-     LIMIT 1"
-);
-
-$stmt->bind_param('iss', $platformId, $primaryMobile, $username);
-$stmt->execute();
-$existingDifferentUsername = $stmt->get_result()->fetch_assoc();
-$stmt->close();
-
-if ($existingDifferentUsername) {
-    $conn->rollback();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'This mobile number is already registered with another username in this software. Please use the existing registered username.',
-        [
-            'code' => 'MOBILE_EXISTS_DIFFERENT_USERNAME'
-        ],
-        [],
-        409
-    );
-}
-
 // A username can identify only one customer per platform.
 $stmt = $conn->prepare(
     "SELECT id

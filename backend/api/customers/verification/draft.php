@@ -113,20 +113,6 @@ try {
             $stmt = $conn->prepare(
                 'SELECT id FROM customers
                  WHERE platform_id = ?
-                   AND TRIM(primary_mobile_no) = ?
-                   AND LOWER(TRIM(username)) <> LOWER(?)
-                 ORDER BY id ASC LIMIT 1'
-            );
-            $stmt->bind_param('iss', $platformId, $primaryMobile, $username);
-            $stmt->execute();
-            $differentUsername = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            if ($differentUsername) {
-                throw new RuntimeException('MOBILE_EXISTS_DIFFERENT_USERNAME');
-            }
-            $stmt = $conn->prepare(
-                'SELECT id FROM customers
-                 WHERE platform_id = ?
                    AND LOWER(TRIM(username)) = LOWER(?)
                    AND TRIM(primary_mobile_no) <> ?
                  ORDER BY id ASC LIMIT 1'
@@ -252,15 +238,6 @@ try {
     $message = $error->getMessage();
     if ($message === 'USERNAME_EXISTS_DIFFERENT_MOBILE') {
         sendResponse(false, 'Username already exists with a different mobile number.', ['code' => $message], [], 409);
-    }
-    if ($message === 'MOBILE_EXISTS_DIFFERENT_USERNAME') {
-        sendResponse(
-            false,
-            'This mobile number is already registered with another username in this software. Please use the existing registered username.',
-            ['code' => $message],
-            [],
-            409
-        );
     }
     if ($message === 'CUSTOMER_VERIFICATION_ALREADY_PENDING') {
         sendResponse(
