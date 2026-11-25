@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import './SearchableDropdown.css';
 
-const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an option...", disabled = false }) => {
+const SearchableDropdown = ({
+    options,
+    value,
+    onChange,
+    placeholder = "Select an option...",
+    disabled = false,
+    'aria-label': ariaLabel
+}) => {
     const safeOptions = Array.isArray(options) ? options : [];
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
@@ -106,6 +113,18 @@ const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an
             <div 
                 className={`dropdown-header ${isOpen ? 'open' : ''} ${disabled ? 'disabled' : ''}`} 
                 onClick={handleToggle}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        setIsOpen(true);
+                    }
+                }}
+                role="combobox"
+                aria-haspopup="listbox"
+                aria-label={ariaLabel}
+                aria-expanded={isOpen}
+                aria-disabled={disabled}
+                tabIndex={disabled ? -1 : 0}
             >
                 <span className={selectedOption ? 'selected-text' : 'placeholder-text'} title={selectedOption ? selectedOption.label : ''}>
                     {selectedOption ? selectedOption.label : placeholder}
@@ -124,7 +143,7 @@ const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an
                         onKeyDown={handleKeyDown}
                         autoFocus
                     />
-                    <ul className="dropdown-list" ref={listRef}>
+                    <ul className="dropdown-list" role="listbox" ref={listRef}>
                         {filteredOptions.length > 0 ? (
                             filteredOptions.map((option, index) => (
                                 <li 
@@ -132,6 +151,8 @@ const SearchableDropdown = ({ options, value, onChange, placeholder = "Select an
                                     className={`dropdown-item ${String(option.value) === String(value) ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
                                     onClick={() => handleSelect(option.value)}
                                     title={option.label}
+                                    role="option"
+                                    aria-selected={String(option.value) === String(value)}
                                 >
                                     {option.label}
                                 </li>

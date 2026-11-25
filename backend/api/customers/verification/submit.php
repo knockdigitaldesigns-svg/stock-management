@@ -60,9 +60,12 @@ if ($firstPayment !== null) {
 }
 if ($paymentCount === 0) {
     $paymentPart1 = $submissionData['payment_part1'] ?? null;
-    if (!is_array($paymentPart1) && is_array($submissionData['vehicles'] ?? null)) {
+    if (!is_array($paymentPart1) || !$paymentPart1) {
+        $paymentPart1 = $submissionData['step4'] ?? null;
+    }
+    if ((!is_array($paymentPart1) || !$paymentPart1) && is_array($submissionData['vehicles'] ?? null)) {
         foreach ($submissionData['vehicles'] as $vehicle) {
-            if (is_array($vehicle['payment_part1'] ?? null)) {
+            if (is_array($vehicle['payment_part1'] ?? null) && $vehicle['payment_part1']) {
                 $paymentPart1 = $vehicle['payment_part1'];
                 break;
             }

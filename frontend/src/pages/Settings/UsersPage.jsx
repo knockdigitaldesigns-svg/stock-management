@@ -16,11 +16,11 @@ import { fetchAllPaginated } from '../../utils/fetchAllPaginated';
 
 const UsersPage = () => {
     const { user: currentUser } = useAuth();
-    const isSuperAdmin = ['super admin', 'super_admin'].includes(
-        String(currentUser?.role?.name ?? currentUser?.role ?? '').trim().toLowerCase()
-    );
+    const superAdminView = String(currentUser?.role?.name ?? currentUser?.role ?? '')
+        .trim().toLowerCase().replace(/[^a-z0-9]/g, '') === 'superadmin';
     const [users, setUsers] = useState([]);
     const [roles, setRoles] = useState([]);
+    const [otpStatuses, setOtpStatuses] = useState({});
     const [filters, setFilters] = useState(emptyTableFilters);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -95,11 +95,22 @@ const UsersPage = () => {
 
     const fetchRoles = async () => {
         try {
-            const list = await fetchAllPaginated(
-                (page, pageSize) => api.get('/roles/list.php', { params: { page, page_size: pageSize } }),
-                'roles'
-            );
-            setRoles(list.filter((role) => role.status === 'active'));
+           const list = await fetchAllPaginated(
+    (page, pageSize) => api.get('/roles/list.php', {
+        params: { page, page_size: pageSize }
+    }),
+    'roles'
+);
+
+setRoles(list.filter((role) => {
+    const normalizedName = String(role.role_name || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+
+    return role.status === 'active'
+        && !['dealer', 'technician'].includes(normalizedName);
+}));
         } catch (err) {
             console.error('Failed to fetch roles', err);
         }
@@ -109,6 +120,29 @@ const UsersPage = () => {
         fetchRoles();
         fetchUsers();
     }, []);
+
+    useEffect(() => {
+        if (!superAdminView) return undefined;
+        let active = true;
+        const fetchOtpStatuses = async () => {
+            try {
+                const response = await api.get('/auth/otp_status.php');
+                if (active && response.data.success) {
+                    setOtpStatuses(response.data.data?.statuses || {});
+                }
+            } catch {
+                if (active) setOtpStatuses({});
+            }
+        };
+        fetchOtpStatuses();
+        const interval = window.setInterval(() => {
+            fetchOtpStatuses();
+        }, 30000);
+        return () => {
+            active = false;
+            window.clearInterval(interval);
+        };
+    }, [superAdminView]);
 
     const filteredUsers = filterTableRows(users, filters, { dateKeys: ['created_at'], searchKeys: ['employee_name', 'username', 'mobile_no', 'role_name', 'role'] });
 
@@ -333,7 +367,7 @@ const clearViewedCredential = () => {
 };
 
 const revealUserCredential = async () => {
-    if (!viewingUser || !isSuperAdmin) return;
+    if (!viewingUser || !superAdminView) return;
     setViewCredentialError('');
     if (viewCredentialPassword !== null) {
         setShowViewCredentialPassword((visible) => !visible);
@@ -402,6 +436,7 @@ const copyViewedCredential = async () => {
                                 <th>Username</th>
                                 <th>Mobile No</th>
                                 <th>Role</th>
+                                {superAdminView && <th>Current OTP</th>}
                                 <th>Status</th>
                                 <th>Created Date</th>
                                 <th>Actions</th>
@@ -409,22 +444,46 @@ const copyViewedCredential = async () => {
                         </thead>
                         <tbody>
                             {loading ? (
-                                <tr><td colSpan="7" className="text-center">Loading users...</td></tr>
+                                <tr><td colSpan={superAdminView ? 8 : 7} className="text-center">Loading users...</td></tr>
                             ) : paginatedItems.length === 0 ? (
-                                <tr><td colSpan="7" className="text-center empty-state">No records found for the selected filters.</td></tr>
+                                <tr><td colSpan={superAdminView ? 8 : 7} className="text-center empty-state">No records found for the selected filters.</td></tr>
                             ) : paginatedItems.map((user) => (
                                 <tr key={user.id}>
                                     <td className="truncate-cell" title={user.employee_name || user.username} style={{ fontWeight: 500 }}>{user.employee_name || user.username}</td>
                                     <td>{user.username}</td>
                                     <td>{user.mobile_no}</td>
                                     <td>{user.role_name || user.role}</td>
+                                    {superAdminView && (
+                                        <td>
+                                            {(() => {
+                                                const otpStatus = otpStatuses[String(user.id)];
+                                                if (!otpStatus || otpStatus.state === '-') return '-';
+                                                if (otpStatus.state === 'Used') return <span className="badge badge-secondary">Used</span>;
+                                                if (otpStatus.state === 'Expired') return <span className="badge badge-danger">Expired</span>;
+                                                const expiresAt = new Date(String(otpStatus.expires_at || '').replace(' ', 'T'));
+                                                const expiresAtTime = expiresAt.getTime();
+                                                const fallbackRemaining = Number(otpStatus.remaining_seconds);
+                                                const remaining = Number.isFinite(expiresAtTime)
+                                                    ? Math.max(0, Math.ceil((expiresAtTime - Date.now()) / 1000))
+                                                    : Math.max(0, Number.isFinite(fallbackRemaining) ? fallbackRemaining : 0);
+                                                const minutes = Math.floor(remaining / 60);
+                                                const seconds = String(remaining % 60).padStart(2, '0');
+                                                return (
+                                                    <span title={`Expires in ${minutes}:${seconds}`}>
+                                                        <strong style={{ letterSpacing: '0.12em' }}>{otpStatus.otp || '-'}</strong>
+                                                        {remaining > 0 && <span className="text-secondary"> ({minutes}:{seconds})</span>}
+                                                    </span>
+                                                );
+                                            })()}
+                                        </td>
+                                    )}
                                     <td><span className={`badge ${user.status === 'active' ? 'badge-success' : 'badge-danger'}`}>{user.status}</span></td>
                                     <td>{formatDate(user.created_at)}</td>
                                     <td>
                                         <div className="action-buttons">
                                             <button className="icon-btn view" type="button" aria-label="View user" title="View" onClick={() => { clearViewedCredential(); setViewingUser(user); }}><Eye size={16} /></button>
                                             <Can permission="users.edit"><button className="icon-btn edit" type="button" aria-label="Edit user" onClick={() => { setEditingUser(user); setShowPassword(false); setShowConfirmPassword(false); setForm({ employee_name: user.employee_name || '', mobile_no: user.mobile_no || '', role_id: String(user.role_id || ''), password: '', confirm_password: '', status: user.status || 'active' }); setEmployeeNameError(''); setError(''); setShowModal(true); }}><Pencil size={16} /></button></Can>
-                                            {isSuperAdmin && <Can permission="users.edit"><button className="icon-btn edit" type="button" aria-label={`Reset password for ${user.username}`} title="Reset Password" onClick={() => { setResetPasswordTarget(user); setResetPasswordForm({ password: '', confirm_password: '' }); setResetPasswordError(''); setShowResetPassword(false); setShowResetConfirmPassword(false); }}><KeyRound size={16} /></button></Can>}
+                                            {superAdminView && <Can permission="users.edit"><button className="icon-btn edit" type="button" aria-label={`Reset password for ${user.username}`} title="Reset Password" onClick={() => { setResetPasswordTarget(user); setResetPasswordForm({ password: '', confirm_password: '' }); setResetPasswordError(''); setShowResetPassword(false); setShowResetConfirmPassword(false); }}><KeyRound size={16} /></button></Can>}
                                             <Can permission="users.delete">
     <button
         className="icon-btn delete"
@@ -706,7 +765,7 @@ const copyViewedCredential = async () => {
                                     ? <span>{viewCredentialUnavailable}</span>
                                     : viewCredentialPassword === null
                                         ? (
-                                            isSuperAdmin
+                                            superAdminView
                                                 ? (
                                                     <button
                                                         type="button"

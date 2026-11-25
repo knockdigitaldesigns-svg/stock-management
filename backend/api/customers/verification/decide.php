@@ -145,7 +145,7 @@ try {
                     throw new RuntimeException('Courier assets have already been committed and this verification cannot be rejected safely. Resume approval instead.');
                 }
             }
-            if (($submissionData['source'] ?? '') !== 'payment_installment') {
+            if (!in_array(($submissionData['source'] ?? ''), ['payment_installment', 'crm_installation'], true)) {
                 rejectCustomerPaymentVerificationApplication(
                     $conn,
                     $submissionId,
@@ -252,6 +252,99 @@ try {
                 throw new RuntimeException('Unable to update the customer rejection status.');
             }
             $customerStatusStmt->close();
+        }
+        if (($submissionData['source'] ?? '') === 'crm_installation') {
+            $closureId = (int) ($submissionData['crm_closure_id'] ?? 0);
+            $installationDeviceId = (int) ($submissionData['installation_device_id'] ?? 0);
+            if ($closureId <= 0 || $installationDeviceId <= 0) {
+                throw new RuntimeException('CRM installation verification is missing its device link.');
+            }
+            $rejectDevice = $conn->prepare(
+                "UPDATE crm_closure_installation_devices
+                 SET verification_status = 'Rejected', verification_rejection_reason = ?
+                 WHERE id = ? AND closure_id = ? AND verification_submission_id = ?
+                   AND installation_status = 'Completed'"
+            );
+            if (!$rejectDevice) {
+                throw new RuntimeException('Unable to prepare CRM installation rejection update.');
+            }
+            $rejectDevice->bind_param('siii', $reason, $installationDeviceId, $closureId, $submissionId);
+            if (!$rejectDevice->execute() || $rejectDevice->affected_rows !== 1) {
+                $rejectDevice->close();
+                throw new RuntimeException('The completed CRM installation device could not be returned for correction.');
+            }
+            $rejectDevice->close();
+
+            $customerId = (int) ($row['linked_customer_id'] ?? $row['existing_customer_id'] ?? 0);
+            if ($customerId > 0) {
+                $customerStatusStmt = $conn->prepare(
+                    "UPDATE customers SET verification_status = 'Rejected' WHERE id = ?"
+                );
+                if (!$customerStatusStmt) {
+                    throw new RuntimeException('Unable to prepare CRM customer rejection status update.');
+                }
+                $customerStatusStmt->bind_param('i', $customerId);
+                if (!$customerStatusStmt->execute()) {
+                    $customerStatusStmt->close();
+                    throw new RuntimeException('Unable to update CRM customer rejection status.');
+                }
+                $customerStatusStmt->close();
+            }
+
+            $closureStmt = $conn->prepare(
+                "UPDATE crm_lead_closure_forms
+                 SET submission_status = 'Installation In Progress', rejection_reason = ?
+                 WHERE id = ?"
+            );
+            if (!$closureStmt) {
+                throw new RuntimeException('Unable to prepare CRM installation return status update.');
+            }
+            $closureStmt->bind_param('si', $reason, $closureId);
+            if (!$closureStmt->execute()) {
+                $closureStmt->close();
+                throw new RuntimeException('Unable to update CRM installation return status.');
+            }
+            $closureStmt->close();
+
+            $creatorStmt = $conn->prepare(
+                'SELECT COALESCE(NULLIF(l.assigned_user_id, 0), NULLIF(l.created_by_user_id, 0),
+                                 cf.submitted_by_user_id) AS lead_owner_user_id,
+                        l.lead_name
+                 FROM crm_lead_closure_forms cf
+                 INNER JOIN crm_leads l ON l.id = cf.lead_id
+                 WHERE cf.id = ? LIMIT 1'
+            );
+            if (!$creatorStmt) {
+                throw new RuntimeException('Unable to prepare CRM lead creator lookup.');
+            }
+            $creatorStmt->bind_param('i', $closureId);
+            if (!$creatorStmt->execute()) {
+                $creatorStmt->close();
+                throw new RuntimeException('Unable to resolve the original CRM lead creator.');
+            }
+            $creator = $creatorStmt->get_result()->fetch_assoc();
+            $creatorStmt->close();
+            $leadOwnerUserId = (int) ($creator['lead_owner_user_id'] ?? 0);
+            if ($leadOwnerUserId > 0) {
+                $notification = $conn->prepare(
+                    'INSERT INTO crm_notifications
+                        (user_id, title, message, notification_type, related_entity_type, related_entity_id)
+                     VALUES (?, ?, ?, \'warning\', \'lead_closure\', ?)'
+                );
+                if (!$notification) {
+                    throw new RuntimeException('Unable to prepare CRM correction notification.');
+                }
+                $title = 'Installation verification rejected';
+                $message = 'Installation for ' . (string) ($creator['lead_name'] ?? 'this lead')
+                    . ' was rejected. Reason: ' . $reason
+                    . ' Please review and correct the submission.';
+                $notification->bind_param('issi', $leadOwnerUserId, $title, $message, $closureId);
+                if (!$notification->execute()) {
+                    $notification->close();
+                    throw new RuntimeException('Unable to notify the original CRM lead creator.');
+                }
+                $notification->close();
+            }
         }
         $newStatus = 'Rejected';
         $storedReason = $reason;

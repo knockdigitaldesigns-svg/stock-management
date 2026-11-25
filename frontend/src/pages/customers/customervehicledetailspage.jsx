@@ -16,7 +16,7 @@ import {
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
-import { saveCustomerDraft } from '../../utils/customerSubmission';
+import { useConfirmation } from '../../components/Modal/useConfirmation';import { saveCustomerDraft } from '../../utils/customerSubmission';
 
 
 const initialForm = {
@@ -39,6 +39,7 @@ const CustomerVehicleDetailsPage = () => {
     const { customerId } = useParams();
 
     const { hasPermission } = useAuth();
+    const { confirm, confirmationDialog } = useConfirmation();
 
 
     const [form, setForm] = useState(initialForm);
@@ -1977,13 +1978,13 @@ const CustomerVehicleDetailsPage = () => {
     |--------------------------------------------------------------------------
     */
 
-    const handleReset = () => {
-
-        const confirmed =
-            window.confirm(
-                'Are you sure you want to reset the vehicle details?'
-            );
-
+    const handleReset = async () => {
+        const confirmed = await confirm({
+            title: 'Reset Vehicle Details',
+            message: 'Are you sure you want to reset the vehicle details?',
+            confirmLabel: 'Reset',
+            confirmClassName: 'btn-danger'
+        });
 
         if (!confirmed) {
             return;
@@ -3039,6 +3040,7 @@ const CustomerVehicleDetailsPage = () => {
                 </div>
             )}
 
+            {confirmationDialog}
         </div>
 
     );

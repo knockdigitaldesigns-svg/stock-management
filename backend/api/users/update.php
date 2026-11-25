@@ -5,6 +5,7 @@ require_once '../../middleware/auth.php';
 require_once '../../utils/user_identity.php';
 require_once '../../utils/audit.php';
 require_once '../../utils/user_credential_crypto.php';
+require_once '../../utils/installation_personnel.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $_SERVER['REQUEST_METHOD'] !== 'PUT') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -33,6 +34,16 @@ if (!in_array($status, ['active', 'inactive'], true)) $status = 'active';
 
 $db = new Database(); $conn = $db->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed', [], [], 500);
+try {
+    if (isInstallationPersonnelAccount($conn, $id)) {
+        $conn->close();
+        sendResponse(false, 'Installation person accounts must be edited from Installation Persons.', [], [], 403);
+    }
+} catch (Throwable $error) {
+    $conn->close();
+    error_log('Installation person account access check failed: ' . $error->getMessage());
+    sendResponse(false, 'Unable to verify account type.', [], [], 500);
+}
 $stmt = $conn->prepare('SELECT id FROM users WHERE id = ?'); $stmt->bind_param('i', $id); $stmt->execute();
 if ($stmt->get_result()->num_rows === 0) sendResponse(false, 'User not found', [], [], 404); $stmt->close();
 $stmt = $conn->prepare('SELECT id FROM users WHERE mobile_no = ? AND id <> ? LIMIT 1'); $stmt->bind_param('si', $mobileNo, $id); $stmt->execute();
@@ -41,6 +52,10 @@ $stmt = $conn->prepare("SELECT id FROM users WHERE id <> ? AND (LOWER(username) 
 if ($stmt->get_result()->num_rows > 0) sendResponse(false, 'Username already exists. Please use a different employee name.', [], [], 409); $stmt->close();
 $stmt = $conn->prepare('SELECT role_name FROM roles WHERE id = ? AND status = "active" LIMIT 1'); $stmt->bind_param('i', $roleId); $stmt->execute(); $role = $stmt->get_result()->fetch_assoc(); $stmt->close();
 if (!$role) sendResponse(false, 'Selected role is invalid or inactive', [], [], 400);
+if (isInstallationPersonnelRoleName((string) $role['role_name'])) {
+    $conn->close();
+    sendResponse(false, 'Dealer and Technician roles can only be assigned through linked personnel records.', [], [], 403);
+}
 $oldStmt = $conn->prepare('SELECT employee_name, mobile_no, username, role_id, status FROM users WHERE id = ? LIMIT 1');
 $oldStmt->bind_param('i', $id); $oldStmt->execute(); $oldUser = $oldStmt->get_result()->fetch_assoc(); $oldStmt->close();
 $newUser = ['employee_name' => $employeeName, 'mobile_no' => $mobileNo, 'username' => $username, 'role_id' => $roleId, 'status' => $status];

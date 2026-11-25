@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import api from '../../../services/api';
 import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
+import PersonnelCredentialNotice from '../../../components/PersonnelCredentialNotice';
 import { showGlobalError } from '../../../context/ErrorContext';
 
 const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
@@ -11,12 +13,19 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
         mobile_no: technician?.mobile_no || '',
         alternate_mobile_no: technician?.alternate_mobile_no || '',
         location: technician?.location || '',
+        installation_service_areas: technician?.installation_service_areas || '',
         enrolled_date: technician?.enrolled_date || '',
         status: technician?.status || 'active',
         notes: technician?.notes || ''
     });
     const [loading, setLoading] = useState(false);
+    const [accountLoading, setAccountLoading] = useState(false);
     const [error, setError] = useState('');
+    const [accountPassword, setAccountPassword] = useState('');
+    const [confirmAccountPassword, setConfirmAccountPassword] = useState('');
+    const [showAccountPassword, setShowAccountPassword] = useState(false);
+    const [showConfirmAccountPassword, setShowConfirmAccountPassword] = useState(false);
+    const [credentials, setCredentials] = useState(null);
     const [allocatedStock, setAllocatedStock] = useState({ devices: [], sims: [] });
     const [stockSummary, setStockSummary] = useState({ total_device: 0, used_device: 0, available_device: 0, total_sim: 0, used_sim: 0, available_sim: 0 });
     const [stockLoading, setStockLoading] = useState(true);
@@ -78,21 +87,58 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
         }
     };
 
+    const createLoginAccount = async () => {
+        setError('');
+        if (accountPassword.length < 8) {
+            return triggerError('Password must be at least 8 characters long.');
+        }
+        if (accountPassword !== confirmAccountPassword) {
+            return triggerError('Passwords do not match.');
+        }
+        if (!/^[6-9][0-9]{9}$/.test(String(technician?.mobile_no || ''))) {
+            return triggerError('The saved technician mobile number must be a valid 10-digit mobile number.');
+        }
+
+        setAccountLoading(true);
+        try {
+            const response = await api.post('/technicians/create.php', {
+                link_existing_id: Number(technician.id),
+                password: accountPassword,
+                confirm_password: confirmAccountPassword
+            });
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Unable to create technician login account.');
+            }
+            setCredentials({
+                username: response.data.data?.user?.username || String(technician.technician_name || '').trim().replace(/\s+/g, '').toLowerCase(),
+                role: response.data.data?.user?.role || 'Technician',
+                password: accountPassword
+            });
+        } catch (accountError) {
+            triggerError(accountError.response?.data?.message || accountError.message || 'Unable to create technician login account.');
+        } finally {
+            setAccountLoading(false);
+        }
+    };
+
     return (
         <Modal
             isOpen={Boolean(technician)}
-            onClose={onClose}
-            title="Edit Technician"
+            onClose={credentials ? onSuccess : onClose}
+            title={credentials ? 'Technician Login Created' : 'Edit Technician'}
             maxWidth="560px"
-            footer={
+            footer={credentials ? null : (
                 <>
-                    <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading}>Cancel</button>
-                    <button type="submit" form="edit-tech-form" className="btn btn-primary" disabled={loading}>
+                    <button type="button" className="btn btn-outline" onClick={onClose} disabled={loading || accountLoading}>Cancel</button>
+                    <button type="submit" form="edit-tech-form" className="btn btn-primary" disabled={loading || accountLoading}>
                         {loading ? 'Saving...' : 'Save Changes'}
                     </button>
                 </>
-            }
+            )}
         >
+            {credentials ? (
+                <PersonnelCredentialNotice credentials={credentials} onDone={onSuccess} />
+            ) : (
             <form id="edit-tech-form" onSubmit={handleSubmit}>
                 {error && <div className="alert alert-danger">{error}</div>}
 
@@ -119,6 +165,11 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                     <label className="form-label">Location *</label>
                     <input type="text" className="form-control" value={formData.location} onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))} required />
                 </div>
+                <div className="form-group">
+                    <label className="form-label">Installation Service Areas</label>
+                    <textarea className="form-control" rows="2" value={formData.installation_service_areas} onChange={(e) => setFormData((prev) => ({ ...prev, installation_service_areas: e.target.value }))} placeholder="Coimbatore, Pollachi, Mettupalayam" />
+                    <small>Enter only cities/areas this technician explicitly serves, separated by commas or new lines.</small>
+                </div>
 
                 <div className="form-group">
                     <label className="form-label">Enrolled Date *</label>
@@ -133,6 +184,49 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                 </div>
 
                 <hr />
+                <h4>Login Account</h4>
+                {technician?.user_id ? (
+                    <p>This technician is linked to login account #{technician.user_id}. Ordinary profile updates do not change the linked account.</p>
+                ) : (
+                    <>
+                        <p>Create a separate account using the saved employee name and mobile number. The Technician role is assigned automatically.</p>
+                        <div className="form-group">
+                            <label className="form-label">Employee Name</label>
+                            <input className="form-control" value={technician?.technician_name || ''} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Mobile Number</label>
+                            <input className="form-control" value={technician?.mobile_no || ''} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Generated Username</label>
+                            <input className="form-control" value={String(technician?.technician_name || '').trim().replace(/\s+/g, '').toLowerCase()} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input type={showAccountPassword ? 'text' : 'password'} className="form-control" autoComplete="new-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} />
+                                <button type="button" className="btn btn-outline" aria-label={showAccountPassword ? 'Hide password' : 'Show password'} onClick={() => setShowAccountPassword((visible) => !visible)}>
+                                    {showAccountPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Confirm Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input type={showConfirmAccountPassword ? 'text' : 'password'} className="form-control" autoComplete="new-password" value={confirmAccountPassword} onChange={(event) => setConfirmAccountPassword(event.target.value)} />
+                                <button type="button" className="btn btn-outline" aria-label={showConfirmAccountPassword ? 'Hide confirmation password' : 'Show confirmation password'} onClick={() => setShowConfirmAccountPassword((visible) => !visible)}>
+                                    {showConfirmAccountPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" className="btn btn-outline" onClick={createLoginAccount} disabled={loading || accountLoading}>
+                            {accountLoading ? 'Creating Login...' : 'Create Login Account'}
+                        </button>
+                    </>
+                )}
+
+                <hr />
                 <h4>Technician Information</h4>
                 <div className="form-group"><label className="form-label">Payment Status</label><input className="form-control" value={technician?.payment_status || 'Not Paid'} readOnly /></div>
                 <hr />
@@ -141,6 +235,7 @@ const EditTechnicianModal = ({ technician, onClose, onSuccess }) => {
                 <h4>Allocated SIMs (Total: {stockSummary.total_sim || 0}, Used: {stockSummary.used_sim || 0}, Available: {stockSummary.available_sim || 0})</h4>
                 {stockLoading ? <p>Loading allocated SIMs...</p> : allocatedStock.sims.length === 0 ? <p>No SIMs currently allocated.</p> : <div className="table-container"><table><thead><tr><th>SIM No</th><th>SIM Type</th><th>SIM Status</th></tr></thead><tbody>{allocatedStock.sims.map((item) => <tr key={item.allocation_id || item.id}><td>{item.sim_no}</td><td>{item.sim_type || '-'}</td><td>{getStatusLabel(item)}</td></tr>)}</tbody></table></div>}
             </form>
+            )}
         </Modal>
     );
 };

@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -6,19 +5,20 @@ import {
     RefreshCw,
     ClipboardList
 } from 'lucide-react';
-
-import api from '../../services/api';
 import DateInput from '../../components/DateInput';
 import { getTodayDate } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { useEffect, useState } from 'react';
+import api from '../../services/api';
+
+import { useConfirmation } from '../../components/Modal/useConfirmation';
 import { saveCustomerDraft } from '../../utils/customerSubmission';
 import {
     installationTypes,
     isInstallationPersonRequired,
     resolveInstallationFormValues
 } from '../../utils/installationValidation';
-
 const initialForm = {
     installation_person_type: '',
     installation_person_id: '',
@@ -58,6 +58,7 @@ const InstallationDetailsPage = () => {
     const navigate = useNavigate();
     const { customerId } = useParams();
     const { hasPermission } = useAuth();
+    const { confirm, confirmationDialog } = useConfirmation();
 
     const [form, setForm] = useState(initialForm);
 
@@ -724,10 +725,13 @@ const InstallationDetailsPage = () => {
      * Reset
      * ---------------------------------------------------------
      */
-    const handleReset = () => {
-        const confirmed = window.confirm(
-            'Are you sure you want to reset the installation details?'
-        );
+    const handleReset = async () => {
+        const confirmed = await confirm({
+            title: 'Reset Installation Details',
+            message: 'Are you sure you want to reset the installation details?',
+            confirmLabel: 'Reset',
+            confirmClassName: 'btn-danger'
+        });
 
         if (!confirmed) {
             return;
@@ -1163,6 +1167,7 @@ const InstallationDetailsPage = () => {
                 </div>
             )}
 
+            {confirmationDialog}
         </div>
     );
 };

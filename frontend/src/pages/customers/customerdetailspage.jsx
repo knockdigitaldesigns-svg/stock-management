@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -196,9 +197,11 @@ const CustomerDetailsPage = () => {
         try {
             const res = await api.get('/platforms/list.php').catch(() => null);
             const raw = res?.data?.data?.platforms || [];
+
             const active = raw
                 .filter(p => !p.status || String(p.status).toLowerCase() === 'active')
                 .map(p => p.platform_name);
+
             setMasterPlatforms(active);
         } catch (e) {
             console.error('Failed to load platforms', e);
@@ -338,38 +341,27 @@ const CustomerDetailsPage = () => {
             return;
         }
         try {
-            setDeleting(true);
-            const response =
-                await api.delete(
-                    '/customers/delete.php',
-                    {
-                        data: {
-                            id: Number(deleteTarget.id)
-                        }
+            setDeleting(true);            const response = await api.delete(
+                '/customers/delete.php',
+                {
+                    data: {
+                        id: Number(deleteTarget.deleteTarget.id)
                     }
-                );
-
+                }
+            );
 
             if (!response.data?.success) {
-
                 throw new Error(
                     response.data?.message ||
                     'Failed to delete customer.'
                 );
-
             }
 
 
             setDeleteTarget(null);
             await loadCustomers();
-
         } catch (err) {
-
-            console.error(
-                'Customer delete error:',
-                err
-            );
-
+            console.error('Customer delete error:', err);
             triggerError(
                 err.response?.data?.message ||
                 err.message ||
@@ -393,10 +385,8 @@ const CustomerDetailsPage = () => {
                 'Pending'
             ).toLowerCase();
 
-
         let background = '#fef3c7';
         let color = '#b45309';
-
 
         if (value === 'paid') {
 
@@ -411,7 +401,6 @@ const CustomerDetailsPage = () => {
             color = '#1d4ed8';
 
         }
-
 
         return {
             display: 'inline-flex',
@@ -432,23 +421,32 @@ const CustomerDetailsPage = () => {
         if (amount === null || amount === undefined || amount === '') {
             return '—';
         }
+
         const num = Number(amount);
+
         if (Number.isNaN(num)) {
             return amount;
         }
-        return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        return `₹${num.toLocaleString('en-IN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        })}`;
     };
 
     const getDisplayTotalAmount = (item) => {
         if (item.total_amount !== null && item.total_amount !== undefined && item.total_amount !== '') {
             const num = Number(item.total_amount);
+
             if (num > 0 || !item.total_sale_amount) {
                 return formatCurrency(item.total_amount);
             }
         }
+
         if (item.total_sale_amount !== null && item.total_sale_amount !== undefined && item.total_sale_amount !== '') {
             return formatCurrency(item.total_sale_amount);
         }
+
         return '—';
     };
 
@@ -456,9 +454,11 @@ const CustomerDetailsPage = () => {
         if (item.amount_pending !== null && item.amount_pending !== undefined && item.amount_pending !== '') {
             return formatCurrency(item.amount_pending);
         }
+
         if (item.payment_status === 'Pending' && item.total_sale_amount) {
             return formatCurrency(item.total_sale_amount);
         }
+
         return '—';
     };
 
@@ -469,28 +469,38 @@ const CustomerDetailsPage = () => {
 
     const handleExport = async () => {
         let exportCustomers = [];
+
         try {
             const response = await api.get('/customers/list.php', {
                 params: { ...appliedFilters, all: 1 }
             });
+
             if (!response.data?.success) {
-                throw new Error(response.data?.message || 'Failed to export customer records.');
+                throw new Error(
+                    response.data?.message ||
+                    'Failed to export customer records.'
+                );
             }
+
             exportCustomers = response.data?.data?.customers || [];
+
         } catch (exportError) {
-            triggerError(exportError.response?.data?.message || exportError.message || 'Failed to export customer records.');
+            triggerError(
+                exportError.response?.data?.message ||
+                exportError.message ||
+                'Failed to export customer records.'
+            );
+
             return;
         }
 
         if (!exportCustomers.length) {
-
             window.alert(
                 'No customer records available to export.'
             );
 
             return;
         }
-
 
         const headers = [
             'Customer Username',
@@ -528,6 +538,7 @@ const CustomerDetailsPage = () => {
 
         const rows = exportCustomers.flatMap((item) => {
             const vehicles = item.vehicles?.length ? item.vehicles : [{}];
+
             return vehicles.map((vehicle) => [
                 item.username || '',
                 item.platform_name || item.platform || '',
@@ -544,7 +555,13 @@ const CustomerDetailsPage = () => {
                 vehicle.imei_no || '',
                 vehicle.sim_no_1 || '',
                 vehicle.sim_no_2 || '',
-                vehicle.validity_months ? (String(vehicle.validity_months).includes('Month') ? vehicle.validity_months : `${vehicle.validity_months} Months`) : '',
+                vehicle.validity_months
+                    ? (
+                        String(vehicle.validity_months).includes('Month')
+                            ? vehicle.validity_months
+                            : `${vehicle.validity_months} Months`
+                    )
+                    : '',
                 item.installation_person_type || '',
                 item.installation_person || '',
                 item.lead_closure || '',
@@ -563,7 +580,6 @@ const CustomerDetailsPage = () => {
             ]);
         });
 
-
         const csv = [
             headers.join(','),
             ...rows.map(
@@ -571,43 +587,27 @@ const CustomerDetailsPage = () => {
                     row
                         .map(
                             value =>
-                                `"${String(
-                                    value
-                                ).replace(
-                                    /"/g,
-                                    '""'
-                                )}"`
+                                `"${String(value).replace(/"/g, '""')}"`
                         )
                         .join(',')
             )
         ].join('\n');
 
+        const blob = new Blob(
+            [csv],
+            {
+                type: 'text/csv;charset=utf-8;'
+            }
+        );
 
-        const blob =
-            new Blob(
-                [csv],
-                {
-                    type:
-                        'text/csv;charset=utf-8;'
-                }
-            );
-
-
-        const url =
-            URL.createObjectURL(blob);
-
-
-        const link =
-            document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
 
         link.href = url;
-        link.download =
-            'customer-details.csv';
+        link.download = 'customer-details.csv';
 
         document.body.appendChild(link);
-
         link.click();
-
         document.body.removeChild(link);
 
         URL.revokeObjectURL(url);
@@ -630,7 +630,6 @@ const CustomerDetailsPage = () => {
         fontSize: '13px',
         outline: 'none'
     };
-
 
     const labelStyle = {
         display: 'block',
@@ -694,7 +693,6 @@ const CustomerDetailsPage = () => {
 
                 </div>
 
-
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     {canAdd && (
                         <button
@@ -750,18 +748,32 @@ const CustomerDetailsPage = () => {
                 </div>
             )}
 
+
             {/* =====================================================
                 FILTERS + TABLE
             ===================================================== */}
+
             <div className="card">
+
                 <div className="table-filter-card">
+
                     <div className="table-filter-grid">
 
                         {/* SEARCH */}
                         <div className="filter-group">
                             <label className="filter-label">Search</label>
+
                             <div style={{ position: 'relative' }}>
-                                <Search size={16} style={{ position: 'absolute', left: '11px', top: '10px', color: '#64748b' }} />
+                                <Search
+                                    size={16}
+                                    style={{
+                                        position: 'absolute',
+                                        left: '11px',
+                                        top: '10px',
+                                        color: '#64748b'
+                                    }}
+                                />
+
                                 <input
                                     type="text"
                                     className="form-control filter-input"
@@ -773,39 +785,51 @@ const CustomerDetailsPage = () => {
                             </div>
                         </div>
 
+
                         {/* PLATFORM */}
                         <div className="filter-group">
                             <label className="filter-label">Platform</label>
+
                             <select
                                 className="form-control filter-input"
                                 value={platformFilter}
                                 onChange={e => setPlatformFilter(e.target.value)}
                             >
                                 <option value="">All Platforms</option>
+
                                 {platforms.map(platform => (
-                                    <option key={platform} value={platform}>{platform}</option>
+                                    <option key={platform} value={platform}>
+                                        {platform}
+                                    </option>
                                 ))}
                             </select>
                         </div>
 
+
                         {/* LOCATION */}
                         <div className="filter-group">
                             <label className="filter-label">Location</label>
+
                             <select
                                 className="form-control filter-input"
                                 value={locationFilter}
                                 onChange={e => setLocationFilter(e.target.value)}
                             >
                                 <option value="">All Locations</option>
+
                                 {locations.map(location => (
-                                    <option key={location} value={location}>{location}</option>
+                                    <option key={location} value={location}>
+                                        {location}
+                                    </option>
                                 ))}
                             </select>
                         </div>
 
+
                         {/* PAYMENT */}
                         <div className="filter-group">
                             <label className="filter-label">Payment Status</label>
+
                             <select
                                 className="form-control filter-input"
                                 value={paymentFilter}
@@ -818,6 +842,7 @@ const CustomerDetailsPage = () => {
                                 <option value="Not Paid">Not Paid</option>
                             </select>
                         </div>
+
 
                         {/* DATE FROM */}
                         <div className="filter-group">
@@ -835,6 +860,7 @@ const CustomerDetailsPage = () => {
                                 max={dateTo || getTodayDate()}
                             />
                         </div>
+
 
                         {/* DATE TO */}
                         <div className="filter-group">
@@ -856,22 +882,38 @@ const CustomerDetailsPage = () => {
 
                     </div>
 
+
                     <div className="table-filter-actions">
                         <button type="button" className="btn btn-primary" onClick={handleSearch}>
                             <Search size={16} /> Search
                         </button>
-                        <button type="button" className="btn btn-secondary" onClick={handleReset}>
+
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={handleReset}
+                        >
                             <RotateCcw size={16} /> Reset
                         </button>
-                        <button type="button" className="btn btn-secondary" onClick={handleExport}>
+
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={handleExport}
+                        >
                             <Download size={16} /> Export
                         </button>
+
                     </div>
+
                 </div>
+
 
                 {/* TABLE */}
                 <div className="table-container">
+
                     <table>
+
                         <thead>
                             <tr>
                                 {[
@@ -893,20 +935,32 @@ const CustomerDetailsPage = () => {
                                 ))}
                             </tr>
                         </thead>
+
+
                         <tbody>
+
                             {loading ? (
+
                                 <tr>
                                     <td colSpan="12" className="text-center">Loading customers...</td>
                                 </tr>
+
                             ) : paginatedCustomers.length === 0 ? (
+
                                 <tr>
                                     <td colSpan="12" className="text-center empty-state">No customer records found.</td>
                                 </tr>
+
                             ) : (
+
                                 paginatedCustomers.map((item, index) => {
+
                                     const id = item.id || item.customer_id;
+
                                     return (
+
                                         <tr key={id}>
+
                                             {/* <td>{startIndex + index + 1}</td> */}
                                             <td><strong>{item.username || '-'}</strong></td>
                                             <td>{item.platform_name || item.platform || '-'}</td>
@@ -923,30 +977,65 @@ const CustomerDetailsPage = () => {
                                                     {item.payment_status || 'Pending'}
                                                 </span>
                                             </td>
+
                                             <td>
-                                                <div className="action-buttons" style={{ flexWrap: 'nowrap' }}>
-                                                    <button type="button" className="icon-btn view" title="View" onClick={() => handleView(id)}>
+
+                                                <div
+                                                    className="action-buttons"
+                                                    style={{ flexWrap: 'nowrap' }}
+                                                >
+
+                                                    <button
+                                                        type="button"
+                                                        className="icon-btn view"
+                                                        title="View"
+                                                        onClick={() => handleView(id)}
+                                                    >
                                                         <Eye size={16} />
                                                     </button>
+
                                                     {canEdit && (
-                                                        <button type="button" className="icon-btn edit" title="Edit" onClick={() => handleEdit(id)}>
+                                                        <button
+                                                            type="button"
+                                                            className="icon-btn edit"
+                                                            title="Edit"
+                                                            onClick={() => handleEdit(id)}
+                                                        >
                                                             <Pencil size={16} />
                                                         </button>
                                                     )}
+
                                                     {canDelete && (
-                                                        <button type="button" className="icon-btn delete" title="Delete" onClick={() => setDeleteTarget({ id, username: item.username })}>
+                                                        <button
+                                                            type="button"
+                                                            className="icon-btn delete"
+                                                            title="Delete"
+                                                            onClick={() => setDeleteTarget({
+                                                                id,
+                                                                username: item.username
+                                                            })}
+                                                        >
                                                             <Trash2 size={16} />
                                                         </button>
                                                     )}
+
                                                 </div>
+
                                             </td>
+
                                         </tr>
+
                                     );
                                 })
+
                             )}
+
                         </tbody>
+
                     </table>
+
                 </div>
+
 
                 <Pagination
                     currentPage={page}
@@ -956,7 +1045,9 @@ const CustomerDetailsPage = () => {
                     onPageSizeChange={handlePageSizeChange}
                     itemName="entries"
                 />
+
             </div>
+
 
             {isUploadModalOpen && (
                 <CustomerExcelUploadModal
@@ -968,6 +1059,8 @@ const CustomerDetailsPage = () => {
                 />
             )}
 
+
+            {/* DELETE CONFIRMATION MODAL */}
             <Modal
                 isOpen={Boolean(deleteTarget)}
                 onClose={() => {
@@ -987,6 +1080,7 @@ const CustomerDetailsPage = () => {
                         >
                             Cancel
                         </button>
+
                         <button
                             type="button"
                             className="btn btn-danger"
@@ -1000,17 +1094,16 @@ const CustomerDetailsPage = () => {
             >
                 <p>
                     Are you sure you want to delete
-                    {deleteTarget?.username ? ` ${deleteTarget.username}` : ' this customer'}?
+                    {deleteTarget?.username
+                        ? ` ${deleteTarget.username}`
+                        : ' this customer'}?
                     This action cannot be undone.
                 </p>
             </Modal>
 
         </div>
     );
+
 };
-
-
-
-
 
 export default CustomerDetailsPage;

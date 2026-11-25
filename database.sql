@@ -32,6 +32,126 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS credential_tag VARCHAR(24) DEFAULT NULL AFTER credential_nonce;
 
 -- =====================================================
+-- OTP LOGIN
+-- =====================================================
+CREATE TABLE IF NOT EXISTS login_otps (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    otp_hash VARCHAR(255) NOT NULL,
+    otp_encrypted TEXT NOT NULL,
+    pending_token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    locked_until DATETIME DEFAULT NULL,
+    is_used TINYINT(1) NOT NULL DEFAULT 0,
+    last_sent_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    verified_at DATETIME DEFAULT NULL,
+    CONSTRAINT fk_login_otps_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_login_otps_user (user_id),
+    INDEX idx_login_otps_pending (pending_token_hash),
+    INDEX idx_login_otps_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
+-- EMPLOYEE ATTENDANCE
+-- Attendance is tracked only for Employee and TL roles.
+-- Workdays are Monday through Saturday; Sunday is excluded.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS attendance_settings (
+    id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    office_start_time TIME NOT NULL,
+    office_end_time TIME NOT NULL,
+    full_day_hours DECIMAL(4,2) NOT NULL,
+    half_day_hours DECIMAL(4,2) NOT NULL,
+    inactivity_minutes SMALLINT UNSIGNED NOT NULL,
+    timezone VARCHAR(64) NOT NULL,
+    updated_by_user_id INT DEFAULT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_attendance_settings_updated_by
+        FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance_settings_history (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    office_start_time TIME NOT NULL,
+    office_end_time TIME NOT NULL,
+    full_day_hours DECIMAL(4,2) NOT NULL,
+    half_day_hours DECIMAL(4,2) NOT NULL,
+    inactivity_minutes SMALLINT UNSIGNED NOT NULL,
+    timezone VARCHAR(64) NOT NULL,
+    changed_by_user_id INT DEFAULT NULL,
+    effective_at_utc DATETIME NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_attendance_settings_effective (effective_at_utc, id),
+    CONSTRAINT fk_attendance_settings_history_user
+        FOREIGN KEY (changed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance_days (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id INT DEFAULT NULL,
+    attendance_date DATE NOT NULL,
+    employee_name_snapshot VARCHAR(150) NOT NULL,
+    username_snapshot VARCHAR(50) NOT NULL,
+    role_name_snapshot VARCHAR(100) NOT NULL,
+    settings_history_id BIGINT UNSIGNED DEFAULT NULL,
+    office_start_time TIME NOT NULL,
+    office_end_time TIME NOT NULL,
+    full_day_hours DECIMAL(4,2) NOT NULL,
+    half_day_hours DECIMAL(4,2) NOT NULL,
+    inactivity_minutes SMALLINT UNSIGNED NOT NULL,
+    timezone VARCHAR(64) NOT NULL,
+    total_work_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+    attendance_status ENUM('Present', 'Half Day', 'Absent') NOT NULL DEFAULT 'Absent',
+    first_login_at_utc DATETIME DEFAULT NULL,
+    final_logout_at_utc DATETIME DEFAULT NULL,
+    late_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+    early_logout_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_attendance_user_date (user_id, attendance_date),
+    KEY idx_attendance_date_status (attendance_date, attendance_status),
+    KEY idx_attendance_name (employee_name_snapshot),
+    CONSTRAINT fk_attendance_days_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_attendance_days_settings
+        FOREIGN KEY (settings_history_id) REFERENCES attendance_settings_history(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance_sessions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    day_id BIGINT UNSIGNED NOT NULL,
+    user_id INT DEFAULT NULL,
+    session_id CHAR(64) NOT NULL,
+    login_at_utc DATETIME NOT NULL,
+    logout_at_utc DATETIME DEFAULT NULL,
+    session_duration_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+    logout_type ENUM('Manual', 'Auto', 'System') DEFAULT NULL,
+    inactivity_timeout_seconds INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_attendance_session_id (session_id),
+    KEY idx_attendance_sessions_day (day_id, login_at_utc),
+    KEY idx_attendance_sessions_user (user_id),
+    CONSTRAINT fk_attendance_sessions_day
+        FOREIGN KEY (day_id) REFERENCES attendance_days(id) ON DELETE CASCADE,
+    CONSTRAINT fk_attendance_sessions_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO attendance_settings
+    (id, office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone)
+VALUES
+    (1, '09:30:00', '18:30:00', 8.00, 4.00, 5, 'Asia/Kolkata');
+
+INSERT INTO attendance_settings_history
+    (office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone, changed_by_user_id, effective_at_utc)
+SELECT office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone, updated_by_user_id, UTC_TIMESTAMP()
+FROM attendance_settings
+WHERE id = 1
+  AND NOT EXISTS (SELECT 1 FROM attendance_settings_history);
+
+-- =====================================================
 -- RBAC TABLES
 -- =====================================================
 CREATE TABLE IF NOT EXISTS roles (
@@ -62,6 +182,244 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
     FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
+
+-- =====================================================
+-- CRM PHASE 1 FOUNDATION
+-- Fresh database setup only. This section is additive and is
+-- intended for a new schema install. Do not run the full file
+-- on an existing database that already contains the operational
+-- tables and CRM objects.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS crm_pipelines (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pipeline_name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    display_order INT NOT NULL DEFAULT 0,
+    created_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_pipeline_name (pipeline_name),
+    KEY idx_crm_pipeline_status (status, display_order),
+    CONSTRAINT fk_crm_pipeline_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_campaigns (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pipeline_id INT UNSIGNED NOT NULL,
+    manager_user_id INT DEFAULT NULL,
+    campaign_name VARCHAR(150) NOT NULL,
+    campaign_type VARCHAR(100) DEFAULT NULL,
+    lead_source VARCHAR(50) NOT NULL DEFAULT 'Manual',
+    start_date DATE NOT NULL,
+    end_date DATE DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_campaign_name (pipeline_id, campaign_name),
+    KEY idx_crm_campaign_pipeline (pipeline_id, status),
+    KEY idx_crm_campaign_manager (manager_user_id),
+    CONSTRAINT fk_crm_campaign_pipeline FOREIGN KEY (pipeline_id) REFERENCES crm_pipelines(id) ON DELETE CASCADE,
+    CONSTRAINT fk_crm_campaign_manager FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_campaign_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_status_master (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    status_name VARCHAR(100) NOT NULL,
+    status_type ENUM('Open', 'Active', 'Resolved', 'Lost') NOT NULL DEFAULT 'Open',
+    color VARCHAR(20) NOT NULL DEFAULT '#6c757d',
+    display_order INT NOT NULL DEFAULT 0,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_status_name (status_name),
+    KEY idx_crm_status_active_order (status, display_order),
+    CONSTRAINT fk_crm_status_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_stage_master (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    stage_name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT NULL,
+    display_order INT NOT NULL DEFAULT 0,
+    status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+    created_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_lead_stage_name (stage_name),
+    KEY idx_crm_lead_stage_active_order (status, display_order),
+    CONSTRAINT fk_crm_lead_stage_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_leads (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pipeline_id INT UNSIGNED NOT NULL,
+    campaign_id INT UNSIGNED DEFAULT NULL,
+    lead_name VARCHAR(150) NOT NULL,
+    mobile_no VARCHAR(20) NOT NULL,
+    alternate_mobile_no VARCHAR(20) DEFAULT NULL,
+    email VARCHAR(150) DEFAULT NULL,
+    location VARCHAR(150) NOT NULL,
+    pincode VARCHAR(10) DEFAULT NULL,
+    lead_source VARCHAR(50) NOT NULL DEFAULT 'Manual',
+    customer_need TEXT DEFAULT NULL,
+    priority VARCHAR(50) NOT NULL DEFAULT 'Normal',
+    lead_status_id INT UNSIGNED DEFAULT NULL,
+    lead_stage_id INT UNSIGNED DEFAULT NULL,
+    remarks TEXT DEFAULT NULL,
+    closure_reason VARCHAR(100) DEFAULT NULL,
+    assigned_user_id INT DEFAULT NULL,
+    assigned_by_user_id INT DEFAULT NULL,
+    assigned_at TIMESTAMP NULL DEFAULT NULL,
+    created_by_user_id INT DEFAULT NULL,
+    deleted_at DATETIME DEFAULT NULL,
+    deleted_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_crm_leads_pipeline (pipeline_id),
+    KEY idx_crm_leads_campaign (campaign_id),
+    KEY idx_crm_leads_status (lead_status_id),
+    KEY idx_crm_leads_stage (lead_stage_id),
+    KEY idx_crm_leads_assignee (assigned_user_id),
+    KEY idx_crm_leads_creator (created_by_user_id),
+    KEY idx_crm_leads_deleted_at (deleted_at),
+    KEY idx_crm_leads_source (lead_source),
+    CONSTRAINT fk_crm_lead_pipeline FOREIGN KEY (pipeline_id) REFERENCES crm_pipelines(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_lead_campaign FOREIGN KEY (campaign_id) REFERENCES crm_campaigns(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_lead_status FOREIGN KEY (lead_status_id) REFERENCES crm_lead_status_master(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_lead_stage FOREIGN KEY (lead_stage_id) REFERENCES crm_lead_stage_master(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_lead_assignee FOREIGN KEY (assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_lead_assigner FOREIGN KEY (assigned_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_lead_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_lead_deleted_by FOREIGN KEY (deleted_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_assignments (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lead_id INT UNSIGNED NOT NULL,
+    assigned_to_user_id INT NOT NULL,
+    assigned_by_user_id INT NOT NULL,
+    assignment_type ENUM('Distribution', 'Reassign') NOT NULL DEFAULT 'Distribution',
+    assignment_notes TEXT DEFAULT NULL,
+    assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_crm_assignment_lead (lead_id),
+    KEY idx_crm_assignment_user (assigned_to_user_id),
+    CONSTRAINT fk_crm_assignment_lead FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE CASCADE,
+    CONSTRAINT fk_crm_assignment_to_user FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_assignment_by_user FOREIGN KEY (assigned_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_transfer_history (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lead_id INT UNSIGNED NOT NULL,
+    previous_employee_id INT NOT NULL,
+    new_employee_id INT NOT NULL,
+    transferred_by_user_id INT NOT NULL,
+    transfer_reason VARCHAR(1000) NOT NULL,
+    transfer_type ENUM('Single', 'Bulk') NOT NULL,
+    transferred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_crm_transfer_lead_date (lead_id, transferred_at, id),
+    KEY idx_crm_transfer_previous_employee (previous_employee_id),
+    KEY idx_crm_transfer_new_employee (new_employee_id),
+    KEY idx_crm_transfer_actor (transferred_by_user_id),
+    CONSTRAINT fk_crm_transfer_lead FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_followups (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lead_id INT UNSIGNED NOT NULL,
+    current_status_id INT UNSIGNED DEFAULT NULL,
+    customer_need TEXT DEFAULT NULL,
+    call_outcome VARCHAR(100) DEFAULT NULL,
+    remarks TEXT DEFAULT NULL,
+    next_followup_date DATE DEFAULT NULL,
+    next_followup_time TIME DEFAULT NULL,
+    completed_at DATETIME DEFAULT NULL,
+    cancelled_at DATETIME DEFAULT NULL,
+    cancellation_reason VARCHAR(150) DEFAULT NULL,
+    closure_reason VARCHAR(100) DEFAULT NULL,
+    updated_by_user_id INT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_crm_followup_lead (lead_id),
+    KEY idx_crm_followup_status (current_status_id),
+    KEY idx_crm_followup_due_date (next_followup_date),
+    KEY idx_crm_followup_active_schedule (lead_id, completed_at, cancelled_at, next_followup_date),
+    CONSTRAINT fk_crm_followup_lead FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE CASCADE,
+    CONSTRAINT fk_crm_followup_status FOREIGN KEY (current_status_id) REFERENCES crm_lead_status_master(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_followup_user FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_lead_closure_forms (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lead_id INT UNSIGNED NOT NULL,
+    platform_id INT DEFAULT NULL,
+    customer_id INT DEFAULT NULL,
+    customer_number VARCHAR(50) DEFAULT NULL,
+    username VARCHAR(100) DEFAULT NULL,
+    vehicle_type VARCHAR(100) DEFAULT NULL,
+    vehicle_number VARCHAR(50) DEFAULT NULL,
+    commitment_date DATE DEFAULT NULL,
+    location VARCHAR(150) DEFAULT NULL,
+    pincode VARCHAR(10) DEFAULT NULL,
+    device_type VARCHAR(100) DEFAULT NULL,
+    device_count INT UNSIGNED NOT NULL DEFAULT 0,
+    amount DECIMAL(12,2) DEFAULT NULL,
+    amount_status VARCHAR(50) DEFAULT NULL,
+    app_name VARCHAR(100) DEFAULT NULL,
+    submission_status ENUM('Draft', 'Submitted', 'Pending Approval', 'Approved', 'Rejected') NOT NULL DEFAULT 'Draft',
+    submitted_by_user_id INT DEFAULT NULL,
+    submitted_at DATETIME DEFAULT NULL,
+    reviewed_by_user_id INT DEFAULT NULL,
+    approved_by_user_id INT DEFAULT NULL,
+    approved_at TIMESTAMP NULL DEFAULT NULL,
+    reviewed_at DATETIME DEFAULT NULL,
+    rejection_reason TEXT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_closure_lead (lead_id),
+    UNIQUE KEY uq_crm_closure_customer (customer_id),
+    KEY idx_crm_closure_platform (platform_id),
+    KEY idx_crm_closure_status (submission_status),
+    CONSTRAINT fk_crm_closure_lead FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE CASCADE,
+    CONSTRAINT fk_crm_closure_submitter FOREIGN KEY (submitted_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_crm_closure_approver FOREIGN KEY (approved_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_notifications (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    title VARCHAR(150) NOT NULL,
+    message TEXT NOT NULL,
+    notification_type VARCHAR(50) NOT NULL DEFAULT 'info',
+    priority ENUM('Normal','High') NOT NULL DEFAULT 'Normal',
+    related_entity_type VARCHAR(50) DEFAULT NULL,
+    related_entity_id INT DEFAULT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    read_at DATETIME DEFAULT NULL,
+    event_key VARCHAR(150) DEFAULT NULL,
+    related_lead_id INT UNSIGNED DEFAULT NULL,
+    related_customer_id INT UNSIGNED DEFAULT NULL,
+    related_closure_id INT UNSIGNED DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_crm_notification_user (user_id, is_read, created_at),
+    UNIQUE KEY uq_crm_notification_event (event_key),
+    CONSTRAINT fk_crm_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
 -- DEVICE ALERT SETTINGS
@@ -376,10 +734,61 @@ VALUES
     ,('sale_amounts.add', 'Sale Amount Add', 'sale_amounts', 'ADD')
     ,('sale_amounts.edit', 'Sale Amount Edit', 'sale_amounts', 'EDIT')
     ,('sale_amounts.delete', 'Sale Amount Delete', 'sale_amounts', 'DELETE')
+    ,('crm_pipelines.view', 'CRM Pipelines View', 'crm_pipelines', 'VIEW')
+    ,('crm_pipelines.add', 'CRM Pipelines Add', 'crm_pipelines', 'ADD')
+    ,('crm_pipelines.edit', 'CRM Pipelines Edit', 'crm_pipelines', 'EDIT')
+    ,('crm_pipelines.delete', 'CRM Pipelines Delete', 'crm_pipelines', 'DELETE')
+    ,('crm_campaigns.view', 'CRM Campaigns View', 'crm_campaigns', 'VIEW')
+    ,('crm_campaigns.add', 'CRM Campaigns Add', 'crm_campaigns', 'ADD')
+    ,('crm_campaigns.edit', 'CRM Campaigns Edit', 'crm_campaigns', 'EDIT')
+    ,('crm_campaigns.delete', 'CRM Campaigns Delete', 'crm_campaigns', 'DELETE')
+    ,('crm_lead_status.view', 'CRM Lead Status View', 'crm_lead_status', 'VIEW')
+    ,('crm_lead_status.add', 'CRM Lead Status Add', 'crm_lead_status', 'ADD')
+    ,('crm_lead_status.edit', 'CRM Lead Status Edit', 'crm_lead_status', 'EDIT')
+    ,('crm_lead_status.activate', 'CRM Lead Status Activate', 'crm_lead_status', 'ACTIVATE')
+    ,('crm_lead_stage.view', 'CRM Lead Stage View', 'crm_lead_stage', 'VIEW')
+    ,('crm_lead_stage.add', 'CRM Lead Stage Add', 'crm_lead_stage', 'ADD')
+    ,('crm_lead_stage.edit', 'CRM Lead Stage Edit', 'crm_lead_stage', 'EDIT')
+    ,('crm_lead_stage.activate', 'CRM Lead Stage Activate', 'crm_lead_stage', 'ACTIVATE')
+    ,('crm_leads.view', 'CRM Leads View', 'crm_leads', 'VIEW')
+    ,('crm_leads.add', 'CRM Leads Add', 'crm_leads', 'ADD')
+    ,('crm_leads.edit', 'CRM Leads Edit', 'crm_leads', 'EDIT')
+    ,('crm_leads.delete', 'CRM Leads Delete', 'crm_leads', 'DELETE')
+    ,('crm_leads.assign', 'CRM Leads Assign', 'crm_leads', 'ASSIGN')
+    ,('crm_leads.my_view', 'CRM My Leads View', 'crm_leads', 'MY_VIEW')
+    ,('crm_leads.transfer', 'CRM Lead Transfer', 'crm_leads', 'TRANSFER')
+    ,('crm_leads.transfer_bulk', 'CRM Bulk Lead Transfer', 'crm_leads', 'BULK_TRANSFER')
+    ,('crm_leads.transfer_history', 'CRM Lead Transfer History View', 'crm_leads', 'TRANSFER_HISTORY')
+    ,('crm_followups.view', 'CRM Follow-ups View', 'crm_followups', 'VIEW')
+    ,('crm_followups.add', 'CRM Follow-ups Add', 'crm_followups', 'ADD')
+    ,('crm_followups.edit', 'CRM Follow-ups Edit', 'crm_followups', 'EDIT')
+    ,('crm_closures.view', 'CRM Closures View', 'crm_closures', 'VIEW')
+    ,('crm_closures.add', 'CRM Closures Add', 'crm_closures', 'ADD')
+    ,('crm_closures.edit', 'CRM Closures Edit', 'crm_closures', 'EDIT')
+    ,('crm_closures.approve', 'CRM Closures Approve', 'crm_closures', 'APPROVE')
+    ,('crm_installations.view', 'CRM Installations View', 'crm_installations', 'VIEW')
+    ,('crm_installations.assign', 'CRM Installations Assign', 'crm_installations', 'ASSIGN')
+    ,('crm_installations.manage', 'CRM Installations Manage', 'crm_installations', 'MANAGE')
+    ,('crm_notifications.view', 'CRM Notifications View', 'crm_notifications', 'VIEW')
+    ,('attendance.view', 'Attendance Reports View', 'attendance', 'VIEW')
+    ,('attendance.settings', 'Attendance Settings Manage', 'attendance', 'SETTINGS')
+    ,('attendance.self.view', 'My Attendance View', 'attendance', 'SELF_VIEW')
 ON DUPLICATE KEY UPDATE
     permission_name = VALUES(permission_name),
     module = VALUES(module),
     action = VALUES(action);
+
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.permission_key IN ('attendance.view', 'attendance.settings')
+WHERE LOWER(TRIM(r.role_name)) = 'admin';
+
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.permission_key = 'attendance.self.view'
+WHERE LOWER(TRIM(r.role_name)) IN ('employee', 'tl');
 
 -- =====================================================
 -- SUPER ADMIN ROLE + ASSIGN ALL PERMISSIONS
@@ -699,6 +1108,88 @@ CREATE TABLE IF NOT EXISTS customer_installations (
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;
+
+-- =========================================================
+-- CRM INSTALLATION DEVICE PROGRESS
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS crm_closure_installation_devices (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    closure_id INT UNSIGNED NOT NULL,
+    device_sequence SMALLINT UNSIGNED NOT NULL,
+    installation_status ENUM('Pending', 'Completed') NOT NULL DEFAULT 'Pending',
+    vehicle_number VARCHAR(30) DEFAULT NULL,
+    vehicle_type_id INT UNSIGNED DEFAULT NULL,
+    device_model_id INT DEFAULT NULL,
+    sale_amount DECIMAL(12,2) DEFAULT NULL,
+    device_id INT DEFAULT NULL,
+    imei_no VARCHAR(15) DEFAULT NULL,
+    sim_id_1 INT DEFAULT NULL,
+    sim_no_1 VARCHAR(13) DEFAULT NULL,
+    sim_id_2 INT DEFAULT NULL,
+    sim_no_2 VARCHAR(13) DEFAULT NULL,
+    validity_months INT DEFAULT NULL,
+    installation_datetime DATETIME DEFAULT NULL,
+    installation_remarks TEXT DEFAULT NULL,
+    completion_evidence TEXT DEFAULT NULL,
+    installation_verified TINYINT(1) NOT NULL DEFAULT 0,
+    customer_vehicle_id INT DEFAULT NULL,
+    customer_installation_id INT DEFAULT NULL,
+    completed_by_user_id INT DEFAULT NULL,
+    completed_at DATETIME DEFAULT NULL,
+    verification_submission_id BIGINT UNSIGNED DEFAULT NULL,
+    verification_status ENUM(
+        'Not Submitted',
+        'Pending Verification',
+        'Rejected',
+        'Approved'
+    ) NOT NULL DEFAULT 'Not Submitted',
+    verification_rejection_reason TEXT DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_crm_installation_device_sequence (closure_id, device_sequence),
+    UNIQUE KEY uq_crm_installation_device_vehicle (closure_id, vehicle_number),
+    UNIQUE KEY uq_crm_installation_device_id (device_id),
+    UNIQUE KEY uq_crm_installation_device_imei (imei_no),
+    UNIQUE KEY uq_crm_installation_device_sim_1 (sim_id_1),
+    UNIQUE KEY uq_crm_installation_device_sim_2 (sim_id_2),
+    UNIQUE KEY uq_crm_installation_device_customer_vehicle (customer_vehicle_id),
+    UNIQUE KEY uq_crm_installation_device_customer_installation (customer_installation_id),
+    UNIQUE KEY uq_crm_installation_verification_submission (verification_submission_id),
+    KEY idx_crm_installation_device_status (closure_id, installation_status),
+    KEY idx_crm_installation_verification_status (closure_id, verification_status),
+    CONSTRAINT fk_crm_installation_device_closure
+        FOREIGN KEY (closure_id) REFERENCES crm_lead_closure_forms(id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_crm_installation_device_vehicle_type
+        FOREIGN KEY (vehicle_type_id) REFERENCES vehicle_types(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_installation_device_model
+        FOREIGN KEY (device_model_id) REFERENCES device_types(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_installation_device_inventory
+        FOREIGN KEY (device_id) REFERENCES devices(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_installation_device_sim_1
+        FOREIGN KEY (sim_id_1) REFERENCES sims(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_installation_device_sim_2
+        FOREIGN KEY (sim_id_2) REFERENCES sims(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_crm_installation_device_customer_vehicle
+        FOREIGN KEY (customer_vehicle_id) REFERENCES customer_vehicle_details(id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_crm_installation_device_customer_installation
+        FOREIGN KEY (customer_installation_id) REFERENCES customer_installations(id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_crm_installation_device_completer
+        FOREIGN KEY (completed_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci;

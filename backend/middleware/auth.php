@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../utils/response.php';
+require_once __DIR__ . '/../utils/attendance.php';
 
 define('SESSION_INACTIVITY_TIMEOUT_SECONDS', 900);
 
@@ -80,12 +81,22 @@ function authenticate() {
         sendResponse(false, 'Unable to validate user session.', [], [], 500);
     }
 
-    $stmt = $conn->prepare('SELECT active_session_id, UNIX_TIMESTAMP(active_session_created_at) AS active_session_last_activity_at, active_session_expires_at FROM users WHERE id = ? LIMIT 1');
+    $legacyTimeout = SESSION_INACTIVITY_TIMEOUT_SECONDS;
+    $stmt = $conn->prepare(
+        'SELECT u.active_session_id,
+                UNIX_TIMESTAMP(u.active_session_created_at) AS active_session_last_activity_at,
+                u.active_session_expires_at,
+                COALESCE(a.inactivity_timeout_seconds, ?) AS inactivity_timeout_seconds
+         FROM users u
+         LEFT JOIN attendance_sessions a ON BINARY a.session_id = BINARY u.active_session_id
+         WHERE u.id = ?
+         LIMIT 1'
+    );
     if (!$stmt) {
         $conn->close();
         sendResponse(false, 'Unable to validate user session.', [], [], 500);
     }
-    $stmt->bind_param('i', $userId);
+    $stmt->bind_param('ii', $legacyTimeout, $userId);
     $stmt->execute();
     $activeSession = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -93,18 +104,58 @@ function authenticate() {
     $activeSessionId = (string) ($activeSession['active_session_id'] ?? '');
     $lastActivityAt = (int) ($activeSession['active_session_last_activity_at'] ?? 0);
     $activeSessionExpiresAt = (int) ($activeSession['active_session_expires_at'] ?? 0);
+    $timeoutSeconds = max(1, (int) ($activeSession['inactivity_timeout_seconds'] ?? SESSION_INACTIVITY_TIMEOUT_SECONDS));
     $sessionMatches = $activeSessionId !== '' && hash_equals($activeSessionId, $sessionId);
     $currentTime = time();
     $sessionExpired = $activeSessionExpiresAt <= $currentTime
-        || $lastActivityAt <= $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
+        || $lastActivityAt <= $currentTime - $timeoutSeconds;
     if (!$sessionMatches || $sessionExpired) {
         if ($sessionMatches && $sessionExpired) {
-            $lastActivityCutoff = $currentTime - SESSION_INACTIVITY_TIMEOUT_SECONDS;
-            $clearSession = $conn->prepare('UPDATE users SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL WHERE id = ? AND active_session_id = ? AND (active_session_expires_at IS NULL OR active_session_expires_at <= ? OR active_session_created_at IS NULL OR UNIX_TIMESTAMP(active_session_created_at) <= ?)');
-            if ($clearSession) {
+            $lastActivityCutoff = $currentTime - $timeoutSeconds;
+            $actualLogoutAt = $lastActivityAt > 0
+                ? min($currentTime, $lastActivityAt + $timeoutSeconds)
+                : min($currentTime, $activeSessionExpiresAt > 0 ? $activeSessionExpiresAt : $currentTime);
+            try {
+                $conn->begin_transaction();
+                $lockSession = $conn->prepare('SELECT active_session_id FROM users WHERE id = ? LIMIT 1 FOR UPDATE');
+                if (!$lockSession) {
+                    throw new RuntimeException('Unable to prepare expired session lock: ' . $conn->error);
+                }
+                $lockSession->bind_param('i', $userId);
+                if (!$lockSession->execute()) {
+                    $error = $lockSession->error;
+                    $lockSession->close();
+                    throw new RuntimeException('Unable to lock expired session: ' . $error);
+                }
+                $lockedSession = $lockSession->get_result()->fetch_assoc();
+                $lockSession->close();
+                if (hash_equals((string) ($lockedSession['active_session_id'] ?? ''), $sessionId)) {
+                    closeAttendanceSession($conn, $sessionId, $actualLogoutAt, 'Auto');
+                }
+                $clearSession = $conn->prepare(
+                    'UPDATE users
+                     SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL
+                     WHERE id = ? AND active_session_id = ?
+                       AND (active_session_expires_at IS NULL OR active_session_expires_at <= ?
+                            OR active_session_created_at IS NULL
+                            OR UNIX_TIMESTAMP(active_session_created_at) <= ?)'
+                );
+                if (!$clearSession) {
+                    throw new RuntimeException('Unable to prepare expired session cleanup: ' . $conn->error);
+                }
                 $clearSession->bind_param('isii', $userId, $sessionId, $currentTime, $lastActivityCutoff);
-                $clearSession->execute();
+                if (!$clearSession->execute()) {
+                    $error = $clearSession->error;
+                    $clearSession->close();
+                    throw new RuntimeException('Unable to clear expired session: ' . $error);
+                }
                 $clearSession->close();
+                $conn->commit();
+            } catch (Throwable $error) {
+                $conn->rollback();
+                error_log('Unable to close expired attendance session: ' . $error->getMessage());
+                $conn->close();
+                sendResponse(false, 'Unable to close expired session.', [], [], 500);
             }
         }
         $conn->close();
@@ -271,11 +322,36 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'support.close' => ['permission_name' => 'Support Close', 'module' => 'support', 'action' => 'CLOSE'],
         'support.qa.view' => ['permission_name' => 'Support Questions View', 'module' => 'support', 'action' => 'QA_VIEW'],
         'support.qa.manage' => ['permission_name' => 'Support Questions Manage', 'module' => 'support', 'action' => 'QA_MANAGE'],
+        'attendance.view' => ['permission_name' => 'Attendance Reports View', 'module' => 'attendance', 'action' => 'VIEW'],
+        'attendance.settings' => ['permission_name' => 'Attendance Settings Manage', 'module' => 'attendance', 'action' => 'SETTINGS'],
+        'attendance.self.view' => ['permission_name' => 'My Attendance View', 'module' => 'attendance', 'action' => 'SELF_VIEW'],
         'courier.view' => ['permission_name' => 'Courier View', 'module' => 'courier', 'action' => 'VIEW'],
         'courier.add' => ['permission_name' => 'Courier Add', 'module' => 'courier', 'action' => 'ADD'],
         'courier.edit' => ['permission_name' => 'Courier Edit', 'module' => 'courier', 'action' => 'EDIT'],
         'courier.delete' => ['permission_name' => 'Courier Delete', 'module' => 'courier', 'action' => 'DELETE'],
-        'courier.approve' => ['permission_name' => 'Courier Approve', 'module' => 'courier', 'action' => 'APPROVE']
+        'courier.approve' => ['permission_name' => 'Courier Approve', 'module' => 'courier', 'action' => 'APPROVE'],
+        'crm_lead_status.view' => ['permission_name' => 'CRM Lead Status View', 'module' => 'crm_lead_status', 'action' => 'VIEW'],
+        'crm_lead_status.add' => ['permission_name' => 'CRM Lead Status Add', 'module' => 'crm_lead_status', 'action' => 'ADD'],
+        'crm_lead_status.edit' => ['permission_name' => 'CRM Lead Status Edit', 'module' => 'crm_lead_status', 'action' => 'EDIT'],
+        'crm_lead_status.activate' => ['permission_name' => 'CRM Lead Status Activate', 'module' => 'crm_lead_status', 'action' => 'ACTIVATE'],
+        'crm_lead_stage.view' => ['permission_name' => 'CRM Lead Stage View', 'module' => 'crm_lead_stage', 'action' => 'VIEW'],
+        'crm_lead_stage.add' => ['permission_name' => 'CRM Lead Stage Add', 'module' => 'crm_lead_stage', 'action' => 'ADD'],
+        'crm_lead_stage.edit' => ['permission_name' => 'CRM Lead Stage Edit', 'module' => 'crm_lead_stage', 'action' => 'EDIT'],
+        'crm_lead_stage.activate' => ['permission_name' => 'CRM Lead Stage Activate', 'module' => 'crm_lead_stage', 'action' => 'ACTIVATE'],
+        'crm_leads.view' => ['permission_name' => 'CRM Leads View', 'module' => 'crm_leads', 'action' => 'VIEW'],
+        'crm_leads.add' => ['permission_name' => 'CRM Leads Add', 'module' => 'crm_leads', 'action' => 'ADD'],
+        'crm_leads.edit' => ['permission_name' => 'CRM Leads Edit', 'module' => 'crm_leads', 'action' => 'EDIT'],
+        'crm_leads.delete' => ['permission_name' => 'CRM Leads Delete', 'module' => 'crm_leads', 'action' => 'DELETE'],
+        'crm_leads.assign' => ['permission_name' => 'CRM Leads Assign', 'module' => 'crm_leads', 'action' => 'ASSIGN'],
+        'crm_leads.my_view' => ['permission_name' => 'CRM My Leads View', 'module' => 'crm_leads', 'action' => 'MY_VIEW'],
+        'crm_leads.transfer' => ['permission_name' => 'CRM Lead Transfer', 'module' => 'crm_leads', 'action' => 'TRANSFER'],
+        'crm_leads.transfer_bulk' => ['permission_name' => 'CRM Bulk Lead Transfer', 'module' => 'crm_leads', 'action' => 'BULK_TRANSFER'],
+        'crm_leads.transfer_history' => ['permission_name' => 'CRM Lead Transfer History View', 'module' => 'crm_leads', 'action' => 'TRANSFER_HISTORY'],
+        'crm_followups.view' => ['permission_name' => 'CRM Follow-ups View', 'module' => 'crm_followups', 'action' => 'VIEW'],
+        'crm_followups.add' => ['permission_name' => 'CRM Follow-ups Add', 'module' => 'crm_followups', 'action' => 'ADD'],
+        'crm_followups.edit' => ['permission_name' => 'CRM Follow-ups Edit', 'module' => 'crm_followups', 'action' => 'EDIT'],
+        'crm_closures.add' => ['permission_name' => 'CRM Lead Converter Add', 'module' => 'crm_closures', 'action' => 'ADD'],
+        'crm_closures.approve' => ['permission_name' => 'CRM Form Approval', 'module' => 'crm_closures', 'action' => 'APPROVE']
     ];
 
     foreach ($permissionKeys as $key) {

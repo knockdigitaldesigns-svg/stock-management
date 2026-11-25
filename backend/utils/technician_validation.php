@@ -10,6 +10,7 @@ function validateTechnicianFields($input, $rowNumber = null) {
     $mobileNo = (string) ($input['mobile_no'] ?? $input['Mobile No'] ?? '');
     $alternateMobileNo = (string) ($input['alternate_mobile_no'] ?? $input['Alternate Mobile No'] ?? '');
     $location = trim((string) ($input['location'] ?? $input['Location'] ?? ''));
+    $installationServiceAreas = trim((string) ($input['installation_service_areas'] ?? ''));
     $enrolledDate = trim((string) ($input['enrolled_date'] ?? $input['Enrolled Date'] ?? ''));
     $notes = trim((string) ($input['notes'] ?? $input['Notes'] ?? ''));
 
@@ -31,6 +32,9 @@ function validateTechnicianFields($input, $rowNumber = null) {
     // 3. Location
     if ($location === '') {
         $errors[] = "{$prefix}Location is required.";
+    }
+    if (mb_strlen($installationServiceAreas) > 2000) {
+        $errors[] = "{$prefix}Installation service areas cannot exceed 2,000 characters.";
     }
 
     // 4. Enrolled Date
@@ -57,6 +61,7 @@ function validateTechnicianFields($input, $rowNumber = null) {
             'raw_mobile' => $mobileNo,
             'alternate_mobile_no' => $alternateMobileNo !== '' ? $alternateMobileNo : null,
             'location' => $location,
+            'installation_service_areas' => $installationServiceAreas,
             'enrolled_date' => $isoDate,
             'notes' => $notes
         ]

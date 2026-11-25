@@ -71,6 +71,30 @@ try {
         throw new Exception('Customer not found.');
     }
 
+    $crmClosureColumnResult = $conn->query(
+        "SHOW COLUMNS FROM customer_installations LIKE 'crm_closure_id'"
+    );
+    if (!$crmClosureColumnResult) {
+        throw new Exception('Failed to check CRM installation linkage.');
+    }
+    $vehicleCrmClosureJoins = '';
+    $vehicleLeadClosureNameSelect = 'vlc.lead_closure_name';
+    if ($crmClosureColumnResult->num_rows > 0) {
+        $vehicleCrmClosureJoins = "
+         LEFT JOIN crm_lead_closure_forms vcf
+            ON vcf.id = vci.crm_closure_id
+         LEFT JOIN crm_leads vlead
+            ON vlead.id = vcf.lead_id
+         LEFT JOIN users vlead_owner
+            ON vlead_owner.id = vlead.assigned_user_id";
+        $vehicleLeadClosureNameSelect =
+            "COALESCE(
+                NULLIF(TRIM(vlead_owner.employee_name), ''),
+                NULLIF(TRIM(vlead_owner.username), ''),
+                vlc.lead_closure_name
+            )";
+    }
+
     $vehicleStmt = $conn->prepare(
         "SELECT
             cvd.id,
@@ -111,7 +135,7 @@ try {
                     AND vci.installation_person_id IS NULL THEN 'Direct'
                 ELSE vci.installation_person_type
             END AS vehicle_installation_type,
-            vlc.lead_closure_name AS vehicle_lead_closure,
+            {$vehicleLeadClosureNameSelect} AS vehicle_lead_closure,
             vci.installation_date AS vehicle_installation_date,
             vcp.id AS vehicle_payment_id,
             vcp.total_sale_amount AS vehicle_total_sale_amount,
@@ -171,6 +195,7 @@ try {
             ON vdlr.id = vci.installation_person_id AND vci.installation_person_type = 'Dealer'
          LEFT JOIN lead_closures vlc
             ON vlc.id = vci.lead_closure_id
+         {$vehicleCrmClosureJoins}
          LEFT JOIN customer_payments vcp
             ON vcp.id = (
                 SELECT latest_vcp.id

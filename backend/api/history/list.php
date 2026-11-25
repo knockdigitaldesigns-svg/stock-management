@@ -8,6 +8,7 @@ error_reporting(E_ALL);
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../middleware/auth.php';
+require_once __DIR__ . '/../crm_leads/access.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') sendResponse(false, 'Method not allowed', [], [], 405);
@@ -15,6 +16,11 @@ requirePermission('history.view');
 
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
+$userId = (int) (getCurrentUserFromToken()['user_id'] ?? 0);
+$canViewAllLeads = crmLeadsCanViewAll($userId, $conn);
+$activeLeadCondition = crmLeadsHasSoftDeleteSchema($conn)
+    ? ' AND workflow_lead.deleted_at IS NULL'
+    : '';
 
 function historyLookup(mysqli $conn, string $table, string $idColumn, string $nameColumn): array
 {
@@ -138,6 +144,19 @@ if (!empty($_GET['date_to'])) {
 if (!empty($_GET['changed_by'])) {
     $where[] = 'h.changed_by_user_id = ?'; $params[] = (int) $_GET['changed_by']; $types .= 'i';
 }
+if (!$canViewAllLeads) {
+    $where[] = "(
+        h.module <> 'CRM Lead Workflow'
+        OR EXISTS (
+            SELECT 1
+            FROM crm_leads workflow_lead
+            WHERE workflow_lead.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(h.new_value, '$.lead_id')) AS UNSIGNED)
+              AND workflow_lead.assigned_user_id = ?{$activeLeadCondition}
+        )
+    )";
+    $params[] = $userId;
+    $types .= 'i';
+}
 
 $condition = $where ? ' WHERE ' . implode(' AND ', $where) : '';
 $from = ' FROM history h LEFT JOIN users u ON u.id = h.changed_by_user_id';
@@ -203,9 +222,24 @@ if ($selectedGroups) {
         $groupParams[] = $selectedGroup['changed_by_user_id'];
         $groupTypes .= 'sssss';
     }
+    if (!$canViewAllLeads) {
+        $groupParams[] = $userId;
+        $groupTypes .= 'i';
+    }
 
     $recordsSql = 'SELECT h.id, h.customer_id, h.module, h.action, h.field_changed, h.old_value, h.new_value, h.changed_by_user_id, h.changed_by_name, u.username AS changed_by_username, h.changed_at'
         . $from . ' WHERE (' . implode(' OR ', $groupConditions) . ')'
+        . (!$canViewAllLeads
+            ? " AND (
+                h.module <> 'CRM Lead Workflow'
+                OR EXISTS (
+                    SELECT 1
+                    FROM crm_leads workflow_lead
+                    WHERE workflow_lead.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(h.new_value, '$.lead_id')) AS UNSIGNED)
+                      AND workflow_lead.assigned_user_id = ?{$activeLeadCondition}
+                )
+            )"
+            : '')
         . ' ORDER BY h.changed_at DESC, h.id DESC';
     $stmt = $conn->prepare($recordsSql);
     if (!$stmt) {

@@ -11,6 +11,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
+import { useConfirmation } from '../../components/Modal/useConfirmation';
 import {
     buildCustomerSubmission,
     commitCustomerSubmission,
@@ -56,6 +57,7 @@ const PaymentDetailsPart1Page = () => {
     const navigate = useNavigate();
     const { customerId } = useParams();
     const { hasPermission } = useAuth();
+    const { confirm, confirmationDialog } = useConfirmation();
 
     const [form, setForm] = useState(initialForm);
     const [saleAmounts, setSaleAmounts] = useState([]);
@@ -537,10 +539,13 @@ const PaymentDetailsPart1Page = () => {
         await performSavePaymentPart1(false);
     };
 
-    const handleReset = () => {
-        const confirmed = window.confirm(
-            'Are you sure you want to reset the payment details?'
-        );
+    const handleReset = async () => {
+        const confirmed = await confirm({
+            title: 'Reset Payment Details',
+            message: 'Are you sure you want to reset the payment details?',
+            confirmLabel: 'Reset',
+            confirmClassName: 'btn-danger'
+        });
 
         if (!confirmed) {
             return;
@@ -1015,6 +1020,7 @@ const PaymentDetailsPart1Page = () => {
                 </div>
             )}
 
+            {confirmationDialog}
         </div>
     );
 };

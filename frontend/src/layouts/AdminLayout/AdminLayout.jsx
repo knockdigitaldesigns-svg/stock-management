@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
+import api from '../../services/api';
 import './AdminLayout.css';
 
 const AdminLayout = () => {
@@ -45,12 +46,81 @@ const AdminLayout = () => {
     const [outwardOpen, setOutwardOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [customerOpen, setCustomerOpen] = useState(false);
+    const [crmOpen, setCrmOpen] = useState(false);
     const [masterSettingsOpen, setMasterSettingsOpen] = useState(false);
+    const [notifications, setNotifications] = useState([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [notificationOpen, setNotificationOpen] = useState(false);
+
+    const loadNotifications = async () => {
+        try {
+            const [listResult, countResult] = await Promise.all([
+                api.get('/notifications/list.php', { params: { page: 1, page_size: 10 } }),
+                api.get('/notifications/unread_count.php')
+            ]);
+            if (listResult.data?.success) {
+                setNotifications(listResult.data.data?.notifications || []);
+            }
+            if (countResult.data?.success) {
+                setUnreadCount(Number(countResult.data.data?.unread_count || 0));
+            }
+        } catch {
+            // The authenticated API interceptor handles session/logout errors.
+        }
+    };
+
+    useEffect(() => {
+        if (!user) return undefined;
+        loadNotifications();
+        const intervalId = window.setInterval(loadNotifications, 30000);
+        return () => window.clearInterval(intervalId);
+    }, [user?.id, user?.user_id]);
+
+    const markAllNotificationsRead = async () => {
+        try {
+            const result = await api.post('/notifications/mark_all_read.php');
+            if (result.data?.success) {
+                setUnreadCount(0);
+                setNotifications((current) => current.map((item) => ({ ...item, is_read: true })));
+            }
+        } catch {
+            // The authenticated API interceptor handles request errors.
+        }
+    };
+
+    const openNotification = async (notification) => {
+        if (!notification.is_read) {
+            try {
+                await api.post('/notifications/mark_read.php', { id: notification.id });
+                setUnreadCount((current) => Math.max(0, current - 1));
+                setNotifications((current) => current.map((item) =>
+                    item.id === notification.id ? { ...item, is_read: true } : item
+                ));
+            } catch {
+                return;
+            }
+        }
+
+        setNotificationOpen(false);
+        const entityType = notification.related_entity_type;
+        if (entityType === 'crm_followup') {
+            navigate('/crm/follow-ups');
+        } else if (entityType === 'lead_closure') {
+            navigate('/crm/form-approval');
+        } else if (entityType === 'crm_installation') {
+            navigate('/crm/my-installations');
+        } else {
+            navigate(notification.related_lead_id ? '/crm/my-leads' : '/dashboard');
+        }
+    };
 
     useEffect(() => {
         setSidebarOpen(false);
         if (location.pathname.startsWith('/customer-management')) {
             setCustomerOpen(true);
+        }
+        if (location.pathname.startsWith('/crm')) {
+            setCrmOpen(true);
         }
         if (location.pathname.startsWith('/inward')) {
             setInwardOpen(true);
@@ -101,6 +171,12 @@ const AdminLayout = () => {
 
     const canViewSupport =
         hasPermission('support.view');
+
+    const canViewAttendance =
+        hasPermission('attendance.view');
+
+    const canViewMyAttendance =
+        hasPermission('attendance.self.view');
 
     const canViewDeviceMaintenance =
         hasPermission('devices.view');
@@ -156,6 +232,45 @@ const AdminLayout = () => {
 
     const canViewSimValidity =
         hasPermission('sim_validity.view');
+
+    const canViewPipelineManagement =
+        hasPermission('crm_pipelines.view') ||
+        hasPermission('crm_pipelines.add') ||
+        hasPermission('crm_pipelines.edit') ||
+        hasPermission('crm_pipelines.delete');
+
+    const canViewCampaignManagement =
+        hasPermission('crm_campaigns.view');
+
+    const canViewLeadStatusMaster =
+        hasPermission('crm_lead_status.view');
+
+    const canViewLeadStageMaster =
+        hasPermission('crm_lead_stage.view') ||
+        hasPermission('crm_lead_stage.add') ||
+        hasPermission('crm_lead_stage.edit') ||
+        hasPermission('crm_lead_stage.activate');
+
+    const canViewLeads =
+        hasPermission('crm_leads.view');
+
+    const canViewMyLeads =
+        hasPermission('crm_leads.my_view') || canViewLeads;
+
+    const canDistributeLeads =
+        hasPermission('crm_leads.assign');
+
+    const canViewFollowups =
+        hasPermission('crm_followups.view');
+
+    const canConvertLeads =
+        hasPermission('crm_closures.add');
+
+    const canApproveClosures =
+        hasPermission('crm_closures.approve');
+
+    const canViewInstallations =
+        hasPermission('crm_installations.view');
         
 const canViewCustomerDetails =
     hasPermission('customers.view');
@@ -182,9 +297,22 @@ const showCustomerManagement =
     canViewCustomerDetails ||
     canViewCustomerReports ||
     canViewCustomerRenewals ||
-    canViewSimLifecycle ||
+    canViewSimLifecycle;
     canViewCustomerVerification ||
     canViewMyCustomerVerifications;
+
+const showCRM =
+    canViewPipelineManagement ||
+    canViewCampaignManagement ||
+    canViewLeadStatusMaster ||
+    canViewLeadStageMaster ||
+    canViewLeads ||
+    canViewMyLeads ||
+    canDistributeLeads ||
+    canViewFollowups ||
+    canConvertLeads ||
+    canApproveClosures ||
+    canViewInstallations;
     // =========================
     // SETTINGS
     // =========================
@@ -197,6 +325,9 @@ const showCustomerManagement =
 
     const canChangePassword =
         hasPermission('password.change');
+
+    const canManageAttendanceSettings =
+        hasPermission('attendance.settings');
 
     // Master Settings visibility
     const showMasterSettings =
@@ -212,7 +343,8 @@ const showCustomerManagement =
         showMasterSettings ||
         canViewRoles ||
         canViewUsers ||
-        canChangePassword;
+        canChangePassword ||
+        canManageAttendanceSettings;
 
     return (
         <div className="app-container">
@@ -441,6 +573,18 @@ const showCustomerManagement =
                         </div>
                     )}
 
+                    {(canViewDealer || canViewTechnician) && (
+                        <NavLink
+                            to="/installation-persons"
+                            className={({ isActive }) =>
+                                `nav-item ${isActive ? 'active' : ''}`
+                            }
+                        >
+                            <Users size={20} />
+                            <span>Installation Persons</span>
+                        </NavLink>
+                    )}
+
                     {/* =========================================
                         STOCK MANAGEMENT
                     ========================================= */}
@@ -623,6 +767,127 @@ const showCustomerManagement =
     </div>
 )}
 
+                    {showCRM && (
+                        <div className="nav-group">
+                            <div
+                                className={`nav-item ${crmOpen ? 'open' : ''}`}
+                                onClick={() => setCrmOpen(!crmOpen)}
+                            >
+                                <SlidersHorizontal size={20} />
+                                <span>CRM</span>
+                                {crmOpen ? (
+                                    <ChevronDown size={16} className="ml-auto" />
+                                ) : (
+                                    <ChevronRight size={16} className="ml-auto" />
+                                )}
+                            </div>
+
+                            {crmOpen && (
+                                <div className="nav-sub">
+                                    {canViewPipelineManagement && (
+                                        <NavLink
+                                            to="/crm/pipelines"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <SlidersHorizontal size={18} />
+                                            <span>Pipeline Management</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewCampaignManagement && (
+                                        <NavLink
+                                            to="/crm/campaigns"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <FileText size={18} />
+                                            <span>Campaign Management</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewLeadStatusMaster && (
+                                        <NavLink
+                                            to="/crm/lead-statuses"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <SlidersHorizontal size={18} />
+                                            <span>Lead Status Master</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewLeadStageMaster && (
+                                        <NavLink
+                                            to="/crm/lead-stages"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <SlidersHorizontal size={18} />
+                                            <span>Lead Stage Master</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewLeads && (
+                                        <NavLink
+                                            to="/crm/leads"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <Users size={18} />
+                                            <span>All Leads</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewMyLeads && (
+                                        <NavLink
+                                            to="/crm/my-leads"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <UserPlus size={18} />
+                                            <span>My Leads</span>
+                                        </NavLink>
+                                    )}
+                                    {canDistributeLeads && (
+                                        <NavLink
+                                            to="/crm/lead-distribution"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <UserCheck size={18} />
+                                            <span>Lead Distribution</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewFollowups && (
+                                        <NavLink
+                                            to="/crm/follow-ups"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <Clock size={18} />
+                                            <span>Follow-ups</span>
+                                        </NavLink>
+                                    )}
+                                    {canConvertLeads && (
+                                        <NavLink
+                                            to="/crm/lead-converter"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <FileText size={18} />
+                                            <span>Lead Converter</span>
+                                        </NavLink>
+                                    )}
+                                    {canApproveClosures && (
+                                        <NavLink
+                                            to="/crm/form-approval"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <Shield size={18} />
+                                            <span>Form Approval</span>
+                                        </NavLink>
+                                    )}
+                                    {canViewInstallations && (
+                                        <NavLink
+                                            to="/crm/my-installations"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <Wrench size={18} />
+                                            <span>My Installations</span>
+                                        </NavLink>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {canViewHistory && (
                         <NavLink
                             to="/history"
@@ -640,6 +905,16 @@ const showCustomerManagement =
                         >
                             <LifeBuoy size={20} />
                             <span>Support</span>
+                        </NavLink>
+                    )}
+
+                    {(canViewAttendance || canViewMyAttendance) && (
+                        <NavLink
+                            to="/attendance"
+                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                        >
+                            <Clock size={20} />
+                            <span>{canViewAttendance ? 'Attendance' : 'My Attendance'}</span>
                         </NavLink>
                     )}
 
@@ -890,6 +1165,16 @@ const showCustomerManagement =
                                         </NavLink>
                                     )}
 
+                                    {canManageAttendanceSettings && (
+                                        <NavLink
+                                            to="/settings/attendance"
+                                            className={({ isActive }) => `nav-sub-item ${isActive ? 'active' : ''}`}
+                                        >
+                                            <Clock size={18} />
+                                            <span>Attendance Settings</span>
+                                        </NavLink>
+                                    )}
+
                                     {/* =================================
                                         CHANGE PASSWORD
                                     ================================= */}
@@ -948,24 +1233,71 @@ const showCustomerManagement =
                     <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
                         {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
-                    <div className="user-profile">
-
-                        <div className="avatar">
-                            {(
-                                user?.employee_name ||
-                                user?.username ||
-                                'U'
-                            )
-                                .charAt(0)
-                                .toUpperCase()}
+                    <div className="topbar-actions">
+                        <div className="notification-menu">
+                            <button
+                                type="button"
+                                className="notification-bell"
+                                onClick={() => setNotificationOpen((current) => !current)}
+                                aria-label={`${unreadCount} unread notifications`}
+                            >
+                                <Bell size={20} />
+                                {unreadCount > 0 && (
+                                    <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                                )}
+                            </button>
+                            {notificationOpen && (
+                                <div className="notification-dropdown">
+                                    <div className="notification-dropdown-header">
+                                        <strong>Notifications</strong>
+                                        {unreadCount > 0 && (
+                                            <button type="button" onClick={markAllNotificationsRead}>
+                                                Mark all as read
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="notification-list">
+                                        {notifications.length === 0 ? (
+                                            <div className="notification-empty">No notifications</div>
+                                        ) : notifications.map((notification) => (
+                                            <button
+                                                type="button"
+                                                className={`notification-item ${notification.is_read ? 'read' : 'unread'}`}
+                                                key={notification.id}
+                                                onClick={() => openNotification(notification)}
+                                            >
+                                                <span className="notification-title-row">
+                                                    <strong>{notification.title}</strong>
+                                                    <span className={`priority-badge ${String(notification.priority).toLowerCase()}`}>
+                                                        {notification.priority || 'Normal'}
+                                                    </span>
+                                                </span>
+                                                <span className="notification-message">{notification.message}</span>
+                                                <span className="notification-time">
+                                                    {notification.created_at ? new Date(notification.created_at).toLocaleString() : ''}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-
-                        <span>
-                            {user?.employee_name ||
-                                user?.username ||
-                                'User'}
-                        </span>
-
+                        <div className="user-profile">
+                            <div className="avatar">
+                                {(
+                                    user?.employee_name ||
+                                    user?.username ||
+                                    'U'
+                                )
+                                    .charAt(0)
+                                    .toUpperCase()}
+                            </div>
+                            <span>
+                                {user?.employee_name ||
+                                    user?.username ||
+                                    'User'}
+                            </span>
+                        </div>
                     </div>
 
                 </header>

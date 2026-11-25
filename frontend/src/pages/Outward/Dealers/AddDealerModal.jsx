@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import api from '../../../services/api';
 import DateInput from '../../../components/DateInput';
 import { SOFTWARE_OPTIONS } from '../../../constants/software';
+import PersonnelCredentialNotice from '../../../components/PersonnelCredentialNotice';
 import useModalScrollLock from '../../../hooks/useModalScrollLock';
 import { showGlobalError } from '../../../context/ErrorContext';
 
@@ -13,6 +15,7 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         mobile_no: '',
         alternate_mobile_no: '',
         location: '',
+        installation_service_areas: '',
         enrolled_date: '',
         installation_status: 'Onsite',
         status: 'active',
@@ -23,6 +26,12 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
     const [softwareOpen, setSoftwareOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [credentials, setCredentials] = useState(null);
+    const generatedUsername = formData.dealer_name.trim().replace(/\s+/g, '').toLowerCase();
 
     const triggerError = (msg) => {
         setError(msg);
@@ -67,9 +76,22 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
             triggerError('Mobile number must contain exactly 10 digits.');
             return;
         }
+        if (!/^[6-9][0-9]{9}$/.test(formData.mobile_no)) {
+            triggerError('Enter a valid 10-digit mobile number.');
+            return;
+        }
 
         if (formData.alternate_mobile_no && formData.alternate_mobile_no.length !== 10) {
             triggerError('Alternate mobile number must contain exactly 10 digits.');
+            return;
+        }
+
+        if (password.length < 8) {
+            triggerError('Password must be at least 8 characters long.');
+            return;
+        }
+        if (password !== confirmPassword) {
+            triggerError('Passwords do not match.');
             return;
         }
 
@@ -85,11 +107,17 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
         try {
             const payload = {
                 ...formData,
+                password,
+                confirm_password: confirmPassword,
                 threshold_amount: formData.threshold_amount !== '' ? formData.threshold_amount : null
             };
             const response = await api.post('/dealers/create.php', payload);
             if (response.data.success) {
-                onSuccess();
+                setCredentials({
+                    username: response.data.data?.user?.username || generatedUsername,
+                    role: response.data.data?.user?.role || 'Dealer',
+                    password
+                });
             } else {
                 triggerError(response.data.message || 'Failed to save dealer');
             }
@@ -99,6 +127,22 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
             setLoading(false);
         }
     };
+
+    if (credentials) {
+        return (
+            <div className="modal-overlay">
+                <div className="modal-content" style={{ maxWidth: '500px' }}>
+                    <div className="modal-header">
+                        <h3>Dealer Login Created</h3>
+                        <button className="close-btn" onClick={onSuccess}>&times;</button>
+                    </div>
+                    <div className="modal-body">
+                        <PersonnelCredentialNotice credentials={credentials} onDone={onSuccess} />
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="modal-overlay">
@@ -165,6 +209,18 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                                 onChange={handleChange}
                                 required
                             />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Installation Service Areas</label>
+                            <textarea
+                                name="installation_service_areas"
+                                className="form-control"
+                                rows="2"
+                                value={formData.installation_service_areas}
+                                onChange={handleChange}
+                                placeholder="Coimbatore, Pollachi, Mettupalayam"
+                            />
+                            <small>Enter only cities/areas this dealer explicitly serves, separated by commas or new lines.</small>
                         </div>
 
                         <div className="form-group">
@@ -266,6 +322,54 @@ const AddDealerModal = ({ onClose, onSuccess }) => {
                                 min="0"
                                 step="any"
                             />
+                        </div>
+
+                        <hr />
+                        <h4>Login Account</h4>
+                        <p>Employee name and mobile number are used to create this account. The Dealer role is assigned automatically.</p>
+                        <div className="form-group">
+                            <label className="form-label">Employee Name</label>
+                            <input className="form-control" value={formData.dealer_name} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Mobile Number</label>
+                            <input className="form-control" value={formData.mobile_no} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Generated Username</label>
+                            <input className="form-control" value={generatedUsername} readOnly />
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    className="form-control"
+                                    autoComplete="new-password"
+                                    value={password}
+                                    onChange={(event) => setPassword(event.target.value)}
+                                    required
+                                />
+                                <button type="button" className="btn btn-outline" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((visible) => !visible)}>
+                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Confirm Password *</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    type={showConfirmPassword ? 'text' : 'password'}
+                                    className="form-control"
+                                    autoComplete="new-password"
+                                    value={confirmPassword}
+                                    onChange={(event) => setConfirmPassword(event.target.value)}
+                                    required
+                                />
+                                <button type="button" className="btn btn-outline" aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'} onClick={() => setShowConfirmPassword((visible) => !visible)}>
+                                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                            </div>
                         </div>
                     </div>
                     

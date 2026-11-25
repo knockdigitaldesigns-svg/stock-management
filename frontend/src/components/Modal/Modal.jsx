@@ -2,7 +2,16 @@ import { useEffect } from 'react';
 import './Modal.css';
 import useModalScrollLock from '../../hooks/useModalScrollLock';
 
-const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '800px', className = '' }) => {
+const Modal = ({
+    isOpen,
+    onClose,
+    title,
+    children,
+    footer,
+    headerContent,
+    maxWidth = '800px',
+    className = ''
+}) => {
     useModalScrollLock(isOpen);
 
     useEffect(() => {
@@ -34,10 +43,14 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '800px', c
                 aria-label={title}
             >
                 <div className="modal-header">
-                    <h3>{title}</h3>
-                    <button type="button" className="close-btn" onClick={onClose} aria-label="Close modal">
-                        &times;
-                    </button>
+                    {headerContent || (
+                        <>
+                            <h3>{title}</h3>
+                            <button type="button" className="close-btn" onClick={onClose} aria-label="Close modal">
+                                &times;
+                            </button>
+                        </>
+                    )}
                 </div>
 
                 <div className="modal-body">{children}</div>

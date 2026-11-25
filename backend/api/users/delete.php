@@ -3,6 +3,7 @@
 require_once '../../config/database.php';
 require_once '../../utils/response.php';
 require_once '../../utils/audit.php';
+require_once '../../utils/installation_personnel.php';
 require_once '../../middleware/auth.php';
 
 handlePreflight();
@@ -49,6 +50,17 @@ if ($check->get_result()->num_rows === 0) {
 }
 
 $check->close();
+
+try {
+    if (isInstallationPersonnelAccount($conn, $id)) {
+        $conn->close();
+        sendResponse(false, 'Installation person logins must be deactivated from Installation Persons.', [], [], 403);
+    }
+} catch (Throwable $error) {
+    $conn->close();
+    error_log('Installation person account deletion check failed: ' . $error->getMessage());
+    sendResponse(false, 'Unable to verify account type.', [], [], 500);
+}
 
 $userSnapshotStmt = $conn->prepare('SELECT id, employee_name, mobile_no, username, role, role_id, status, created_at, updated_at FROM users WHERE id = ? LIMIT 1');
 $userSnapshotStmt->bind_param('i', $id);

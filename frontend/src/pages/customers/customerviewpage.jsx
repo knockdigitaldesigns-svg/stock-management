@@ -33,6 +33,7 @@ import {
 } from '../../utils/installationValidation';
 import { normalizeCurrency } from '../../utils/paymentValidation';
 import DateInput from '../../components/DateInput';
+import { useConfirmation } from '../../components/Modal/useConfirmation';
 import { formatDate, getTodayDate } from '../../utils/date';
 import './CustomerInstallments.css';
 
@@ -199,6 +200,7 @@ const CustomerViewPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { customerId } = useParams();
+    const { confirm, confirmationDialog } = useConfirmation();
     const { hasPermission } = useAuth();
 
     const isEditMode = location.pathname.endsWith('/edit');
@@ -964,7 +966,14 @@ const CustomerViewPage = () => {
     };
 
     const handleDeleteVehicle = async (vehicleId) => {
-        if (!window.confirm('Are you sure you want to delete this vehicle?')) {
+        const confirmed = await confirm({
+            title: 'Delete Vehicle',
+            message: 'Are you sure you want to delete this vehicle?',
+            confirmLabel: 'Delete',
+            confirmClassName: 'btn-danger'
+        });
+
+        if (!confirmed) {
             return;
         }
 
@@ -2466,6 +2475,7 @@ const CustomerViewPage = () => {
 
                 </>
             )}
+            {confirmationDialog}
         </div>
     );
 };

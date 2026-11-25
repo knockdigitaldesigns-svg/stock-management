@@ -27,7 +27,7 @@ $statusSql = $status === 'Pending Verification'
     ? "s.status IN ('Pending Verification', 'Applying')"
     : 's.status = ?';
 $page = max(1, (int) ($_GET['page'] ?? 1));
-$pageSize = min(250, max(1, (int) ($_GET['page_size'] ?? 10)));
+$pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 $offset = ($page - 1) * $pageSize;
 $pattern = '%' . $search . '%';
 $countStmt = $conn->prepare(
@@ -96,12 +96,23 @@ while ($row = $result->fetch_assoc()) {
         $conn->close();
         sendResponse(false, 'A saved verification submission could not be read.', [], [], 500);
     }
-    $customer = $detail['customer'] ?? [];
-    $payment = $detail['payment_part2'] ?? null;
+    $customer = array_replace(
+        is_array($detail['step1'] ?? null) ? $detail['step1'] : [],
+        is_array($detail['customer'] ?? null) ? $detail['customer'] : []
+    );
+    $payment = $detail['payment_part2'] ?? $detail['paymentPart2'] ?? $detail['step5'] ?? null;
     $paymentStatus = '';
-    if (!is_array($payment) && is_array($detail['vehicles'] ?? null)) {
-        foreach ($detail['vehicles'] as $vehicle) {
-            if (is_array($vehicle['payment_part2'] ?? null)) {
+    $vehicleDetails = $detail['vehicles'] ?? [];
+    if (!is_array($vehicleDetails) || !$vehicleDetails) {
+        $singleVehicle = $detail['vehicle'] ?? $detail['step2'] ?? null;
+        $vehicleDetails = is_array($singleVehicle) ? [$singleVehicle] : [];
+    }
+    if (!is_array($payment) || !$payment) {
+        foreach ($vehicleDetails as $vehicle) {
+            if (!is_array($vehicle)) {
+                continue;
+            }
+            if (is_array($vehicle['payment_part2'] ?? null) && $vehicle['payment_part2']) {
                 $payment = $vehicle['payment_part2'];
                 break;
             }
@@ -112,17 +123,28 @@ while ($row = $result->fetch_assoc()) {
     }
     if ($paymentStatus === '') {
         $paymentPart1 = $detail['payment_part1'] ?? null;
-        if (!is_array($paymentPart1) && is_array($detail['vehicles'] ?? null)) {
-            foreach ($detail['vehicles'] as $vehicle) {
-                if (is_array($vehicle['payment_part1'] ?? null)) {
+        if (!is_array($paymentPart1) || !$paymentPart1) {
+            $paymentPart1 = $detail['step4'] ?? null;
+        }
+        if (!is_array($paymentPart1) || !$paymentPart1) {
+            foreach ($vehicleDetails as $vehicle) {
+                if (!is_array($vehicle)) {
+                    continue;
+                }
+                if (is_array($vehicle['payment_part1'] ?? null) && $vehicle['payment_part1']) {
                     $paymentPart1 = $vehicle['payment_part1'];
                     break;
                 }
             }
         }
-        if (is_array($paymentPart1)) {
+        if (is_array($paymentPart1) && $paymentPart1) {
             $payment = $paymentPart1;
-            $paymentStatus = (string) ($detail['payment_status'] ?? 'Pending');
+            $paymentStatus = (string) (
+                $paymentPart1['payment_status'] ??
+                $paymentPart1['paymentStatus'] ??
+                $detail['payment_status'] ??
+                'Pending'
+            );
         }
     }
     $vehicleCount = (int) ($row['vehicle_count'] ?? 0);
@@ -162,6 +184,8 @@ while ($row = $result->fetch_assoc()) {
         $submissionType = 'Payment Installment';
     } elseif (($detail['source'] ?? '') === 'customer_vehicle_addition') {
         $submissionType = 'Additional Customer Vehicle';
+    } elseif (($detail['source'] ?? '') === 'crm_installation') {
+        $submissionType = 'CRM Installation Device';
     }
     $submissions[] = [
         'id' => (int) $row['id'],
