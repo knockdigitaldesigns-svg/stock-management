@@ -348,48 +348,6 @@ $stmt->close();
 
 /*
 |--------------------------------------------------------------------------
-| Duplicate Primary Mobile
-| Exclude Current Customer
-|--------------------------------------------------------------------------
-*/
-
-$stmt = $conn->prepare(
-    "SELECT id
-     FROM customers
-     WHERE primary_mobile_no = ?
-       AND id != ?
-     LIMIT 1"
-);
-
-$stmt->bind_param(
-    'si',
-    $primaryMobile,
-    $customerId
-);
-
-$stmt->execute();
-
-$result = $stmt->get_result();
-
-if ($result->num_rows > 0) {
-
-    $stmt->close();
-    $conn->close();
-
-    sendResponse(
-        false,
-        'Primary mobile number already exists.',
-        [],
-        [],
-        409
-    );
-}
-
-$stmt->close();
-
-
-/*
-|--------------------------------------------------------------------------
 | Update
 |--------------------------------------------------------------------------
 */

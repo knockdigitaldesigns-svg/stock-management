@@ -96,7 +96,6 @@ const DealerSimActivationEditModal = ({
                 activation_date: details.activation_date || '',
                 sim_validity_id: String(details.sim_validity_id || ''),
                 renewal_validity_id: '',
-                reactivation_validity_id: String(details.sim_validity_id || ''),
                 deactivation_date: '',
                 reactivation_date: ''
             });
@@ -177,14 +176,6 @@ const DealerSimActivationEditModal = ({
         return formatDate(`${targetYear}-${String(normalizedMonth).padStart(2, '0')}-${String(normalizedDay).padStart(2, '0')}`);
     };
 
-    const calculateReactivationExpiry = () => {
-        if (!allocation?.expiry_date || !form.reactivation_date || !form.reactivation_validity_id) return '-';
-        if (form.reactivation_date <= allocation.expiry_date) {
-            return formatDate(allocation.expiry_date);
-        }
-        return calculateExpiry(form.reactivation_date, form.reactivation_validity_id);
-    };
-
     const handleSave = async () => {
         if (!allocation || !form) return;
         setError('');
@@ -207,10 +198,6 @@ const DealerSimActivationEditModal = ({
             }
             if (lifecycleAction === 'reactivate' && !allocation.expiry_date) {
                 setError('The saved Expiry Date is missing. SIM reactivation cannot calculate the next renewal cycle.');
-                return;
-            }
-            if (lifecycleAction === 'reactivate' && !form.reactivation_validity_id) {
-                setError('Please select the Reactivation Validity.');
                 return;
             }
             if (hasLifecyclePayment) {
@@ -324,7 +311,6 @@ const DealerSimActivationEditModal = ({
                 allocation_id: allocation.allocation_id,
                 action: lifecycleAction,
                 renewal_validity_id: form.renewal_validity_id,
-                reactivation_validity_id: form.reactivation_validity_id,
                 deactivation_date: form.deactivation_date,
                 reactivation_date: form.reactivation_date,
                 lifecycle_payment: hasLifecyclePayment ? {
@@ -837,15 +823,8 @@ const DealerSimActivationEditModal = ({
                         {lifecycleAction === 'reactivate' && (
                             <>
                                 <div className="form-group"><label className="form-label">Actual Reactivation Date *</label><DateInput className="form-control" value={form.reactivation_date} onChange={(value) => update('reactivation_date', value)} allowFuture /></div>
-                                <div className="form-group"><label className="form-label">Previous Expiry Date</label><input className="form-control" value={formatDate(allocation.expiry_date)} readOnly /></div>
-                                <div className="form-group">
-                                    <label className="form-label">SIM Validity *</label>
-                                    <select className="form-control" value={form.reactivation_validity_id} onChange={(event) => update('reactivation_validity_id', event.target.value)}>
-                                        <option value="">Select Validity</option>
-                                        {simValidities.filter((validity) => !validity.status || String(validity.status).toLowerCase() === 'active').map((validity) => <option key={validity.id} value={validity.id}>{validity.months} Months</option>)}
-                                    </select>
-                                </div>
-                                <div className="form-group"><label className="form-label">Next Expiry / Renewal Date</label><input className="form-control" value={calculateReactivationExpiry()} readOnly /></div>
+                                <div className="form-group"><label className="form-label">Original Expiry Date</label><input className="form-control" value={formatDate(allocation.expiry_date)} readOnly /></div>
+                                <div className="form-group"><label className="form-label">Original Validity</label><input className="form-control" value={allocation.validity_months ? `${allocation.validity_months} Months` : '-'} readOnly /></div>
                             </>
                         )}
                         {lifecycleAction === 'safe_custody' && (
