@@ -16,7 +16,8 @@ import { useAuth } from '../../context/AuthContext';
 const FormApprovalPage = () => {
     const { hasPermission } = useAuth();
     const { confirm, confirmationDialog } = useConfirmation();
-    const canAssignInstallations = hasPermission('crm_installations.assign');
+    const canAssignInstallations = hasPermission('crm_installations.assign')
+        || hasPermission('crm_installations.manage');
     const [submissions, setSubmissions] = useState([]);
     const [locations, setLocations] = useState([]);
     const [rejectionReasons, setRejectionReasons] = useState({});

@@ -48,6 +48,19 @@ function customerVerificationMergeMissing(array $values, array $fallback): array
     return $values;
 }
 
+function customerVerificationFirstValue(array $values, array $fields)
+{
+    foreach ($fields as $field) {
+        if (array_key_exists($field, $values)
+            && is_scalar($values[$field])
+            && trim((string) $values[$field]) !== '') {
+            return $values[$field];
+        }
+    }
+
+    return null;
+}
+
 function customerVerificationNormalizePayment(array $payment): array
 {
     return customerVerificationMergeMissing($payment, [
@@ -159,6 +172,93 @@ function customerVerificationLoadInstallation(mysqli $conn, int $customerId, int
     $stmt->close();
 
     return $installation;
+}
+
+function customerVerificationLoadCrmInstallationContext(
+    mysqli $conn,
+    int $closureId,
+    int $installationDeviceId
+): ?array {
+    if ($closureId <= 0) {
+        return null;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT cf.platform_id, p.platform_name, cf.location,
+                COALESCE(
+                    NULLIF(TRIM(assignee.employee_name), ''),
+                    NULLIF(TRIM(assignee.username), ''),
+                    NULLIF(TRIM(creator.employee_name), ''),
+                    NULLIF(TRIM(creator.username), ''),
+                    NULLIF(TRIM(submitter.employee_name), ''),
+                    NULLIF(TRIM(submitter.username), '')
+                ) AS lead_closure_by,
+                COALESCE(
+                    NULLIF(TRIM(ci.installation_person_type), ''),
+                    NULLIF(TRIM(cf.installation_person_type), '')
+                ) AS installation_person_type,
+                COALESCE(ci.installation_person_id, cf.installation_person_id) AS installation_person_id,
+                CASE
+                    WHEN LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) LIKE '%dealer%'
+                        THEN CASE
+                            WHEN LOWER(TRIM(COALESCE(d.installation_status, ''))) = 'offsite'
+                                THEN 'Offsite Dealer'
+                            ELSE 'Onsite Dealer'
+                        END
+                    WHEN LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) = 'technician'
+                        THEN 'Technician'
+                    WHEN COALESCE(ci.installation_person_id, cf.installation_person_id) IS NULL
+                        THEN 'Direct'
+                    ELSE COALESCE(ci.installation_person_type, cf.installation_person_type)
+                END AS installation_type,
+                CASE
+                    WHEN LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) LIKE '%dealer%'
+                        THEN d.dealer_name
+                    WHEN LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) = 'technician'
+                        THEN t.technician_name
+                    ELSE NULL
+                END AS installation_person,
+                COALESCE(ci.installation_date, DATE(device.installation_datetime), DATE(cf.installation_datetime))
+                    AS installation_date
+         FROM crm_lead_closure_forms cf
+         LEFT JOIN platforms p ON p.id = cf.platform_id
+         LEFT JOIN crm_leads crm_lead ON crm_lead.id = cf.lead_id
+         LEFT JOIN users assignee ON assignee.id = crm_lead.assigned_user_id
+         LEFT JOIN users creator ON creator.id = crm_lead.created_by_user_id
+         LEFT JOIN users submitter ON submitter.id = cf.submitted_by_user_id
+         LEFT JOIN crm_closure_installation_devices device
+            ON device.id = ? AND device.closure_id = cf.id
+         LEFT JOIN customer_installations ci
+            ON ci.id = COALESCE(
+                NULLIF(device.customer_installation_id, 0),
+                NULLIF(cf.customer_installation_id, 0),
+                (SELECT existing_installation.id
+                 FROM customer_installations existing_installation
+                 WHERE existing_installation.crm_closure_id = cf.id
+                 ORDER BY existing_installation.id DESC
+                 LIMIT 1)
+            )
+         LEFT JOIN dealers d
+            ON d.id = COALESCE(ci.installation_person_id, cf.installation_person_id)
+           AND LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) LIKE '%dealer%'
+         LEFT JOIN technicians t
+            ON t.id = COALESCE(ci.installation_person_id, cf.installation_person_id)
+           AND LOWER(TRIM(COALESCE(ci.installation_person_type, cf.installation_person_type, ''))) = 'technician'
+         WHERE cf.id = ?
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        throw new RuntimeException('Unable to prepare CRM installation verification lookup.');
+    }
+    $stmt->bind_param('ii', $installationDeviceId, $closureId);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        throw new RuntimeException('Unable to resolve CRM installation verification details.');
+    }
+    $context = $stmt->get_result()->fetch_assoc() ?: null;
+    $stmt->close();
+
+    return $context;
 }
 
 function customerVerificationLoadLegacyInstallationMap(mysqli $conn, int $customerId): array
@@ -331,112 +431,62 @@ function customerVerificationLoadPayment(
     return $payment;
 }
 
-function customerVerificationPayment(array $payment, ?string $vehicleName, bool $part2): array
+function customerVerificationPayment(
+    array $payment,
+    ?string $vehicleName,
+    bool $part2,
+    bool $includePaymentStatus = false
+): array
 {
+    $fields = $part2
+        ? [
+            'Device Charge' => ['device_charge', 'deviceCharge'],
+            'Software Charge' => ['software_charge', 'softwareCharge'],
+            'Technician Charge' => ['technician_charge', 'technicianCharge'],
+            'SIM Charge' => ['sim_charge', 'simCharge'],
+            'Courier Charge' => ['courier_charge', 'courierCharge'],
+            'Total Amount' => ['total_amount', 'totalAmount'],
+            'Amount Paid' => ['amount_paid', 'amountPaid'],
+            'Amount Pending' => ['amount_pending', 'amountPending'],
+            'Payment Status' => ['payment_status', 'paymentStatus'],
+            'Payment Mode' => ['payment_mode', 'paymentMode'],
+            'Transaction ID' => ['transaction_id', 'transactionId']
+        ]
+        : [
+            'Total Sale Amount' => ['total_sale_amount', 'totalSaleAmount'],
+            'Transaction ID' => ['transaction_id', 'transactionId'],
+            'Payment Mode' => ['payment_mode', 'paymentMode']
+        ];
+    if (!$part2 && $includePaymentStatus) {
+        $fields['Payment Status'] = ['payment_status', 'paymentStatus'];
+    }
     $display = ['Vehicle' => $vehicleName];
-    if (!$part2) {
-        $totalSaleAmount = $payment['total_sale_amount'] ?? $payment['totalSaleAmount'] ?? null;
-        if ($totalSaleAmount !== null && $totalSaleAmount !== '') {
-            $display['Total Sale Amount'] = $totalSaleAmount;
-        }
+    foreach ($fields as $label => $keys) {
+        $display[$label] = customerVerificationFirstValue($payment, $keys);
     }
-    $paymentMode = $payment['payment_mode'] ?? $payment['paymentMode'] ?? null;
-    if ($paymentMode !== null && $paymentMode !== '') {
-        $display['Payment Mode'] = $paymentMode;
-    }
-    $transactionId = $payment['transaction_id'] ?? $payment['transactionId'] ?? null;
-    if ($transactionId !== null && $transactionId !== '') {
-        $display['Transaction ID'] = $transactionId;
-    }
-    $paymentDate = $payment['payment_date'] ?? $payment['paymentDate'] ?? null;
-    if ($paymentDate !== null && $paymentDate !== '') {
-        $display['Payment Date'] = $paymentDate;
-    }
-    $paymentStep = $payment['payment_step'] ?? $payment['paymentStep'] ?? null;
-    if ($paymentStep !== null && $paymentStep !== '') {
-        $display['Payment Step'] = $paymentStep;
-    }
-    if (!$part2) {
-        foreach ([
-            'payment_date',
-            'paymentDate'
-        ] as $field) {
-            if (isset($payment[$field]) && $payment[$field] !== '') {
-                $display['Payment Date'] = $payment[$field];
-                break;
+    if ($part2) {
+        $recipient = trim((string) (
+            $payment['cash_recipient_name']
+            ?? $payment['cashRecipientName']
+            ?? $payment['recipient_name']
+            ?? $payment['recipientName']
+            ?? ''
+        ));
+        $recipientType = trim((string) ($payment['cash_recipient_type'] ?? $payment['cashRecipientType'] ?? ''));
+        if ($recipient === '') {
+            if ($recipientType === 'ET') {
+                $recipient = 'Direct Cash to ET';
+            } elseif ($recipientType !== '') {
+                $recipient = $recipientType;
+            } elseif (!empty($payment['cash_to_technician']) || !empty($payment['cashToTechnician'])) {
+                $recipient = 'Cash to Technician';
+            } elseif (!empty($payment['cash_to_dealer']) || !empty($payment['cashToDealer'])) {
+                $recipient = 'Cash to Dealer';
+            } elseif (!empty($payment['cash_to_et']) || !empty($payment['cashToEt'])) {
+                $recipient = 'Direct Cash to ET';
             }
         }
-        foreach ($payment as $field => $value) {
-            if (in_array($field, [
-                'total_sale_amount', 'totalSaleAmount', 'payment_mode', 'paymentMode',
-                'transaction_id', 'transactionId', 'payment_date', 'paymentDate',
-                'payment_step', 'paymentStep'
-            ], true) || preg_match('/^(?:_.*|id|.*_id)$/i', $field)
-                || $value === null || $value === '') {
-                continue;
-            }
-            $display[$field] = $value;
-        }
-        return $display;
-    }
-    foreach ([
-        'Device Charge' => ['device_charge', 'deviceCharge'],
-        'Software Charge' => ['software_charge', 'softwareCharge'],
-        'Technician Charge' => ['technician_charge', 'technicianCharge'],
-        'SIM Charge' => ['sim_charge', 'simCharge'],
-        'Courier Charge' => ['courier_charge', 'courierCharge'],
-        'Total Amount' => ['total_amount', 'totalAmount'],
-        'Amount Paid' => ['amount_paid', 'amountPaid'],
-        'Amount Pending' => ['amount_pending', 'amountPending'],
-        'Payment Status' => ['payment_status', 'paymentStatus']
-    ] as $label => $fields) {
-        foreach ($fields as $field) {
-            if (array_key_exists($field, $payment)) {
-                $display[$label] = $payment[$field];
-                break;
-            }
-        }
-    }
-    $recipient = trim((string) (
-        $payment['cash_recipient_name']
-        ?? $payment['cashRecipientName']
-        ?? $payment['recipient_name']
-        ?? $payment['recipientName']
-        ?? ''
-    ));
-    $recipientType = trim((string) ($payment['cash_recipient_type'] ?? $payment['cashRecipientType'] ?? ''));
-    if ($recipient === '') {
-        if ($recipientType === 'ET') {
-            $recipient = 'Direct Cash to ET';
-        } elseif ($recipientType !== '') {
-            $recipient = $recipientType;
-        } elseif (!empty($payment['cash_to_technician']) || !empty($payment['cashToTechnician'])) {
-            $recipient = 'Cash to Technician';
-        } elseif (!empty($payment['cash_to_dealer']) || !empty($payment['cashToDealer'])) {
-            $recipient = 'Cash to Dealer';
-        } elseif (!empty($payment['cash_to_et']) || !empty($payment['cashToEt'])) {
-            $recipient = 'Direct Cash to ET';
-        }
-    }
-    $display['Cash Collection Recipient'] = $recipient !== '' ? $recipient : null;
-    foreach ($payment as $field => $value) {
-        if (in_array($field, [
-            'total_sale_amount', 'totalSaleAmount', 'payment_mode', 'paymentMode',
-            'transaction_id', 'transactionId', 'payment_date', 'paymentDate',
-            'device_charge', 'deviceCharge', 'software_charge', 'softwareCharge',
-            'technician_charge', 'technicianCharge', 'sim_charge', 'simCharge',
-            'courier_charge', 'courierCharge', 'total_amount', 'totalAmount',
-            'amount_paid', 'amountPaid', 'amount_pending', 'amountPending',
-            'payment_status', 'paymentStatus', 'cash_recipient_type',
-            'cashRecipientType', 'cash_recipient_name', 'cashRecipientName',
-            'recipient_name', 'recipientName', 'payment_step', 'paymentStep',
-            'cash_to_technician', 'cashToTechnician', 'cash_to_dealer',
-            'cashToDealer', 'cash_to_et', 'cashToEt'
-        ], true) || preg_match('/^(?:_.*|id|.*_id)$/i', $field)
-            || $value === null || $value === '') {
-            continue;
-        }
-        $display[$field] = $value;
+        $display['Cash Collection Recipient'] = $recipient !== '' ? $recipient : null;
     }
     return $display;
 }
@@ -482,23 +532,31 @@ try {
 }
 
 $snapshot = $row['submission_data'];
-$customer = array_replace(
-    is_array($snapshot['step1'] ?? null) ? $snapshot['step1'] : [],
-    is_array($snapshot['customer'] ?? null) ? $snapshot['customer'] : []
+$source = (string) ($snapshot['source'] ?? '');
+$crmInstallationContext = $source === 'crm_installation'
+    ? customerVerificationLoadCrmInstallationContext(
+        $conn,
+        (int) ($snapshot['crm_closure_id'] ?? 0),
+        (int) ($snapshot['installation_device_id'] ?? 0)
+    )
+    : null;
+$step1Customer = is_array($snapshot['step1'] ?? null) ? $snapshot['step1'] : [];
+$customer = customerVerificationMergeMissing(
+    array_replace($step1Customer, is_array($snapshot['customer'] ?? null) ? $snapshot['customer'] : []),
+    $step1Customer
 );
 $customer = customerVerificationMergeMissing($customer, [
     'platform_id' => $customer['platformId'] ?? null,
-    'platform_name' => $customer['platformName']
-        ?? $customer['platform']
-        ?? $customer['software_name']
-        ?? $customer['software']
-        ?? null,
+    'platform_name' => customerVerificationFirstValue(
+        $customer,
+        ['platform_name', 'platformName', 'platform', 'software_name', 'software']
+    ),
     'primary_mobile_no' => $customer['primaryMobileNo'] ?? null,
     'secondary_mobile_no' => $customer['secondaryMobileNo'] ?? null,
-    'location' => $customer['customer_location']
-        ?? $customer['customerLocation']
-        ?? $customer['address']
-        ?? null,
+    'location' => customerVerificationFirstValue(
+        $customer,
+        ['location', 'customer_location', 'customerLocation', 'address']
+    ),
     'status' => $customer['customer_status'] ?? $customer['customerStatus'] ?? null
 ]);
 $existingCustomerId = (int) ($row['existing_customer_id'] ?? 0);
@@ -544,8 +602,18 @@ if ($customerId > 0) {
         }
     }
 }
-$platformId = (int) ($customer['platform_id'] ?? 0);
-$platformName = trim((string) ($customer['platform_name'] ?? ''));
+    if ($crmInstallationContext) {
+        $customer = customerVerificationMergeMissing($customer, [
+            'platform_id' => $crmInstallationContext['platform_id'] ?? null,
+            'platform_name' => $crmInstallationContext['platform_name'] ?? null,
+            'location' => $crmInstallationContext['location'] ?? null
+        ]);
+    }
+$platformId = (int) customerVerificationFirstValue($customer, ['platform_id', 'platformId']);
+$platformName = trim((string) customerVerificationFirstValue(
+    $customer,
+    ['platform_name', 'platformName', 'platform', 'software_name', 'software']
+));
 if ($platformId <= 0 && ctype_digit($platformName)) {
     $platformId = (int) $platformName;
     $platformName = '';
@@ -564,21 +632,15 @@ foreach ([$customer, $snapshot] as $customerSource) {
 }
 
   $customerDisplay = [
-    'Username' => $customerName !== ''
-        ? $customerName
-        : ($existingCustomerId > 0
-            ? 'Existing Customer'
-            : 'New Customer — Pending Approval'),
     'Platform' => $platformName !== '' ? $platformName : null,
-    'Verification Status' => (string) ($row['status'] ?? '')
+    'Username' => $customerName !== '' ? $customerName : null,
 ];
 foreach ([
     'Primary Mobile No' => ['primary_mobile_no', 'primaryMobileNo'],
     'Secondary Mobile No' => ['secondary_mobile_no', 'secondaryMobileNo'],
     'Email' => ['email'],
     'Location' => ['location'],
-    'Pincode' => ['pincode'],
-    'Status' => ['status']
+    'Pincode' => ['pincode']
 ] as $label => $fields) {
     $customerDisplay[$label] = null;
     foreach ($fields as $field) {
@@ -608,7 +670,6 @@ if (!$vehicles && is_array($snapshot['step2'] ?? null)) {
 if (!$vehicles && $linkedVehicleId > 0) {
     $vehicles[] = ['vehicle_record_id' => $linkedVehicleId];
 }
-$source = (string) ($snapshot['source'] ?? '');
 $topLevelInstallation = $snapshot['installation']
     ?? $snapshot['installationDetails']
     ?? $snapshot['step3']
@@ -731,7 +792,7 @@ foreach ($vehicles as $vehicle) {
     }
     $vehicleLabel = $vehicleNumber !== '' ? $vehicleNumber : null;
     $vehicleAssociations[] = ['id' => $vehicleId, 'label' => $vehicleLabel];
-    $vehicleDisplay = ['Vehicle' => $vehicleLabel];
+    $vehicleDisplay = ['Vehicle No' => $vehicleLabel];
     $vehicleType = $vehicle['vehicle_type'] ?? null;
     if (empty($vehicleType) || is_numeric($vehicle['vehicle_type_id'] ?? null)) {
         $vehicleType = customerVerificationLookup(
@@ -770,13 +831,30 @@ foreach ($vehicles as $vehicle) {
             (int) $vehicle['validity_id']
         );
     }
-    $vehicleDisplay['SIM Validity'] = is_numeric($validityMonths)
+    $vehicleDisplay['Validity'] = is_numeric($validityMonths)
         ? $validityMonths . ' Months'
         : null;
     $displayVehicles[] = $vehicleDisplay;
 
     $installation = $vehicle['installation'] ?? null;
 
+    $actualInstallation = customerVerificationLoadInstallation($conn, $customerId, $vehicleId);
+    if ($actualInstallation) {
+        $installation = customerVerificationMergeMissing(
+            is_array($installation) ? $installation : [],
+            $actualInstallation
+        );
+    } elseif ($customerId > 0 && $vehicleId > 0) {
+        if ($legacyInstallationMap === null) {
+            $legacyInstallationMap = customerVerificationLoadLegacyInstallationMap($conn, $customerId);
+        }
+        if (isset($legacyInstallationMap[$vehicleId])) {
+            $installation = customerVerificationMergeMissing(
+                is_array($installation) ? $installation : [],
+                $legacyInstallationMap[$vehicleId]
+            );
+        }
+    }
 
 // Handle missing or empty installation data
 if (!is_array($installation) || !$installation) {
@@ -794,6 +872,19 @@ if (is_array($installation)) {
         'lead_closure' => $installation['leadClosure'] ?? null,
         'installation_date' => $installation['installationDate'] ?? null
     ]);
+}
+if ($crmInstallationContext) {
+    $installation = customerVerificationMergeMissing(
+        is_array($installation) ? $installation : [],
+        [
+            'installation_person_type' => $crmInstallationContext['installation_person_type'] ?? null,
+            'installation_type' => $crmInstallationContext['installation_type'] ?? null,
+            'installation_person_id' => $crmInstallationContext['installation_person_id'] ?? null,
+            'installation_person' => $crmInstallationContext['installation_person'] ?? null,
+            'lead_closure_by' => $crmInstallationContext['lead_closure_by'] ?? null,
+            'installation_date' => $crmInstallationContext['installation_date'] ?? null
+        ]
+    );
 }
 
 // Fallback to legacy vehicle installation fields
@@ -816,18 +907,40 @@ if (!is_array($installation) && (
         $installation = $snapshot['installation'];
     }
     if (is_array($installation)) {
-        $personType = trim((string) ($installation['installation_person_type'] ?? ''));
+        $personType = trim((string) customerVerificationFirstValue($installation, [
+            'installation_person_type',
+            'installationPersonType',
+            'person_type',
+            'personType'
+        ]));
         if ($personType === '') {
-            $personType = trim((string) ($installation['installation_type'] ?? ''));
+            $personType = trim((string) customerVerificationFirstValue($installation, [
+                'installation_type',
+                'installationType',
+                'vehicle_installation_type'
+            ]));
         }
-        $displayPersonType = trim((string) ($installation['installation_type'] ?? ''));
+        $displayPersonType = trim((string) customerVerificationFirstValue($installation, [
+            'installation_type',
+            'installationType',
+            'vehicle_installation_type'
+        ]));
         if ($displayPersonType === '') {
-            $displayPersonType = trim((string) ($installation['installation_person_type'] ?? ''));
+            $displayPersonType = $personType;
         }
-        $personId = (int) ($installation['installation_person_id'] ?? 0);
+        $personId = (int) customerVerificationFirstValue($installation, [
+            'installation_person_id',
+            'installationPersonId',
+            'person_id',
+            'personId'
+        ]);
         $personTable = stripos($personType, 'dealer') !== false ? 'dealers' : 'technicians';
         $personLabelColumn = $personTable === 'dealers' ? 'dealer_name' : 'technician_name';
-        $installationPerson = trim((string) ($installation['installation_person'] ?? ''));
+        $installationPerson = trim((string) customerVerificationFirstValue($installation, [
+            'installation_person',
+            'installationPerson',
+            'person_name'
+        ]));
 
 if ($installationPerson === '') {
     $installationPerson = strcasecmp($personType, 'Direct') === 0
@@ -840,19 +953,27 @@ if ($installationPerson === '') {
         ) ?? '');
 }
 
-$leadClosure = trim((string) ($installation['lead_closure'] ?? ''));
+$leadClosure = trim((string) customerVerificationFirstValue($installation, [
+    'lead_closure_by',
+    'leadClosureBy',
+    'lead_closure',
+    'leadClosure'
+]));
 
 if ($leadClosure === '') {
     $leadClosure = customerVerificationLookup(
         $conn,
         'lead_closures',
         'lead_closure_name',
-        (int) ($installation['lead_closure_id'] ?? 0)
+        (int) customerVerificationFirstValue($installation, ['lead_closure_id', 'leadClosureId'])
     ) ?? '';
 }
         $displayInstallations[] = [
-            'Vehicle' => $vehicleLabel,
-            
+    'Installation Type' => $displayPersonType,
+    'Installation Person' => $installationPerson !== '' ? $installationPerson : null,
+    'Installation Person Type' => $personType,
+    'Lead Closure By' => $leadClosure !== '' ? $leadClosure : null,
+    'Installation Date' => customerVerificationFirstValue($installation, ['installation_date', 'installationDate'])
         ];
     }
 
@@ -866,10 +987,7 @@ if ($leadClosure === '') {
     }
 
     $actualPayment = null;
-    if ($customerId > 0
-        && $source !== 'payment_installment'
-        && $source !== 'courier'
-        && (!is_array($payment1) || !is_array($payment2))) {
+    if ($customerId > 0 && $source !== 'payment_installment' && $source !== 'courier') {
         if ($vehicleId > 0) {
             $actualPayment = customerVerificationLoadPayment($conn, $customerId, 0, $vehicleId);
         }
@@ -892,7 +1010,12 @@ if ($leadClosure === '') {
         );
     }
     if (is_array($payment1)) {
-        $displayPaymentPart1[] = customerVerificationPayment($payment1, $vehicleLabel, false);
+        $displayPaymentPart1[] = customerVerificationPayment(
+            $payment1,
+            $vehicleLabel,
+            false,
+            $source === 'crm_installation'
+        );
     }
     if (is_array($payment2)) {
         $displayPaymentPart2[] = customerVerificationPayment($payment2, $vehicleLabel, true);
@@ -932,7 +1055,12 @@ $resolvePaymentVehicle = static function (array $payment) use ($vehicleAssociati
 
 if (!$displayPaymentPart1 && is_array($topLevelPayment1)) {
     $payment1 = $topLevelPayment1;
-    $displayPaymentPart1[] = customerVerificationPayment($payment1, $resolvePaymentVehicle($payment1), false);
+    $displayPaymentPart1[] = customerVerificationPayment(
+        $payment1,
+        $resolvePaymentVehicle($payment1),
+        false,
+        $source === 'crm_installation'
+    );
 }
 if (!$displayPaymentPart2 && is_array($topLevelPayment2)) {
     $payment2 = $topLevelPayment2;
@@ -946,7 +1074,7 @@ if (!$vehicles && $linkedPayment && $source !== 'payment_installment' && $source
             'transaction_id' => $linkedPayment['transaction_id'] ?? null,
             'payment_mode' => $linkedPayment['payment_mode'] ?? null
         ]
-    ), null, false)];
+    ), null, false, $source === 'crm_installation')];
     $displayPaymentPart2 = [customerVerificationPayment(customerVerificationMergeMissing(
         is_array($topLevelPayment2) ? $topLevelPayment2 : [],
         [

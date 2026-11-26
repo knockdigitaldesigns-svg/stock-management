@@ -86,19 +86,22 @@ function crmLeadSetLifecycleStage($conn, int $leadId, string $stageName, array $
         'lead_stage_id' => $targetStageId,
         'lead_stage_name' => (string) $targetStage['stage_name']
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $actorId = (int) ($currentUser['user_id'] ?? 0);
-    $actorName = trim((string) ($currentUser['username'] ?? 'Unknown user'));
+    $actorId = (int) ($currentUser['auth_user_id'] ?? $currentUser['user_id'] ?? 0);
+    $representedUserId = !empty($currentUser['impersonating'])
+        ? (int) ($currentUser['represented_user_id'] ?? $currentUser['user_id'] ?? 0)
+        : null;
+    $actorName = trim((string) ($currentUser['auth_username'] ?? $currentUser['username'] ?? 'Unknown user'));
     $historyStmt = $conn->prepare(
         "INSERT INTO history
             (customer_id, module, action, field_changed, old_value, new_value,
-             changed_by_user_id, changed_by_name, changed_at)
+             changed_by_user_id, represented_by_user_id, changed_by_name, changed_at)
          VALUES (NULL, 'CRM Lead Workflow', 'Automatic Lead Stage Transition',
-                 'lead_stage_id', ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+                 'lead_stage_id', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
     );
     if (!$historyStmt) {
         throw new RuntimeException('Unable to prepare lead stage history: ' . $conn->error);
     }
-    $historyStmt->bind_param('ssis', $oldValue, $newValue, $actorId, $actorName);
+    $historyStmt->bind_param('ssiis', $oldValue, $newValue, $actorId, $representedUserId, $actorName);
     if (!$historyStmt->execute()) {
         $error = $historyStmt->error;
         $historyStmt->close();

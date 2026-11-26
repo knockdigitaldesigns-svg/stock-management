@@ -1,9 +1,11 @@
 <?php
 
+require_once __DIR__ . '/notifications.php';
+
 function crmLeadTransferBatch(
     mysqli $conn,
     array $leadIds,
-    int $employeeId,
+    int $targetUserId,
     int $transferredByUserId,
     string $reason,
     string $transferType,
@@ -14,29 +16,29 @@ function crmLeadTransferBatch(
     }
     sort($leadIds, SORT_NUMERIC);
 
-    $employeeStmt = $conn->prepare(
+    $targetUserStmt = $conn->prepare(
         "SELECT u.id
          FROM users u
          LEFT JOIN roles r ON r.id = u.role_id
          WHERE u.id = ?
            AND LOWER(COALESCE(u.status, 'active')) = 'active'
-           AND LOWER(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, ''))) = 'employee'
+           AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
          LIMIT 1
          FOR UPDATE"
     );
-    if (!$employeeStmt) {
-        throw new RuntimeException('Unable to prepare transfer employee validation: ' . $conn->error);
+    if (!$targetUserStmt) {
+        throw new RuntimeException('Unable to prepare transfer destination validation: ' . $conn->error);
     }
-    $employeeStmt->bind_param('i', $employeeId);
-    if (!$employeeStmt->execute()) {
-        $error = $employeeStmt->error;
-        $employeeStmt->close();
-        throw new RuntimeException('Unable to validate transfer employee: ' . $error);
+    $targetUserStmt->bind_param('i', $targetUserId);
+    if (!$targetUserStmt->execute()) {
+        $error = $targetUserStmt->error;
+        $targetUserStmt->close();
+        throw new RuntimeException('Unable to validate transfer destination: ' . $error);
     }
-    $employeeExists = $employeeStmt->get_result()->num_rows === 1;
-    $employeeStmt->close();
-    if (!$employeeExists) {
-        throw new DomainException('Select an active Employee account as the transfer destination.');
+    $targetUserExists = $targetUserStmt->get_result()->num_rows === 1;
+    $targetUserStmt->close();
+    if (!$targetUserExists) {
+        throw new DomainException('Select an active eligible user account as the transfer destination.');
     }
 
     $hasSoftDeleteSchema = crmLeadsHasSoftDeleteSchema($conn);
@@ -111,11 +113,11 @@ function crmLeadTransferBatch(
             ];
             continue;
         }
-        if ($previousEmployeeId === $employeeId) {
+        if ($previousEmployeeId === $targetUserId) {
             $failures[] = [
                 'lead_id' => $leadId,
                 'lead_name' => (string) $lead['lead_name'],
-                'reason' => 'The lead is already assigned to the selected Employee.'
+                'reason' => 'The lead is already assigned to the selected user.'
             ];
             continue;
         }
@@ -133,7 +135,7 @@ function crmLeadTransferBatch(
     foreach ($validatedLeads as $lead) {
         $leadId = (int) $lead['id'];
         $previousEmployeeId = (int) $lead['previous_employee_id'];
-        $updateStmt->bind_param('iiii', $employeeId, $transferredByUserId, $leadId, $previousEmployeeId);
+        $updateStmt->bind_param('iiii', $targetUserId, $transferredByUserId, $leadId, $previousEmployeeId);
         if (!$updateStmt->execute() || $updateStmt->affected_rows !== 1) {
             $error = $updateStmt->error ?: 'The current lead assignment changed during transfer.';
             $leadStmt->close();
@@ -145,7 +147,7 @@ function crmLeadTransferBatch(
             'iiiiss',
             $leadId,
             $previousEmployeeId,
-            $employeeId,
+            $targetUserId,
             $transferredByUserId,
             $reason,
             $transferType
@@ -157,6 +159,39 @@ function crmLeadTransferBatch(
             $historyStmt->close();
             throw new RuntimeException('Unable to record transfer history for lead #' . $leadId . ': ' . $error);
         }
+
+        $transferHistoryId = (int) $historyStmt->insert_id;
+        if ($transferHistoryId <= 0) {
+            $leadStmt->close();
+            $updateStmt->close();
+            $historyStmt->close();
+            throw new RuntimeException('Unable to identify transfer history for lead #' . $leadId . '.');
+        }
+        $leadName = trim((string) ($lead['lead_name'] ?? 'Lead #' . $leadId));
+        crmCreateNotification(
+            $conn,
+            $previousEmployeeId,
+            'lead_transferred_from_you',
+            'Lead Transferred from You',
+            'Lead ' . $leadName . ' was transferred to another user.',
+            'Normal',
+            'lead',
+            $leadId,
+            'lead_transferred_from:' . $transferHistoryId . ':' . $previousEmployeeId,
+            $leadId
+        );
+        crmCreateNotification(
+            $conn,
+            $targetUserId,
+            'lead_transferred_to_you',
+            'Lead Transferred to You',
+            'Lead ' . $leadName . ' was transferred to you.',
+            'High',
+            'lead',
+            $leadId,
+            'lead_transferred_to:' . $transferHistoryId . ':' . $targetUserId,
+            $leadId
+        );
     }
 
     $leadStmt->close();

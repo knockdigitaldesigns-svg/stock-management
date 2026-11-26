@@ -155,8 +155,11 @@ function crmClosureCanViewAllLeads($userId) {
 }
 
 function crmClosureWriteHistory($conn, $leadId, $action, $oldValue, $newValue, $currentUser) {
-    $actorId = (int) ($currentUser['user_id'] ?? 0);
-    $actorName = trim((string) ($currentUser['username'] ?? 'Unknown user'));
+    $actorId = (int) ($currentUser['auth_user_id'] ?? $currentUser['user_id'] ?? 0);
+    $representedUserId = !empty($currentUser['impersonating'])
+        ? (int) ($currentUser['represented_user_id'] ?? $currentUser['user_id'] ?? 0)
+        : null;
+    $actorName = trim((string) ($currentUser['auth_username'] ?? $currentUser['username'] ?? 'Unknown user'));
     $oldJson = $oldValue === null ? null : json_encode($oldValue, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (is_array($newValue)) {
         $newValue['lead_id'] = $leadId;
@@ -165,14 +168,14 @@ function crmClosureWriteHistory($conn, $leadId, $action, $oldValue, $newValue, $
     $stmt = $conn->prepare(
         "INSERT INTO history
             (customer_id, module, action, field_changed, old_value, new_value,
-             changed_by_user_id, changed_by_name, changed_at)
-         VALUES (NULL, 'CRM Lead Workflow', ?, 'lead_id', ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+             changed_by_user_id, represented_by_user_id, changed_by_name, changed_at)
+         VALUES (NULL, 'CRM Lead Workflow', ?, 'lead_id', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
     );
     if (!$stmt) {
         throw new RuntimeException('Unable to prepare CRM workflow history: ' . $conn->error);
     }
     $newJson = $newJson ?? json_encode(['lead_id' => $leadId]);
-    $stmt->bind_param('sssis', $action, $oldJson, $newJson, $actorId, $actorName);
+    $stmt->bind_param('sssiis', $action, $oldJson, $newJson, $actorId, $representedUserId, $actorName);
     if (!$stmt->execute()) {
         $error = $stmt->error;
         $stmt->close();

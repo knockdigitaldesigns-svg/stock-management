@@ -9,7 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 $currentUser = authenticate();
-requirePermission('crm_installations.assign');
+requireAnyPermission(['crm_installations.assign', 'crm_installations.manage']);
 crmClosureRequireAdminRole((int) ($currentUser['user_id'] ?? 0));
 $conn = (new Database())->getConnection();
 if (!$conn) {

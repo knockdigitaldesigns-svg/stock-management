@@ -2,8 +2,9 @@
 
 function auditActor(array $user): array
 {
+    $actorId = (int) ($user['auth_user_id'] ?? $user['user_id'] ?? 0);
     return [
-        'id' => (int) ($user['user_id'] ?? 0),
+        'id' => $actorId,
         'name' => (string) ($user['username'] ?? 'Unknown user')
     ];
 }
@@ -79,11 +80,14 @@ function writeAudit(mysqli $conn, int $recordId, string $module, string $action,
     }
     $old = auditValue($oldValue);
     $new = auditValue($newValue);
-    $stmt = $conn->prepare('INSERT INTO history (customer_id, module, action, field_changed, old_value, new_value, changed_by_user_id, changed_by_name, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)');
+    $representedUserId = !empty($user['impersonating'])
+        ? (int) ($user['represented_user_id'] ?? $user['user_id'] ?? 0)
+        : null;
+    $stmt = $conn->prepare('INSERT INTO history (customer_id, module, action, field_changed, old_value, new_value, changed_by_user_id, represented_by_user_id, changed_by_name, changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)');
     if (!$stmt) {
         throw new RuntimeException('Unable to prepare audit history insert: ' . $conn->error);
     }
-    $stmt->bind_param('isssssis', $recordId, $module, $action, $field, $old, $new, $actor['id'], $actor['name']);
+    $stmt->bind_param('isssssiis', $recordId, $module, $action, $field, $old, $new, $actor['id'], $representedUserId, $actor['name']);
     if (!$stmt->execute()) {
         $error = $stmt->error;
         $stmt->close();

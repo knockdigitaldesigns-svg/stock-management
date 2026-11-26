@@ -12,11 +12,12 @@ require_once __DIR__ . '/../crm_leads/access.php';
 
 handlePreflight();
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') sendResponse(false, 'Method not allowed', [], [], 405);
+$currentUser = authenticate();
 requirePermission('history.view');
 
 $conn = (new Database())->getConnection();
 if (!$conn) sendResponse(false, 'Database connection failed.', [], [], 500);
-$userId = (int) (getCurrentUserFromToken()['user_id'] ?? 0);
+$userId = (int) ($currentUser['user_id'] ?? 0);
 $canViewAllLeads = crmLeadsCanViewAll($userId, $conn);
 $activeLeadCondition = crmLeadsHasSoftDeleteSchema($conn)
     ? ' AND workflow_lead.deleted_at IS NULL'
@@ -159,16 +160,18 @@ if (!$canViewAllLeads) {
 }
 
 $condition = $where ? ' WHERE ' . implode(' AND ', $where) : '';
-$from = ' FROM history h LEFT JOIN users u ON u.id = h.changed_by_user_id';
+$from = ' FROM history h
+          LEFT JOIN users u ON u.id = h.changed_by_user_id
+          LEFT JOIN users represented_user ON represented_user.id = h.represented_by_user_id';
 
 /*
  * Paginate history GROUPS in SQL instead of loading all 70k+ history rows
  * into PHP memory. A group is identified using the same fields as the UI:
  * changed_at, module, action, customer_id, and changed_by_user_id.
  */
-$groupBaseSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id'
+$groupBaseSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, h.represented_by_user_id'
     . $from . $condition
-    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id';
+    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, h.represented_by_user_id';
 
 $countSql = 'SELECT COUNT(*) AS total FROM (' . $groupBaseSql . ') AS history_groups';
 $countStmt = $conn->prepare($countSql);
@@ -185,9 +188,9 @@ $countStmt->close();
 $totalPages = max(1, (int) ceil($total / $pageSize));
 $page = min($page, $totalPages);
 $offset = ($page - 1) * $pageSize;
-$pageGroupsSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, MAX(h.id) AS latest_id'
+$pageGroupsSql = 'SELECT h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, h.represented_by_user_id, MAX(h.id) AS latest_id'
     . $from . $condition
-    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id'
+    . ' GROUP BY h.changed_at, h.module, h.action, h.customer_id, h.changed_by_user_id, h.represented_by_user_id'
     . ' ORDER BY h.changed_at DESC, latest_id DESC LIMIT ? OFFSET ?';
 $pageGroupsStmt = $conn->prepare($pageGroupsSql);
 if (!$pageGroupsStmt) {
@@ -214,20 +217,21 @@ if ($selectedGroups) {
     $groupParams = [];
     $groupTypes = '';
     foreach ($selectedGroups as $selectedGroup) {
-        $groupConditions[] = '(h.changed_at = ? AND h.module = ? AND h.action = ? AND h.customer_id <=> ? AND h.changed_by_user_id <=> ?)';
+        $groupConditions[] = '(h.changed_at = ? AND h.module = ? AND h.action = ? AND h.customer_id <=> ? AND h.changed_by_user_id <=> ? AND h.represented_by_user_id <=> ?)';
         $groupParams[] = $selectedGroup['changed_at'];
         $groupParams[] = $selectedGroup['module'];
         $groupParams[] = $selectedGroup['action'];
         $groupParams[] = $selectedGroup['customer_id'];
         $groupParams[] = $selectedGroup['changed_by_user_id'];
-        $groupTypes .= 'sssss';
+        $groupParams[] = $selectedGroup['represented_by_user_id'];
+        $groupTypes .= 'ssssss';
     }
     if (!$canViewAllLeads) {
         $groupParams[] = $userId;
         $groupTypes .= 'i';
     }
 
-    $recordsSql = 'SELECT h.id, h.customer_id, h.module, h.action, h.field_changed, h.old_value, h.new_value, h.changed_by_user_id, h.changed_by_name, u.username AS changed_by_username, h.changed_at'
+    $recordsSql = 'SELECT h.id, h.customer_id, h.module, h.action, h.field_changed, h.old_value, h.new_value, h.changed_by_user_id, h.represented_by_user_id, h.changed_by_name, u.username AS changed_by_username, COALESCE(NULLIF(represented_user.employee_name, \'\'), represented_user.username) AS represented_by_username, h.changed_at'
         . $from . ' WHERE (' . implode(' OR ', $groupConditions) . ')'
         . (!$canViewAllLeads
             ? " AND (
@@ -256,7 +260,8 @@ if ($selectedGroups) {
             $row['module'],
             $row['action'],
             $row['customer_id'] ?? '',
-            $row['changed_by_user_id'] ?? ''
+            $row['changed_by_user_id'] ?? '',
+            $row['represented_by_user_id'] ?? ''
         ]);
         if (!isset($groups[$key])) {
             $groups[$key] = [
@@ -265,6 +270,8 @@ if ($selectedGroups) {
                 'module' => $row['module'],
                 'action' => $row['action'],
                 'changed_by_user_id' => $row['changed_by_user_id'],
+                'represented_by_user_id' => $row['represented_by_user_id'],
+                'represented_by_username' => $row['represented_by_username'],
                 'changed_by_name' => $row['changed_by_name'],
                 'changed_by_username' => $row['changed_by_username'],
                 'changed_at' => $row['changed_at'],

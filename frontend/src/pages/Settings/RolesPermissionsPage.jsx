@@ -17,30 +17,52 @@ const PERMISSION_COLUMNS = [
     'view',
     'add',
     'assign',
+    'manage',
     'edit',
     'delete',
     'import',
     'export',
+    'download',
     'update',
     'approve',
     'activate',
     'transfer',
-    'bulk_transfer'
+    'bulk_transfer',
+    'status',
+    'review',
+    'renew',
+    'history',
+    'close',
+    'qa_view',
+    'qa_manage',
+    'self_view',
+    'settings'
 ];
 
 const PERMISSION_COLUMN_LABELS = {
     view: 'View',
     add: 'Add',
     assign: 'Assign',
+    manage: 'Manage',
     edit: 'Edit',
     delete: 'Delete',
     import: 'Bulk Upload',
     export: 'Export',
+    download: 'Download',
     update: 'Update',
     approve: 'Approve',
     activate: 'Activate',
     transfer: 'Transfer',
-    bulk_transfer: 'Bulk Transfer'
+    bulk_transfer: 'Bulk Transfer',
+    status: 'Status',
+    review: 'Review',
+    renew: 'Renew',
+    history: 'History',
+    close: 'Close',
+    qa_view: 'QA View',
+    qa_manage: 'QA Manage',
+    self_view: 'Self View',
+    settings: 'Settings'
 };
 
 const EXACT_MODULE_PERMISSIONS = [
@@ -56,7 +78,8 @@ const EXACT_MODULE_PERMISSIONS = [
             view: ['sims.view'],
             add: ['sims.add'],
             edit: ['sims.edit'],
-            delete: ['sims.delete']
+            delete: ['sims.delete'],
+            export: ['sims.export']
         }
     },
     {
@@ -65,7 +88,8 @@ const EXACT_MODULE_PERMISSIONS = [
             view: ['devices.view'],
             add: ['devices.add'],
             edit: ['devices.edit'],
-            delete: ['devices.delete']
+            delete: ['devices.delete'],
+            export: ['devices.export']
         }
     },
     {
@@ -82,7 +106,8 @@ const EXACT_MODULE_PERMISSIONS = [
             add: ['dealers.add'],
             import: ['dealers.import'],
             edit: ['dealers.edit'],
-            delete: ['dealers.delete']
+            delete: ['dealers.delete'],
+            export: ['dealers.export']
         }
     },
     {
@@ -92,7 +117,8 @@ const EXACT_MODULE_PERMISSIONS = [
             add: ['technicians.add'],
             import: ['technicians.import'],
             edit: ['technicians.edit'],
-            delete: ['technicians.delete']
+            delete: ['technicians.delete'],
+            export: ['technicians.export']
         }
     },
     {
@@ -117,7 +143,8 @@ const EXACT_MODULE_PERMISSIONS = [
             view: ['stock_management.view', 'stock.view'],
             edit: ['stock_management.edit'],
             delete: ['stock_management.delete'],
-            update: ['stock_management.update', 'stock.update']
+            update: ['stock_management.update', 'stock.update'],
+            export: ['stock.export']
         }
     },
     {
@@ -155,7 +182,8 @@ const EXACT_MODULE_PERMISSIONS = [
             add: ['customers.add', 'customer_details.add'],
             edit: ['customers.edit', 'customer_details.edit'],
             delete: ['customers.delete', 'customer_details.delete'],
-            export: ['customers.export', 'customer_details.export']
+            export: ['customers.export', 'customer_details.export'],
+            update: ['customers.update']
         }
     },
     {
@@ -170,7 +198,9 @@ const EXACT_MODULE_PERMISSIONS = [
         actions: {
             view: ['renewals.view', 'customer_renewals.view'],
             edit: ['renewals.edit', 'customer_renewals.edit'],
-            delete: ['renewals.delete', 'customer_renewals.delete']
+            delete: ['renewals.delete', 'customer_renewals.delete'],
+            renew: ['customer_renewals.renew'],
+            history: ['customer_renewals.history']
         }
     },
     {
@@ -186,7 +216,10 @@ const EXACT_MODULE_PERMISSIONS = [
             add: ['support.add'],
             assign: ['support.assign'],
             edit: ['support.edit'],
-            delete: ['support.delete']
+            delete: ['support.delete'],
+            close: ['support.close'],
+            qa_view: ['support.qa.view'],
+            qa_manage: ['support.qa.manage']
         }
     },
     {
@@ -265,7 +298,8 @@ const EXACT_MODULE_PERMISSIONS = [
             view: ['users.view', 'add_user.view'],
             add: ['users.add', 'add_user.add'],
             edit: ['users.edit', 'add_user.edit'],
-            delete: ['users.delete', 'add_user.delete']
+            delete: ['users.delete', 'add_user.delete'],
+            status: ['users.status']
         }
     },
     {
@@ -280,6 +314,62 @@ const EXACT_MODULE_PERMISSIONS = [
         actions: {
             view: ['sim_lifecycle.view'],
             add: ['sim_lifecycle.add', 'sim_lifecycle.edit']
+        }
+    },
+    {
+        name: 'Attendance',
+        actions: {
+            view: ['attendance.view'],
+            self_view: ['attendance.self.view'],
+            settings: ['attendance.settings']
+        }
+    },
+    {
+        name: 'Employee Working Reports',
+        actions: {
+            view: ['employee_working_reports.view'],
+            self_view: ['employee_working_reports.own.view'],
+            download: ['employee_working_reports.download']
+        }
+    },
+    {
+        name: 'Customer Payment Verification',
+        actions: {
+            review: ['customer_payment_verification.review']
+        }
+    },
+    {
+        name: 'CRM Pipelines',
+        actions: {
+            view: ['crm_pipelines.view'],
+            add: ['crm_pipelines.add'],
+            edit: ['crm_pipelines.edit'],
+            delete: ['crm_pipelines.delete']
+        }
+    },
+    {
+        name: 'CRM Campaigns',
+        actions: {
+            view: ['crm_campaigns.view'],
+            add: ['crm_campaigns.add'],
+            edit: ['crm_campaigns.edit'],
+            delete: ['crm_campaigns.delete']
+        }
+    },
+    {
+        name: 'CRM Lead Status Master',
+        actions: {
+            view: ['crm_lead_status.view'],
+            add: ['crm_lead_status.add'],
+            edit: ['crm_lead_status.edit'],
+            activate: ['crm_lead_status.activate']
+        }
+    },
+    {
+        name: 'Lead Management & Distribution',
+        actions: {
+            view: ['crm_leads.view'],
+            assign: ['crm_leads.assign']
         }
     },
     {
@@ -309,6 +399,12 @@ const EXACT_MODULE_PERMISSIONS = [
         }
     },
     {
+        name: 'CRM Notifications',
+        actions: {
+            view: ['crm_notifications.view']
+        }
+    },
+    {
         name: 'Follow-ups',
         actions: {
             view: ['crm_followups.view'],
@@ -319,15 +415,18 @@ const EXACT_MODULE_PERMISSIONS = [
     {
         name: 'Lead Converter & Form Approval',
         actions: {
+            view: ['crm_closures.view'],
             add: ['crm_closures.add'],
+            edit: ['crm_closures.edit'],
             approve: ['crm_closures.approve']
         }
     },
     {
-        name: 'Installation Assignments',
+        name: 'Installation Management',
         actions: {
             view: ['crm_installations.view'],
-            edit: ['crm_installations.assign']
+            assign: ['crm_installations.assign'],
+            manage: ['crm_installations.manage']
         }
     }
 ];

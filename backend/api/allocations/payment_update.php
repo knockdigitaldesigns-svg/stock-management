@@ -14,7 +14,7 @@ requireAnyPermission([
     'stock.update'
 ]);
 
-$currentUser = getCurrentUserFromToken();
+$currentUser = authenticate();
 $data = json_decode(file_get_contents('php://input'), true) ?: [];
 $allocationId = (int) ($data['allocation_id'] ?? 0);
 if ($allocationId <= 0) {

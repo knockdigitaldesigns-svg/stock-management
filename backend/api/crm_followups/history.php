@@ -45,6 +45,52 @@ $cancellationSelect = $hasCancellationColumn
 $cancellationReasonSelect = $hasCancellationReasonColumn
     ? 'f.cancellation_reason'
     : 'NULL AS cancellation_reason';
+$activeScheduleCondition = $hasCancellationColumn
+    ? ' AND schedule.cancelled_at IS NULL'
+    : '';
+$latestActivityCondition = "NOT EXISTS (
+    SELECT 1
+    FROM crm_lead_followups later
+    WHERE later.lead_id = f.lead_id
+      AND (
+          later.completed_at > f.completed_at
+          OR (later.completed_at = f.completed_at AND later.id > f.id)
+      )
+      AND NOT (
+          later.call_outcome IS NULL
+          AND COALESCE(later.remarks, '') = 'Scheduled during lead assignment'
+      )
+)";
+$nextFollowupDateSelect = "CASE
+    WHEN f.next_followup_date IS NOT NULL THEN f.next_followup_date
+    WHEN f.completed_at IS NOT NULL AND {$latestActivityCondition} THEN (
+        SELECT schedule.next_followup_date
+        FROM crm_lead_followups schedule
+        WHERE schedule.lead_id = f.lead_id
+          AND schedule.completed_at IS NULL
+          AND schedule.call_outcome IS NULL
+          AND schedule.remarks = 'Scheduled during lead assignment'
+          AND schedule.next_followup_date IS NOT NULL{$activeScheduleCondition}
+        ORDER BY schedule.created_at DESC, schedule.id DESC
+        LIMIT 1
+    )
+    ELSE NULL
+END AS next_followup_date";
+$nextFollowupTimeSelect = "CASE
+    WHEN f.next_followup_time IS NOT NULL THEN f.next_followup_time
+    WHEN f.completed_at IS NOT NULL AND {$latestActivityCondition} THEN (
+        SELECT schedule.next_followup_time
+        FROM crm_lead_followups schedule
+        WHERE schedule.lead_id = f.lead_id
+          AND schedule.completed_at IS NULL
+          AND schedule.call_outcome IS NULL
+          AND schedule.remarks = 'Scheduled during lead assignment'
+          AND schedule.next_followup_date IS NOT NULL{$activeScheduleCondition}
+        ORDER BY schedule.created_at DESC, schedule.id DESC
+        LIMIT 1
+    )
+    ELSE NULL
+END AS next_followup_time";
 
 $activeLeadCondition = crmLeadsHasSoftDeleteSchema($conn)
     ? ' AND deleted_at IS NULL'
@@ -121,8 +167,8 @@ $historyStmt = $conn->prepare(
                 ELSE NULL
             END AS connection_result,
             f.remarks,
-            CASE WHEN f.completed_at IS NULL THEN f.next_followup_date ELSE NULL END AS next_followup_date,
-            CASE WHEN f.completed_at IS NULL THEN f.next_followup_time ELSE NULL END AS next_followup_time,
+            {$nextFollowupDateSelect},
+            {$nextFollowupTimeSelect},
             f.completed_at, {$cancellationSelect}, {$cancellationReasonSelect},
             {$closureReasonSelect}, f.updated_by_user_id, f.created_at,
             s.status_name, s.color AS status_color,

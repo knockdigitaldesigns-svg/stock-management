@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../utils/attendance.php';
+require_once __DIR__ . '/../utils/account_impersonation.php';
 
 define('SESSION_INACTIVITY_TIMEOUT_SECONDS', 900);
 
@@ -132,6 +133,9 @@ function authenticate() {
                 if (hash_equals((string) ($lockedSession['active_session_id'] ?? ''), $sessionId)) {
                     closeAttendanceSession($conn, $sessionId, $actualLogoutAt, 'Auto');
                 }
+                if (isSuperAdminUser(null, (string) ($payload['role'] ?? ''))) {
+                    accountImpersonationEnd($conn, $userId, $sessionId, 'session_expired');
+                }
                 $clearSession = $conn->prepare(
                     'UPDATE users
                      SET active_session_id = NULL, active_session_created_at = NULL, active_session_expires_at = NULL
@@ -157,12 +161,57 @@ function authenticate() {
                 $conn->close();
                 sendResponse(false, 'Unable to close expired session.', [], [], 500);
             }
+        } elseif (isSuperAdminUser(null, (string) ($payload['role'] ?? ''))) {
+            try {
+                accountImpersonationEnd($conn, $userId, $sessionId, 'session_invalidated');
+            } catch (Throwable $error) {
+                error_log('Unable to close invalidated account-switch context: ' . $error->getMessage());
+            }
         }
         $conn->close();
         $message = $sessionMatches && $sessionExpired
             ? 'Session expired due to inactivity.'
             : 'Your session is no longer valid.';
         sendResponse(false, $message, [], [], 401);
+    }
+
+    $mayImpersonate = isSuperAdminUser(null, (string) ($payload['role'] ?? ''));
+    $payload['auth_user_id'] = $userId;
+    $payload['auth_username'] = (string) ($payload['username'] ?? 'Unknown user');
+    $payload['impersonating'] = false;
+    if ($mayImpersonate) {
+        try {
+            $switch = accountImpersonationFindActive($conn, $userId, $sessionId);
+            if ($switch) {
+                $actor = accountImpersonationLoadUser($conn, $userId);
+                $representedUserId = (int) $switch['represented_user_id'];
+                $represented = accountImpersonationLoadUser($conn, $representedUserId);
+                $actorIsAuthorized = $actor
+                    && strtolower(trim((string) ($actor['status'] ?? 'active'))) === 'active'
+                    && strtolower(trim((string) ($actor['role_status'] ?? 'active'))) === 'active'
+                    && accountImpersonationIsSuperAdminRole((string) ($actor['role_name'] ?? ''));
+                if (!$actorIsAuthorized || !$represented || !accountImpersonationUserIsEligible($represented)) {
+                    accountImpersonationEnd($conn, $userId, $sessionId, 'account_ineligible');
+                    $conn->close();
+                    sendResponse(false, 'The switched account is no longer eligible. Return to your Super Admin account.', [], [], 403);
+                }
+                $payload['user_id'] = $representedUserId;
+                $payload['username'] = (string) $represented['username'];
+                $payload['role'] = (string) $represented['role_name'];
+                $payload['role_name'] = (string) $represented['role_name'];
+                $payload['role_id'] = (int) ($represented['role_id'] ?? 0);
+                $payload['employee_name'] = (string) ($represented['employee_name'] ?: $represented['username']);
+                $payload['impersonating'] = true;
+                $payload['acting_user_id'] = $userId;
+                $payload['represented_user_id'] = $representedUserId;
+                $payload['auth_username'] = (string) $actor['username'];
+                $payload['switch_started_at'] = (string) $switch['started_at'];
+            }
+        } catch (Throwable $error) {
+            error_log('Unable to validate account-switch context: ' . $error->getMessage());
+            $conn->close();
+            sendResponse(false, 'Unable to validate account context.', [], [], 500);
+        }
     }
 
     $conn->close();
@@ -338,6 +387,14 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'crm_lead_stage.add' => ['permission_name' => 'CRM Lead Stage Add', 'module' => 'crm_lead_stage', 'action' => 'ADD'],
         'crm_lead_stage.edit' => ['permission_name' => 'CRM Lead Stage Edit', 'module' => 'crm_lead_stage', 'action' => 'EDIT'],
         'crm_lead_stage.activate' => ['permission_name' => 'CRM Lead Stage Activate', 'module' => 'crm_lead_stage', 'action' => 'ACTIVATE'],
+        'crm_pipelines.view' => ['permission_name' => 'CRM Pipelines View', 'module' => 'crm_pipelines', 'action' => 'VIEW'],
+        'crm_pipelines.add' => ['permission_name' => 'CRM Pipelines Add', 'module' => 'crm_pipelines', 'action' => 'ADD'],
+        'crm_pipelines.edit' => ['permission_name' => 'CRM Pipelines Edit', 'module' => 'crm_pipelines', 'action' => 'EDIT'],
+        'crm_pipelines.delete' => ['permission_name' => 'CRM Pipelines Delete', 'module' => 'crm_pipelines', 'action' => 'DELETE'],
+        'crm_campaigns.view' => ['permission_name' => 'CRM Campaigns View', 'module' => 'crm_campaigns', 'action' => 'VIEW'],
+        'crm_campaigns.add' => ['permission_name' => 'CRM Campaigns Add', 'module' => 'crm_campaigns', 'action' => 'ADD'],
+        'crm_campaigns.edit' => ['permission_name' => 'CRM Campaigns Edit', 'module' => 'crm_campaigns', 'action' => 'EDIT'],
+        'crm_campaigns.delete' => ['permission_name' => 'CRM Campaigns Delete', 'module' => 'crm_campaigns', 'action' => 'DELETE'],
         'crm_leads.view' => ['permission_name' => 'CRM Leads View', 'module' => 'crm_leads', 'action' => 'VIEW'],
         'crm_leads.add' => ['permission_name' => 'CRM Leads Add', 'module' => 'crm_leads', 'action' => 'ADD'],
         'crm_leads.edit' => ['permission_name' => 'CRM Leads Edit', 'module' => 'crm_leads', 'action' => 'EDIT'],
@@ -350,8 +407,17 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'crm_followups.view' => ['permission_name' => 'CRM Follow-ups View', 'module' => 'crm_followups', 'action' => 'VIEW'],
         'crm_followups.add' => ['permission_name' => 'CRM Follow-ups Add', 'module' => 'crm_followups', 'action' => 'ADD'],
         'crm_followups.edit' => ['permission_name' => 'CRM Follow-ups Edit', 'module' => 'crm_followups', 'action' => 'EDIT'],
+        'crm_closures.view' => ['permission_name' => 'CRM Closures View', 'module' => 'crm_closures', 'action' => 'VIEW'],
         'crm_closures.add' => ['permission_name' => 'CRM Lead Converter Add', 'module' => 'crm_closures', 'action' => 'ADD'],
-        'crm_closures.approve' => ['permission_name' => 'CRM Form Approval', 'module' => 'crm_closures', 'action' => 'APPROVE']
+        'crm_closures.edit' => ['permission_name' => 'CRM Closures Edit', 'module' => 'crm_closures', 'action' => 'EDIT'],
+        'crm_closures.approve' => ['permission_name' => 'CRM Form Approval', 'module' => 'crm_closures', 'action' => 'APPROVE'],
+        'crm_installations.view' => ['permission_name' => 'CRM Installations View', 'module' => 'crm_installations', 'action' => 'VIEW'],
+        'crm_installations.assign' => ['permission_name' => 'CRM Installations Assign', 'module' => 'crm_installations', 'action' => 'ASSIGN'],
+        'crm_installations.manage' => ['permission_name' => 'CRM Installations Manage', 'module' => 'crm_installations', 'action' => 'MANAGE'],
+        'crm_notifications.view' => ['permission_name' => 'CRM Notifications View', 'module' => 'crm_notifications', 'action' => 'VIEW'],
+        'employee_working_reports.view' => ['permission_name' => 'View Employee Working Reports', 'module' => 'employee_working_reports', 'action' => 'VIEW'],
+        'employee_working_reports.own.view' => ['permission_name' => 'View Own Employee Working Reports', 'module' => 'employee_working_reports', 'action' => 'OWN_VIEW'],
+        'employee_working_reports.download' => ['permission_name' => 'Download Employee Working Reports', 'module' => 'employee_working_reports', 'action' => 'DOWNLOAD']
     ];
 
     foreach ($permissionKeys as $key) {

@@ -168,8 +168,8 @@ const FollowupModal = ({ lead, mode, onClose, onSaved }) => {
                     call_outcome: savedOutcome,
                     closure_reason: selectedActivity?.closure_reason || '',
                     remarks: mode === 'update' ? selectedActivity?.remarks || '' : '',
-                    next_followup_date: parseDate(loadedLead.current_schedule?.next_followup_date),
-                    next_followup_time: loadedLead.current_schedule?.next_followup_time
+                    next_followup_date: mode === 'record' ? '' : parseDate(loadedLead.current_schedule?.next_followup_date),
+                    next_followup_time: mode === 'record' ? '' : loadedLead.current_schedule?.next_followup_time
                         ? String(loadedLead.current_schedule.next_followup_time).slice(0, 5)
                         : '',
                     connection: isNotConnected ? 'not-connected' : 'connected',
@@ -572,12 +572,13 @@ const FollowupModal = ({ lead, mode, onClose, onSaved }) => {
                                                 </span>
                                             </div>
                                             <p><b>Call connection:</b> {entry.connection_result || '—'}</p>
-                                            <p><b>Outcome / reason:</b> {entry.call_outcome || '—'}</p>
+                                            {entry.call_outcome && <p><b>Outcome / reason:</b> {entry.call_outcome}</p>}
                                             <p><b>Customer need:</b> {entry.customer_need || '—'}</p>
                                             <p><b>Remarks:</b> {entry.remarks || '—'}</p>
                                             <p><b>Next follow-up:</b> {entry.next_followup_date
                                                 ? `${formatDate(entry.next_followup_date)}${entry.next_followup_time ? ` ${String(entry.next_followup_time).slice(0, 5)}` : ''}`
                                                 : 'Not scheduled'}</p>
+                                            {entry.updated_by && <small>Recorded by {entry.updated_by}</small>}
                                             {entry.completed_at && <small>Completed {formatDateTime(entry.completed_at)}</small>}
                                         </li>
                                     ))}

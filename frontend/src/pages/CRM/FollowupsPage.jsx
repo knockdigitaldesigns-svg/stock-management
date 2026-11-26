@@ -380,6 +380,7 @@ const FollowupsPage = () => {
                                                     <small>Outcome / reason: {item.call_outcome}</small>
                                                 )}
                                                 {item.remarks && <small>{item.remarks}</small>}
+                                                {item.latest_activity_updated_by && <small>Recorded by {item.latest_activity_updated_by}</small>}
                                             </>
                                         )}
                                     </td>
@@ -408,12 +409,12 @@ const FollowupsPage = () => {
                                                         ...item,
                                                         id: item.lead_id,
                                                         followup_id: item.id,
-                                                        followup_mode: Number(item.is_assignment_schedule) === 1 ? 'record' : 'update'
+                                                        followup_mode: Number(item.is_scheduled_followup) === 1 ? 'record' : 'update'
                                                     })}
-                                                    title={`${Number(item.is_assignment_schedule) === 1 ? 'Record' : 'Edit'} follow-up for ${item.lead_name}`}
-                                                    aria-label={`${Number(item.is_assignment_schedule) === 1 ? 'Record' : 'Edit'} follow-up for ${item.lead_name}`}
+                                                    title={`${Number(item.is_scheduled_followup) === 1 ? 'Record' : 'Edit'} follow-up for ${item.lead_name}`}
+                                                    aria-label={`${Number(item.is_scheduled_followup) === 1 ? 'Record' : 'Edit'} follow-up for ${item.lead_name}`}
                                                 >
-                                                    {Number(item.is_assignment_schedule) === 1 ? 'Record' : 'Edit'}
+                                                    {Number(item.is_scheduled_followup) === 1 ? 'Record' : 'Edit'}
                                                 </button>
                                             )}
                                             {canConvert && item.lead_status_type === 'Resolved' && item.lead_status_state === 'Active' && (

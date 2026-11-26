@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate } from '../../utils/date';
 import FollowupModal from './FollowupModal';
+import WhatsAppButton from '../../components/WhatsAppButton/WhatsAppButton';
 import './LeadManagementPage.css';
 
 const leadSources = ['Manual', 'Facebook', 'Google', 'Instagram', 'Website', 'Other'];
@@ -434,12 +435,12 @@ const LeadManagementPage = ({ scope = 'all' }) => {
         try {
             const response = await api.get('/crm_leads/transfer_options.php');
             if (!response.data?.success) {
-                setTransferError(response.data?.message || 'Unable to load eligible Employees.');
+                setTransferError(response.data?.message || 'Unable to load eligible users.');
                 return;
             }
             setTransferEmployees(response.data.data?.employees || []);
         } catch (err) {
-            setTransferError(err.response?.data?.message || 'Unable to load eligible Employees.');
+            setTransferError(err.response?.data?.message || 'Unable to load eligible users.');
         } finally {
             setTransferOptionsLoading(false);
         }
@@ -456,7 +457,7 @@ const LeadManagementPage = ({ scope = 'all' }) => {
     const submitTransfer = async (event) => {
         event.preventDefault();
         if (!transferForm.employee_id || !transferForm.reason.trim()) {
-            setTransferError('Select an Employee and enter a transfer reason.');
+            setTransferError('Select a user and enter a transfer reason.');
             return;
         }
         setTransferLoading(true);
@@ -464,8 +465,8 @@ const LeadManagementPage = ({ scope = 'all' }) => {
             const confirmed = await confirm({
                 title: transferType === 'single' ? 'Confirm Lead Transfer' : 'Confirm Bulk Lead Transfer',
                 message: transferType === 'single'
-                    ? `Transfer "${transferLeads[0]?.lead_name}" to the selected Employee?`
-                    : `Transfer all ${transferLeads.length} selected leads to the selected Employee?`,
+                    ? `Transfer "${transferLeads[0]?.lead_name}" to the selected user?`
+                    : `Transfer all ${transferLeads.length} selected leads to the selected user?`,
                 confirmLabel: transferType === 'single' ? 'Transfer Lead' : 'Transfer Leads',
                 confirmClassName: 'btn-primary'
             });
@@ -974,6 +975,11 @@ const LeadManagementPage = ({ scope = 'all' }) => {
                                     <td>{formatDate(lead.created_at)}</td>
                                     <td>
                                         <div className="lead-row-actions">
+                                            <WhatsAppButton
+                                                className="lead-action-btn"
+                                                mobileNumber={lead.mobile_no}
+                                                recordName={lead.lead_name}
+                                            />
                                             <button type="button" className="lead-action-btn view" onClick={() => setSelectedLead(lead)} aria-label={`View ${lead.lead_name}`} title="View lead details">
                                                 <Eye size={17} />
                                             </button>
@@ -1186,10 +1192,10 @@ const LeadManagementPage = ({ scope = 'all' }) => {
                     </div>
                 )}
                 {transferOptionsLoading ? (
-                    <p className="lead-form-notice">Loading eligible Employees...</p>
+                    <p className="lead-form-notice">Loading eligible users...</p>
                 ) : availableTransferEmployees.length === 0 ? (
                     <div className="alert alert-warning lead-form-notice" role="alert">
-                        No different active Employee account is available as a transfer destination.
+                        No different active eligible user account is available as a transfer destination.
                     </div>
                 ) : null}
                 <form id="lead-transfer-form" className="lead-transfer-form" onSubmit={submitTransfer}>
@@ -1203,7 +1209,7 @@ const LeadManagementPage = ({ scope = 'all' }) => {
                             required
                             disabled={transferOptionsLoading}
                         >
-                            <option value="">Select Employee</option>
+                            <option value="">Select user</option>
                             {availableTransferEmployees.map((employee) => (
                                     <option key={employee.id} value={employee.id}>{employee.employee_name}</option>
                                 ))}

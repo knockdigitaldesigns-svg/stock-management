@@ -33,12 +33,13 @@ import {
 
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import { showGlobalError } from '../../context/ErrorContext';
 import './AdminLayout.css';
 
 const AdminLayout = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user, hasPermission, logout } = useAuth();
+    const { user, hasPermission, logout, isImpersonating, returnToOriginalAccount } = useAuth();
 
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -159,6 +160,21 @@ const AdminLayout = () => {
         navigate('/login');
     };
 
+    const handleReturnToSuperAdmin = async () => {
+        try {
+            await returnToOriginalAccount();
+            navigate('/dashboard');
+        } catch (error) {
+            showGlobalError(error.response?.data?.message || error.message || 'Unable to restore the Super Admin account.');
+        }
+    };
+
+    const currentRole = String(user?.role?.name || user?.role || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+    const isSuperAdmin = currentRole === 'superadmin';
+
     // =========================
     // MAIN PERMISSIONS
     // =========================
@@ -177,6 +193,10 @@ const AdminLayout = () => {
 
     const canViewMyAttendance =
         hasPermission('attendance.self.view');
+
+    const canViewEmployeeWorkingReports =
+        hasPermission('employee_working_reports.view') ||
+        hasPermission('employee_working_reports.own.view');
 
     const canViewDeviceMaintenance =
         hasPermission('devices.view');
@@ -918,6 +938,16 @@ const showCRM =
                         </NavLink>
                     )}
 
+                    {canViewEmployeeWorkingReports && (
+                        <NavLink
+                            to="/employee-working-reports"
+                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                        >
+                            <FileText size={20} />
+                            <span>Employee Working Reports</span>
+                        </NavLink>
+                    )}
+
                     {/* =========================================
                         SETTINGS
                     ========================================= */}
@@ -1234,6 +1264,22 @@ const showCRM =
                         {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
                     </button>
                     <div className="topbar-actions">
+                        {isImpersonating ? (
+                            <div className="account-mode-indicator" role="status">
+                                <span>Logged in as: {user?.employee_name || user?.username || 'Employee'}</span>
+                                <button type="button" className="account-mode-return" onClick={handleReturnToSuperAdmin}>
+                                    Back to Super Admin
+                                </button>
+                            </div>
+                        ) : isSuperAdmin ? (
+                            <button
+                                type="button"
+                                className="account-switch-button"
+                                onClick={() => navigate('/switch-account')}
+                            >
+                                Switch Account
+                            </button>
+                        ) : null}
                         <div className="notification-menu">
                             <button
                                 type="button"

@@ -10,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $currentUser = authenticate();
-requirePermission('crm_installations.assign');
+requireAnyPermission(['crm_installations.assign', 'crm_installations.manage']);
 $userId = (int) ($currentUser['user_id'] ?? 0);
 crmClosureRequireAdminRole($userId);
 $data = json_decode(file_get_contents('php://input'));

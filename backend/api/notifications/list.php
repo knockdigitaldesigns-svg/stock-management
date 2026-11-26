@@ -22,7 +22,8 @@ if (!$conn) {
 $visibilityCondition = crmNotificationLeadVisibilityCondition(
     'n',
     crmLeadsCanViewAll($userId, $conn),
-    crmLeadsHasSoftDeleteSchema($conn)
+    crmLeadsHasSoftDeleteSchema($conn),
+    userHasPermission($userId, 'crm_closures.approve')
 );
 $countStmt = $conn->prepare('SELECT COUNT(*) AS total FROM crm_notifications n WHERE n.user_id = ?' . $visibilityCondition);
 if ($visibilityCondition !== '') {

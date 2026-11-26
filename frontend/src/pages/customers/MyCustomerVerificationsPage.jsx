@@ -11,10 +11,10 @@ import './CustomerPaymentVerificationPage.css';
 const detailSections = [
     ['customer', 'Customer Details'],
     ['courier', 'Courier Request'],
-    ['vehicle', 'Vehicle Details'],
+    ['vehicle', 'Vehicle & Device Details'],
     ['installation', 'Installation Details'],
-    ['payment_part1', 'Payment Part 1'],
-    ['payment_part2', 'Payment Part 2']
+    ['payment_part1', 'Payment Details - Part 1'],
+    ['payment_part2', 'Payment Details - Part 2']
 ];
 const MY_VERIFICATION_RETURN_STATE_KEY = 'my_verification_return_state';
 
@@ -45,7 +45,7 @@ const getSectionData = (data, key) => {
 const formatValue = (value) => {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-    if (typeof value === 'object') return JSON.stringify(value);
+    if (typeof value === 'object') return '—';
     return String(value);
 };
 
@@ -527,7 +527,7 @@ const MyCustomerVerificationsPage = () => {
                         </div>
                         {detailSections.map(([key, title]) => {
                             const sectionData = getSectionData(selected.submission_data || {}, key);
-                            if (!sectionData) return null;
+                            if (!sectionData || (Array.isArray(sectionData) && sectionData.length === 0)) return null;
                             const entries = Array.isArray(sectionData) ? sectionData : [sectionData];
                             return (
                                 <section className="verification-section" key={key}>

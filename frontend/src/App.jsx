@@ -52,6 +52,8 @@ import RolesPermissionsPage
 
 import UsersPage
     from './pages/Settings/UsersPage';
+import SwitchAccountPage
+    from './pages/Settings/SwitchAccountPage';
 
 import DeviceAlertPage
     from './pages/DeviceAlert/DeviceAlertPage';
@@ -82,6 +84,7 @@ import HistoryPage from './pages/History/HistoryPage';
 import SupportPage from './pages/Support/SupportPage';
 import AttendancePage from './pages/Attendance/AttendancePage';
 import AttendanceSettingsPage from './pages/Attendance/AttendanceSettingsPage';
+import EmployeeWorkingReportsPage from './pages/Reports/EmployeeWorkingReportsPage';
 import PipelineManagementPage from './pages/CRM/PipelineManagementPage';
 import CampaignManagementPage from './pages/CRM/CampaignManagementPage';
 import CampaignReportPage from './pages/CRM/CampaignReportPage';
@@ -199,7 +202,20 @@ function App() {
 
                     <Route
                         path="dashboard"
-                        element={<Dashboard />}
+                        element={
+                            <ProtectedRoute permission="dashboard.view">
+                                <Dashboard />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="switch-account"
+                        element={
+                            <ProtectedRoute role={['Super Admin', 'super_admin', 'superadmin', 'super-admin']}>
+                                <SwitchAccountPage />
+                            </ProtectedRoute>
+                        }
                     />
 
                     <Route
@@ -225,6 +241,18 @@ function App() {
                         element={
                             <ProtectedRoute permission={['attendance.view', 'attendance.self.view']}>
                                 <AttendancePage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="employee-working-reports"
+                        element={
+                            <ProtectedRoute permission={[
+                                'employee_working_reports.view',
+                                'employee_working_reports.own.view'
+                            ]}>
+                                <EmployeeWorkingReportsPage />
                             </ProtectedRoute>
                         }
                     />

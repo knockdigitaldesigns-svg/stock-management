@@ -22,7 +22,7 @@ $employeeId = filter_var($data->employee_id ?? null, FILTER_VALIDATE_INT);
 $reason = trim((string) ($data->reason ?? ''));
 if ($userId <= 0 || $employeeId === false || $employeeId <= 0 ||
     $reason === '' || mb_strlen($reason) > 1000 || count($data->lead_ids) === 0) {
-    sendResponse(false, 'Select at least one lead, an active Employee, and a transfer reason of up to 1,000 characters.', [], [], 400);
+    sendResponse(false, 'Select at least one lead, an active eligible user, and a transfer reason of up to 1,000 characters.', [], [], 400);
 }
 
 $leadIds = [];
