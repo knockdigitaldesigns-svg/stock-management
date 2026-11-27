@@ -47,6 +47,7 @@ function historyDisplayValue($value, string $field, array $lookups, ?string $own
     if ($field === 'vehicle_type_id') return $lookups['vehicle_types'][$raw] ?? $raw;
     if ($field === 'device_model_id') return $lookups['device_types'][$raw] ?? $raw;
     if ($field === 'lead_closure_id') return $lookups['lead_closures'][$raw] ?? $raw;
+    if ($field === 'lead_closure_by_user_id') return $lookups['users'][$raw] ?? $raw;
     if ($field === 'customer_id') return $lookups['customers'][$raw] ?? $raw;
     if ($field === 'device_id') return $lookups['devices'][$raw] ?? $raw;
     if ($field === 'sim_id') return $lookups['sims'][$raw] ?? $raw;
@@ -84,6 +85,7 @@ function historyDisplaySnapshot(array $snapshot, array $lookups): array
                 'vehicle_type_id' => 'vehicle_type',
                 'device_model_id' => 'device_model',
                 'lead_closure_id' => 'lead_closure',
+                'lead_closure_by_user_id' => 'lead_closure_by_user',
                 'customer_id' => 'customer',
                 'device_id' => 'device',
                 'sim_id' => 'sim',

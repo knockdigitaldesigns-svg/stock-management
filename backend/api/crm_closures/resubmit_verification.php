@@ -36,6 +36,7 @@ $vehicleType = trim((string) ($vehicle['vehicle_type'] ?? ''));
 $deviceType = trim((string) ($vehicle['device_type'] ?? ''));
 $imei = trim((string) ($vehicle['imei_no'] ?? ''));
 $simNumber1 = trim((string) ($vehicle['sim_no_1'] ?? ''));
+$simNumber1Value = $simNumber1 !== '' ? $simNumber1 : null;
 $simNumber2 = trim((string) ($vehicle['sim_no_2'] ?? ''));
 $validityMonths = filter_var($vehicle['validity_months'] ?? null, FILTER_VALIDATE_INT);
 $saleAmountInput = trim((string) ($payment['total_sale_amount'] ?? ''));
@@ -55,7 +56,8 @@ if ($leadName === '' || mb_strlen($leadName) > 150 ||
 if ($vehicleNumber === '' || mb_strlen($vehicleNumber) > 30 ||
     $vehicleType === '' || $deviceType === '' ||
     !preg_match('/^\d{15}$/', $imei) ||
-    !preg_match('/^\d{10}$|^\d{13}$/', $simNumber1) ||
+    (!crmClosureSimNumberIsOptional($deviceType) &&
+        !preg_match('/^\d{10}$|^\d{13}$/', $simNumber1)) ||
     ($simNumber2 !== '' && (!preg_match('/^\d{10}$|^\d{13}$/', $simNumber2) || $simNumber2 === $simNumber1)) ||
     $validityMonths === false || $validityMonths <= 0 ||
     $saleAmountInput === '' || !is_numeric($saleAmountInput) ||
@@ -284,7 +286,7 @@ try {
     }
 
     $deviceId = (int) $record['device_id'];
-    $simId1 = (int) $record['sim_id_1'];
+    $simId1 = $record['sim_id_1'] !== null ? (int) $record['sim_id_1'] : null;
     $simId2 = $record['sim_id_2'] !== null ? (int) $record['sim_id_2'] : null;
     if (
         strcasecmp((string) $oldVehicle['imei_no'], $imei) !== 0 ||
@@ -356,7 +358,7 @@ try {
         'device_model_id' => $deviceTypeId,
         'imei_no' => $imei,
         'sim_id_1' => $simId1,
-        'sim_no_1' => $simNumber1,
+        'sim_no_1' => $simNumber1Value,
         'sim_id_2' => $simId2,
         'sim_no_2' => $simNumber2Value,
         'validity_months' => $validityMonths
@@ -380,7 +382,7 @@ try {
         $deviceTypeId,
         $imei,
         $simId1,
-        $simNumber1,
+        $simNumber1Value,
         $simId2,
         $simNumber2Value,
         $validityMonths,
@@ -558,7 +560,7 @@ try {
         'device_id' => $deviceId,
         'imei_no' => $imei,
         'sim_id_1' => $simId1,
-        'sim_no_1' => $simNumber1,
+        'sim_no_1' => $simNumber1Value,
         'sim_id_2' => $simId2,
         'sim_no_2' => $simNumber2Value,
         'validity_months' => $validityMonths,

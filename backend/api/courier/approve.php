@@ -496,6 +496,9 @@ try {
         }
         $instDate = !empty($step3['installation_date']) ? $step3['installation_date'] : null;
         $leadClosureId = !empty($step3['lead_closure_id']) ? (int)$step3['lead_closure_id'] : null;
+        $leadClosureByUserId = !empty($step3['lead_closure_by_user_id'])
+            ? (int) $step3['lead_closure_by_user_id']
+            : null;
         if ($leadClosureId) {
             $leadClosureStmt = $conn->prepare("SELECT id FROM lead_closures WHERE id = ? AND (status IS NULL OR status = '' OR LOWER(status) = 'active') LIMIT 1");
             $leadClosureStmt->bind_param('i', $leadClosureId);
@@ -506,8 +509,36 @@ try {
                 throw new Exception('Selected lead closure is inactive or does not exist.');
             }
         }
+        if ($leadClosureByUserId) {
+            $closureUserStmt = $conn->prepare(
+                "SELECT u.id
+                 FROM users u
+                 LEFT JOIN roles r ON r.id = u.role_id
+                 WHERE u.id = ?
+                   AND LOWER(COALESCE(u.status, 'active')) = 'active'
+                   AND LOWER(COALESCE(r.status, 'active')) = 'active'
+                   AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
+                   AND NOT EXISTS (SELECT 1 FROM dealers d WHERE d.user_id = u.id)
+                   AND NOT EXISTS (SELECT 1 FROM technicians t WHERE t.user_id = u.id)
+                 LIMIT 1"
+            );
+            if (!$closureUserStmt) {
+                throw new Exception('Failed to validate Lead Closure By user.');
+            }
+            $closureUserStmt->bind_param('i', $leadClosureByUserId);
+            if (!$closureUserStmt->execute()) {
+                $closureUserStmt->close();
+                throw new Exception('Failed to validate Lead Closure By user.');
+            }
+            $validClosureUser = $closureUserStmt->get_result()->fetch_assoc();
+            $closureUserStmt->close();
+            if (!$validClosureUser) {
+                throw new Exception('Selected Lead Closure By user is inactive or does not exist.');
+            }
+        }
 
-        if ($customerVehicleId !== null && $instPersonType !== null && ($instPersonId || $instDate || $leadClosureId)) {
+        if ($customerVehicleId !== null && $instPersonType !== null &&
+            ($instPersonId || $instDate || $leadClosureId || $leadClosureByUserId)) {
             $chkInstTable = $conn->query("SHOW TABLES LIKE 'customer_installations'");
             if ($chkInstTable && $chkInstTable->num_rows > 0) {
                 $existingInstallationStmt = $conn->prepare("
@@ -518,20 +549,22 @@ try {
                       AND installation_person_id <=> NULLIF(?, 0)
                       AND installation_date <=> ?
                       AND lead_closure_id <=> NULLIF(?, 0)
+                      AND lead_closure_by_user_id <=> NULLIF(?, 0)
                     LIMIT 1
                     FOR UPDATE
                 ");
-                $existingInstallationStmt->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
+                $existingInstallationStmt->bind_param("isisii", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId, $leadClosureByUserId);
                 $existingInstallationStmt->execute();
                 $existingInstallation = $existingInstallationStmt->get_result()->fetch_assoc();
                 $existingInstallationStmt->close();
                 if (!$existingInstallation) {
                     $insInst = $conn->prepare("
                         INSERT INTO customer_installations (
-                            customer_id, installation_person_type, installation_person_id, installation_date, lead_closure_id
-                        ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0))
+                            customer_id, installation_person_type, installation_person_id, installation_date,
+                            lead_closure_id, lead_closure_by_user_id
+                        ) VALUES (?, ?, NULLIF(?, 0), ?, NULLIF(?, 0), NULLIF(?, 0))
                     ");
-                    $insInst->bind_param("isisi", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId);
+                    $insInst->bind_param("isisii", $owner_id, $instPersonType, $instPersonId, $instDate, $leadClosureId, $leadClosureByUserId);
                     if (!$insInst->execute()) {
                         throw new Exception('Failed to create customer installation details: ' . $insInst->error);
                     }

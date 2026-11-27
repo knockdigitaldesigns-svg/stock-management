@@ -50,10 +50,10 @@ $installationPersonId = isset(
     ? (int) $data->installation_person_id
     : 0;
 
-$leadClosureId = isset(
-    $data->lead_closure_id
+$leadClosureByUserId = isset(
+    $data->lead_closure_by_user_id
 )
-    ? (int) $data->lead_closure_id
+    ? (int) $data->lead_closure_by_user_id
     : 0;
 
 $installationDate = trim(
@@ -115,10 +115,10 @@ if ($installationPersonType !== 'Direct' && $installationPersonId <= 0) {
     );
 }
 
-if ($leadClosureId <= 0) {
+if ($leadClosureByUserId <= 0) {
     sendResponse(
         false,
-        'Lead Closure By is required.',
+        'Lead Closure By user is required.',
         [],
         [],
         400
@@ -264,6 +264,7 @@ try {
             installation_person_type,
             installation_person_id,
             lead_closure_id,
+            lead_closure_by_user_id,
             installation_date
          FROM customer_installations
          WHERE {$installationWhere}
@@ -579,59 +580,59 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | 3. Lead Closure validation
+    | 3. Lead Closure By user validation
     |--------------------------------------------------------------------------
     |
-    | Lead closure master has Active / Inactive.
-    | Only Active can be selected.
+    | Only active regular users can be selected.
     |--------------------------------------------------------------------------
     */
 
-    $leadClosureStmt = $conn->prepare(
-        "SELECT id
-         FROM lead_closures
-         WHERE id = ?
-         AND (
-             status IS NULL
-             OR status = ''
-             OR LOWER(status) = 'active'
-         )
+    $closureUserStmt = $conn->prepare(
+        "SELECT u.id
+         FROM users u
+         LEFT JOIN roles r ON r.id = u.role_id
+         WHERE u.id = ?
+           AND LOWER(COALESCE(u.status, 'active')) = 'active'
+           AND LOWER(COALESCE(r.status, 'active')) = 'active'
+           AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
+           AND NOT EXISTS (SELECT 1 FROM dealers d WHERE d.user_id = u.id)
+           AND NOT EXISTS (SELECT 1 FROM technicians t WHERE t.user_id = u.id)
          LIMIT 1"
     );
 
-    if (!$leadClosureStmt) {
+    if (!$closureUserStmt) {
         throw new Exception(
-            'Failed to prepare lead closure validation.'
+            'Failed to prepare Lead Closure By user validation.'
         );
     }
 
-    $leadClosureStmt->bind_param(
+    $closureUserStmt->bind_param(
         'i',
-        $leadClosureId
+        $leadClosureByUserId
     );
 
-    if (!$leadClosureStmt->execute()) {
-        $leadClosureStmt->close();
+    if (!$closureUserStmt->execute()) {
+        $closureUserStmt->close();
 
         throw new Exception(
-            'Failed to validate lead closure.'
+            'Failed to validate Lead Closure By user.'
         );
     }
 
-    $leadClosureResult =
-        $leadClosureStmt->get_result();
+    $closureUserResult =
+        $closureUserStmt->get_result();
 
     if (
-        $leadClosureResult->num_rows === 0
+        $closureUserResult->num_rows === 0
     ) {
-        $leadClosureStmt->close();
+        $closureUserStmt->close();
 
         throw new Exception(
-            'Selected lead closure is inactive or does not exist.'
+            'Selected Lead Closure By user is inactive or does not exist.'
         );
     }
 
-    $leadClosureStmt->close();
+    $closureUserStmt->close();
 
 
     /*
@@ -648,7 +649,7 @@ try {
         writeChangedFields($conn, $installationId, 'Customer Installation', $existingInstallation, [
             'installation_person_type' => $persistedInstallationPersonType,
             'installation_person_id' => $installationPersonId ?: null,
-            'lead_closure_id' => $leadClosureId,
+            'lead_closure_by_user_id' => $leadClosureByUserId,
             'installation_date' => $installationDate
         ], $currentUser);
 
@@ -656,7 +657,7 @@ try {
             'UPDATE customer_installations
              SET installation_person_type = ?,
                  installation_person_id = NULLIF(?, 0),
-                 lead_closure_id = ?,
+                 lead_closure_by_user_id = ?,
                  installation_date = ?,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = ?'
@@ -672,7 +673,7 @@ try {
             'siisi',
             $persistedInstallationPersonType,
             $installationPersonId,
-            $leadClosureId,
+            $leadClosureByUserId,
             $installationDate,
             $installationId
         );
@@ -906,7 +907,7 @@ try {
             vehicle_id,
             installation_person_type,
             installation_person_id,
-            lead_closure_id,
+            lead_closure_by_user_id,
             installation_date
          ) VALUES (?, ?, ?, NULLIF(?, 0), ?, ?)'
     );
@@ -923,7 +924,7 @@ try {
         $vehicleId,
         $persistedInstallationPersonType,
         $installationPersonId,
-        $leadClosureId,
+        $leadClosureByUserId,
         $installationDate
     );
 
@@ -945,7 +946,7 @@ try {
         'vehicle_id' => $vehicleId ?: null,
         'installation_person_type' => $persistedInstallationPersonType,
         'installation_person_id' => $installationPersonId ?: null,
-        'lead_closure_id' => $leadClosureId,
+        'lead_closure_by_user_id' => $leadClosureByUserId,
         'installation_date' => $installationDate
     ], $currentUser);
 

@@ -845,7 +845,7 @@ const PaymentDetailsPart2Page = () => {
                 !isEditMode && (
                     !step3.installation_person_type ||
                         (isInstallationPersonRequired(step3.installation_person_type) && !step3.installation_person_id) ||
-                    !step3.lead_closure_id ||
+                    !step3.lead_closure_by_user_id ||
                     !step3.installation_date
                 )
             ) {

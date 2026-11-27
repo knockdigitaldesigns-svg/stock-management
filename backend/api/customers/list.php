@@ -196,7 +196,8 @@ $sql = "
             WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name
             ELSE t.technician_name
         END AS installation_person,
-        lc.lead_closure_name AS lead_closure,
+        ci.lead_closure_by_user_id,
+        COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
         ci.installation_date,
         (
             SELECT GROUP_CONCAT(
@@ -267,6 +268,8 @@ $sql = "
 
     LEFT JOIN lead_closures lc
         ON lc.id = ci.lead_closure_id
+    LEFT JOIN users closure_user
+        ON closure_user.id = ci.lead_closure_by_user_id
 
     LEFT JOIN (
         SELECT

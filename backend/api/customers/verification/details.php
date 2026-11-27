@@ -147,7 +147,9 @@ function customerVerificationLoadInstallation(mysqli $conn, int $customerId, int
                         THEN t.technician_name
                     ELSE NULL
                 END AS installation_person,
-                ci.lead_closure_id, lc.lead_closure_name AS lead_closure,
+                ci.lead_closure_id, ci.lead_closure_by_user_id,
+                COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
+                COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), '')) AS lead_closure_by_user,
                 ci.installation_date
          FROM customer_installations ci
          LEFT JOIN dealers d
@@ -157,6 +159,7 @@ function customerVerificationLoadInstallation(mysqli $conn, int $customerId, int
             ON t.id = ci.installation_person_id
            AND LOWER(TRIM(COALESCE(ci.installation_person_type, ''))) = 'technician'
          LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
+         LEFT JOIN users closure_user ON closure_user.id = ci.lead_closure_by_user_id
          WHERE ci.customer_id = ? AND ci.vehicle_id = ?
          ORDER BY ci.id DESC
          LIMIT 1"
@@ -306,7 +309,9 @@ function customerVerificationLoadLegacyInstallationMap(mysqli $conn, int $custom
                         THEN t.technician_name
                     ELSE NULL
                 END AS installation_person,
-                ci.lead_closure_id, lc.lead_closure_name AS lead_closure,
+                ci.lead_closure_id, ci.lead_closure_by_user_id,
+                COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
+                COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), '')) AS lead_closure_by_user,
                 ci.installation_date
          FROM customer_installations ci
          LEFT JOIN dealers d
@@ -316,6 +321,7 @@ function customerVerificationLoadLegacyInstallationMap(mysqli $conn, int $custom
             ON t.id = ci.installation_person_id
            AND LOWER(TRIM(COALESCE(ci.installation_person_type, ''))) = 'technician'
          LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
+         LEFT JOIN users closure_user ON closure_user.id = ci.lead_closure_by_user_id
          WHERE ci.customer_id = ? AND ci.vehicle_id IS NULL
          ORDER BY ci.id ASC"
     );
@@ -870,6 +876,8 @@ if (is_array($installation)) {
         'installation_person_id' => $installation['installationPersonId'] ?? null,
         'installation_person' => $installation['installationPerson'] ?? null,
         'lead_closure_id' => $installation['leadClosureId'] ?? null,
+        'lead_closure_by_user_id' => $installation['leadClosureByUserId'] ?? null,
+        'lead_closure_by_user' => $installation['leadClosureByUser'] ?? null,
         'lead_closure' => $installation['leadClosure'] ?? null,
         'installation_date' => $installation['installationDate'] ?? null
     ]);
@@ -900,6 +908,8 @@ if (!is_array($installation) && (
         'installation_person_id' => $vehicle['vehicle_installation_person_id'] ?? 0,
         'installation_person' => $vehicle['vehicle_installation_person'] ?? null,
         'lead_closure_id' => $vehicle['vehicle_lead_closure_id'] ?? 0,
+        'lead_closure_by_user_id' => $vehicle['vehicle_lead_closure_by_user_id'] ?? null,
+        'lead_closure_by_user' => $vehicle['vehicle_lead_closure_by_user'] ?? null,
         'lead_closure' => $vehicle['vehicle_lead_closure'] ?? null,
         'installation_date' => $vehicle['vehicle_installation_date'] ?? null
     ];
@@ -955,6 +965,8 @@ if ($installationPerson === '') {
 }
 
 $leadClosure = trim((string) customerVerificationFirstValue($installation, [
+    'lead_closure_by_user',
+    'leadClosureByUser',
     'lead_closure_by',
     'leadClosureBy',
     'lead_closure',

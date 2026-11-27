@@ -6,6 +6,9 @@ import usePagination from '../../hooks/usePagination';
 import { formatDate } from '../../utils/date';
 import './ClosureWorkflowPages.css';
 
+const isPrimarySimOptional = (deviceType) =>
+    String(deviceType ?? '').trim().toLowerCase() === 'bharat101 - ais 140';
+
 const getPaymentStatus = (amountPaid, totalAmount) => {
     const paid = Number(amountPaid) || 0;
     const total = Number(totalAmount) || 0;
@@ -229,6 +232,7 @@ const InstallerJobsPage = () => {
     const renderSingleDeviceForm = (job, device) => {
         const formKey = `${job.closure_id}:${device.device_sequence}`;
         const form = completionForms[formKey] || {};
+        const primarySimOptional = isPrimarySimOptional(device.device_type ?? job.device_type);
         return (
             <form className="closure-completion-form" onSubmit={(event) => completeInstallation(event, job, device)}>
                 <label>Username
@@ -243,8 +247,8 @@ const InstallerJobsPage = () => {
                 <label>Device IMEI
                     <input className="form-control" required inputMode="numeric" maxLength="15" value={form.imei_no || ''} onChange={(event) => updateCompletionField(formKey, 'imei_no', event.target.value.replace(/\D/g, '').slice(0, 15))} />
                 </label>
-                <label>Primary SIM
-                    <input className="form-control" required inputMode="numeric" maxLength="13" value={form.sim_no_1 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_1', event.target.value.replace(/\D/g, '').slice(0, 13))} />
+                <label>{primarySimOptional ? 'Primary SIM (optional)' : 'Primary SIM'}
+                    <input className="form-control" required={!primarySimOptional} inputMode="numeric" maxLength="13" value={form.sim_no_1 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_1', event.target.value.replace(/\D/g, '').slice(0, 13))} />
                 </label>
                 <label>Secondary SIM (optional)
                     <input className="form-control" inputMode="numeric" maxLength="13" value={form.sim_no_2 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_2', event.target.value.replace(/\D/g, '').slice(0, 13))} />
@@ -278,6 +282,7 @@ const InstallerJobsPage = () => {
         const form = completionForms[formKey] || {};
         const initialAmount = device.sale_amount ?? '';
         const shareUsername = sameUsernameByClosure[job.closure_id] ?? defaultSameUsername(job);
+        const primarySimOptional = isPrimarySimOptional(form.device_type ?? device.device_type ?? job.device_type);
         return (
             <form className="closure-completion-form closure-device-form" onSubmit={(event) => completeInstallation(event, job, device)}>
                 {!shareUsername && (
@@ -314,8 +319,8 @@ const InstallerJobsPage = () => {
                 <label>Device IMEI
                     <input className="form-control" required inputMode="numeric" maxLength="15" value={form.imei_no || ''} onChange={(event) => updateCompletionField(formKey, 'imei_no', event.target.value.replace(/\D/g, '').slice(0, 15))} />
                 </label>
-                <label>Primary SIM
-                    <input className="form-control" required inputMode="numeric" maxLength="13" value={form.sim_no_1 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_1', event.target.value.replace(/\D/g, '').slice(0, 13))} />
+                <label>{primarySimOptional ? 'Primary SIM (optional)' : 'Primary SIM'}
+                    <input className="form-control" required={!primarySimOptional} inputMode="numeric" maxLength="13" value={form.sim_no_1 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_1', event.target.value.replace(/\D/g, '').slice(0, 13))} />
                 </label>
                 <label>Secondary SIM (optional)
                     <input className="form-control" inputMode="numeric" maxLength="13" value={form.sim_no_2 || ''} onChange={(event) => updateCompletionField(formKey, 'sim_no_2', event.target.value.replace(/\D/g, '').slice(0, 13))} />

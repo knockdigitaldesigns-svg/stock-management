@@ -233,7 +233,7 @@ export const commitCustomerSubmission = async (submission, submissionId, onProgr
                 installation_person_id: installation.installation_person_id
                     ? Number(installation.installation_person_id)
                     : null,
-                lead_closure_id: Number(installation.lead_closure_id),
+                lead_closure_by_user_id: Number(installation.lead_closure_by_user_id),
                 installation_date: installation.installation_date
             }), 'Failed to save installation details.');
         }

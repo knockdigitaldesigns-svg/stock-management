@@ -346,12 +346,32 @@ if ($res) {
     }
 }
 
-// Preload Lead Closures
-$leadClosureMap = [];
-$res = $conn->query("SELECT id, lead_closure_name FROM lead_closures WHERE status = 'Active' OR status IS NULL");
+// Preload active regular users for Lead Closure By.
+$closureUserMap = [];
+$res = $conn->query(
+    "SELECT u.id, u.employee_name, u.username
+     FROM users u
+     LEFT JOIN roles r ON r.id = u.role_id
+     WHERE LOWER(COALESCE(u.status, 'active')) = 'active'
+       AND LOWER(COALESCE(r.status, 'active')) = 'active'
+       AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
+       AND NOT EXISTS (SELECT 1 FROM dealers d WHERE d.user_id = u.id)
+       AND NOT EXISTS (SELECT 1 FROM technicians t WHERE t.user_id = u.id)"
+);
 if ($res) {
     while ($r = $res->fetch_assoc()) {
-        $leadClosureMap[strtolower(trim($r['lead_closure_name']))] = (int) $r['id'];
+        foreach ([$r['employee_name'], $r['username']] as $name) {
+            $normalizedName = strtolower(trim((string) $name));
+            if ($normalizedName === '') {
+                continue;
+            }
+            if (array_key_exists($normalizedName, $closureUserMap) &&
+                $closureUserMap[$normalizedName] !== (int) $r['id']) {
+                $closureUserMap[$normalizedName] = null;
+            } elseif (!array_key_exists($normalizedName, $closureUserMap)) {
+                $closureUserMap[$normalizedName] = (int) $r['id'];
+            }
+        }
     }
 }
 
@@ -874,13 +894,14 @@ foreach ($dataRows as $idx => $row) {
     }
 
     // Lead Closure By
-    $leadClosureId = null;
+    $leadClosureByUserId = null;
     if ($leadClosureBy === '') {
-        $allErrors[] = "Row {$rowNumber}: Lead Closure By - Lead Closure By is required.";
-    } elseif (!isset($leadClosureMap[strtolower($leadClosureBy)])) {
-        $allErrors[] = "Row {$rowNumber}: Lead Closure By - Lead Closure By '{$leadClosureBy}' is invalid or inactive.";
+        $allErrors[] = "Row {$rowNumber}: Lead Closure By - select an active user.";
+    } elseif (!array_key_exists(strtolower($leadClosureBy), $closureUserMap) ||
+        $closureUserMap[strtolower($leadClosureBy)] === null) {
+        $allErrors[] = "Row {$rowNumber}: Lead Closure By - '{$leadClosureBy}' is invalid, inactive, or ambiguous.";
     } else {
-        $leadClosureId = $leadClosureMap[strtolower($leadClosureBy)];
+        $leadClosureByUserId = $closureUserMap[strtolower($leadClosureBy)];
     }
 
     // Installation Date
@@ -1085,7 +1106,7 @@ foreach ($dataRows as $idx => $row) {
         'installation_person_type' => $installationDbPersonType,
         'installation_person_label' => $normPersonType,
         'installation_person_id' => $installationPersonId,
-        'lead_closure_id' => $leadClosureId,
+        'lead_closure_by_user_id' => $leadClosureByUserId,
         'installation_date' => $installationDate,
 
         // Payment
@@ -1313,7 +1334,7 @@ try {
                 'installation' => [
                     'installation_person_type' => $row['installation_person_label'],
                     'installation_person_id' => $row['installation_person_id'],
-                    'lead_closure_id' => $row['lead_closure_id'],
+                    'lead_closure_by_user_id' => $row['lead_closure_by_user_id'],
                     'installation_date' => $row['installation_date']
                 ],
                 'payment_part1' => [

@@ -22,7 +22,7 @@ import {
 const initialForm = {
     installation_person_type: '',
     installation_person_id: '',
-    lead_closure_id: '',
+    lead_closure_by_user_id: '',
     installation_date: ''
 };
 
@@ -65,7 +65,7 @@ const InstallationDetailsPage = () => {
     const [technicians, setTechnicians] = useState([]);
     const [onsiteDealers, setOnsiteDealers] = useState([]);
     const [offsiteDealers, setOffsiteDealers] = useState([]);
-    const [leadClosures, setLeadClosures] = useState([]);
+    const [closureUsers, setClosureUsers] = useState([]);
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -115,11 +115,11 @@ const InstallationDetailsPage = () => {
             const [
                 techniciansResponse,
                 dealersResponse,
-                leadClosuresResponse
+                closureUsersResponse
             ] = await Promise.all([
                 api.get('/technicians/list.php'),
                 api.get('/dealers/list.php?for_installation=1'),
-                api.get('/lead_closures/list.php')
+                api.get('/users/list.php?scope=lead_closure_by_users')
             ]);
 
             const techniciansData = extractList(
@@ -132,9 +132,9 @@ const InstallationDetailsPage = () => {
                 ['dealers']
             );
 
-            const leadClosuresData = extractList(
-                leadClosuresResponse,
-                ['lead_closures']
+            const closureUsersData = extractList(
+                closureUsersResponse,
+                ['users']
             );
 
             /*
@@ -208,32 +208,13 @@ const InstallationDetailsPage = () => {
                             `Dealer #${item.id}`
                     }));
 
-            /*
-             * Lead Closure master.
-             * Existing endpoint may return status.
-             * If status is missing, keep the record.
-             */
-            const normalizedLeadClosures =
-                leadClosuresData.filter((item) => {
-                    if (!item) {
-                        return false;
-                    }
-
-                    if (
-                        item.status === undefined ||
-                        item.status === null ||
-                        item.status === ''
-                    ) {
-                        return true;
-                    }
-
-                    return (
-                        String(item.status)
-                            .trim()
-                            .toLowerCase() ===
-                        'active'
-                    );
-                });
+            const normalizedClosureUsers = closureUsersData
+                .filter((item) => item?.id)
+                .map((item) => ({
+                    ...item,
+                    id: Number(item.id),
+                    displayName: item.employee_name || item.username || `User #${item.id}`
+                }));
 
             setTechnicians(
                 normalizedTechnicians
@@ -247,9 +228,7 @@ const InstallationDetailsPage = () => {
                 normalizedOffsiteDealers
             );
 
-            setLeadClosures(
-                normalizedLeadClosures
-            );
+            setClosureUsers(normalizedClosureUsers);
         } catch (err) {
             console.error(
                 'Installation master loading error:',
@@ -354,7 +333,7 @@ const InstallationDetailsPage = () => {
                     installation_person_type: ownerType || stored.step3?.installation_person_type || '',
                     installation_person_id: currentOwner ? String(currentOwner.id) : stored.step3?.installation_person_id || '',
                     installation_date: '',
-                    lead_closure_id: ''
+                    lead_closure_by_user_id: ''
                 });
                 return;
             }
@@ -549,8 +528,8 @@ const InstallationDetailsPage = () => {
             return 'Installation Date is required.';
         }
 
-        if (!form.lead_closure_id) {
-            return 'Lead Closure By is required.';
+        if (!form.lead_closure_by_user_id) {
+            return 'Lead Closure By user is required.';
         }
 
         const [year, month, day] = form.installation_date
@@ -591,9 +570,9 @@ const InstallationDetailsPage = () => {
             showValidation && !form.installation_date
                 ? 'Installation Date is required.'
                 : '',
-        lead_closure_id:
-            showValidation && !form.lead_closure_id
-                ? 'Lead Closure By is required.'
+        lead_closure_by_user_id:
+            showValidation && !form.lead_closure_by_user_id
+                ? 'Lead Closure By user is required.'
                 : ''
     };
 
@@ -614,7 +593,7 @@ const InstallationDetailsPage = () => {
                 step3: {
                     installation_person_type: form.installation_person_type,
                     installation_person_id: form.installation_person_id ? Number(form.installation_person_id) : null,
-                    lead_closure_id: Number(form.lead_closure_id),
+                    lead_closure_by_user_id: Number(form.lead_closure_by_user_id),
                     installation_date: form.installation_date
                 }
             };
@@ -667,7 +646,7 @@ const InstallationDetailsPage = () => {
                 vehicle_id: Number(stored.vehicle_record_id || 0),
                 installation_person_type: form.installation_person_type,
                 installation_person_id: form.installation_person_id ? Number(form.installation_person_id) : null,
-                lead_closure_id: Number(form.lead_closure_id),
+                lead_closure_by_user_id: Number(form.lead_closure_by_user_id),
                 installation_date: form.installation_date
             };
 
@@ -1036,29 +1015,29 @@ const InstallationDetailsPage = () => {
                                 <span className="required">*</span>
                             </label>
                             <select
-                                name="lead_closure_id"
-                                value={form.lead_closure_id}
+                                name="lead_closure_by_user_id"
+                                value={form.lead_closure_by_user_id}
                                 onChange={handleChange}
                                 className="form-control"
                                 disabled={loading || saving}
                             >
                                 <option value="">
                                     {loading
-                                        ? 'Loading lead closures...'
-                                        : 'Select Lead Closure By'}
+                                        ? 'Loading users...'
+                                        : 'Select user'}
                                 </option>
-                                {leadClosures.map((item) => (
+                                {closureUsers.map((item) => (
                                     <option
                                         key={item.id}
                                         value={item.id}
                                     >
-                                        {item.lead_closure_name}
+                                        {item.displayName}
                                     </option>
                                 ))}
                             </select>
-                            {installationErrors.lead_closure_id && (
+                            {installationErrors.lead_closure_by_user_id && (
                                 <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>
-                                    ✕ {installationErrors.lead_closure_id}
+                                    ✕ {installationErrors.lead_closure_by_user_id}
                                 </small>
                             )}
                         </div>

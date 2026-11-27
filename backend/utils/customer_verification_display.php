@@ -9,12 +9,16 @@ function customerVerificationDisplayLookup(mysqli $conn, string $table, string $
         'sim_validities' => 'months',
         'technicians' => 'technician_name',
         'dealers' => 'dealer_name',
-        'lead_closures' => 'lead_closure_name'
+        'lead_closures' => 'lead_closure_name',
+        'users' => 'employee_name'
     ];
     if ($id <= 0 || ($allowedLookups[$table] ?? null) !== $column) {
         return null;
     }
-    $stmt = $conn->prepare("SELECT {$column} AS display_name FROM {$table} WHERE id = ? LIMIT 1");
+    $select = $table === 'users'
+        ? "COALESCE(NULLIF(employee_name, ''), username) AS display_name"
+        : "{$column} AS display_name";
+    $stmt = $conn->prepare("SELECT {$select} FROM {$table} WHERE id = ? LIMIT 1");
     if (!$stmt) {
         throw new RuntimeException('Unable to prepare verification display lookup.');
     }
@@ -181,6 +185,8 @@ function customerVerificationSnapshotDisplayData(mysqli $conn, array $snapshot):
             'installation_person' => ['vehicle_installation_person'],
             'installation_type' => ['vehicle_installation_type'],
             'lead_closure_id' => ['vehicle_lead_closure_id'],
+            'lead_closure_by_user_id' => ['vehicle_lead_closure_by_user_id'],
+            'lead_closure_by_user' => ['vehicle_lead_closure_by_user'],
             'lead_closure' => ['vehicle_lead_closure'],
             'installation_date' => ['vehicle_installation_date']
         ] as $field => $vehicleFields) {
@@ -219,6 +225,13 @@ function customerVerificationSnapshotDisplayData(mysqli $conn, array $snapshot):
             $leadClosure = customerVerificationDisplayNamedValue(
                 $conn,
                 $installation,
+                ['lead_closure_by_user', 'leadClosureByUser'],
+                ['lead_closure_by_user_id', 'leadClosureByUserId'],
+                'users',
+                'employee_name'
+            ) ?? customerVerificationDisplayNamedValue(
+                $conn,
+                $installation,
                 ['lead_closure', 'leadClosure'],
                 ['lead_closure_id', 'leadClosureId'],
                 'lead_closures',
@@ -255,6 +268,13 @@ function customerVerificationSnapshotDisplayData(mysqli $conn, array $snapshot):
                 ),
                 'Installation Person Type' => $personType,
                 'Lead Closure By' => customerVerificationDisplayNamedValue(
+                    $conn,
+                    $installation,
+                    ['lead_closure_by_user', 'leadClosureByUser'],
+                    ['lead_closure_by_user_id', 'leadClosureByUserId'],
+                    'users',
+                    'employee_name'
+                ) ?? customerVerificationDisplayNamedValue(
                     $conn,
                     $installation,
                     ['lead_closure', 'leadClosure'],

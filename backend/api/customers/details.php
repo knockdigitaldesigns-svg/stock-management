@@ -78,7 +78,11 @@ try {
         throw new Exception('Failed to check CRM installation linkage.');
     }
     $vehicleCrmClosureJoins = '';
-    $vehicleLeadClosureNameSelect = 'vlc.lead_closure_name';
+    $vehicleLeadClosureNameSelect = "COALESCE(
+        NULLIF(TRIM(vclosure_user.employee_name), ''),
+        NULLIF(TRIM(vclosure_user.username), ''),
+        vlc.lead_closure_name
+    )";
     if ($crmClosureColumnResult->num_rows > 0) {
         $vehicleCrmClosureJoins = "
          LEFT JOIN crm_lead_closure_forms vcf
@@ -91,6 +95,8 @@ try {
             "COALESCE(
                 NULLIF(TRIM(vlead_owner.employee_name), ''),
                 NULLIF(TRIM(vlead_owner.username), ''),
+                NULLIF(TRIM(vclosure_user.employee_name), ''),
+                NULLIF(TRIM(vclosure_user.username), ''),
                 vlc.lead_closure_name
             )";
     }
@@ -121,6 +127,8 @@ try {
             END AS vehicle_installation_person_type,
             vci.installation_person_id AS vehicle_installation_person_id,
             vci.lead_closure_id AS vehicle_lead_closure_id,
+            vci.lead_closure_by_user_id AS vehicle_lead_closure_by_user_id,
+            COALESCE(NULLIF(TRIM(vclosure_user.employee_name), ''), NULLIF(TRIM(vclosure_user.username), '')) AS vehicle_lead_closure_by_user,
             CASE
                 WHEN vci.installation_person_type = 'Dealer' THEN vdlr.dealer_name
                 ELSE vtech.technician_name
@@ -195,6 +203,8 @@ try {
             ON vdlr.id = vci.installation_person_id AND vci.installation_person_type = 'Dealer'
          LEFT JOIN lead_closures vlc
             ON vlc.id = vci.lead_closure_id
+         LEFT JOIN users vclosure_user
+            ON vclosure_user.id = vci.lead_closure_by_user_id
          {$vehicleCrmClosureJoins}
          LEFT JOIN customer_payments vcp
             ON vcp.id = (
@@ -284,7 +294,9 @@ try {
                 ELSE ci.installation_person_type
             END AS installation_type,
             ci.lead_closure_id,
-            lc.lead_closure_name AS lead_closure,
+            ci.lead_closure_by_user_id,
+            COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
+            COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), '')) AS lead_closure_by_user,
             ci.installation_date
          FROM customer_installations ci
          LEFT JOIN technicians t
@@ -293,6 +305,8 @@ try {
             ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
          LEFT JOIN lead_closures lc
             ON lc.id = ci.lead_closure_id
+         LEFT JOIN users closure_user
+            ON closure_user.id = ci.lead_closure_by_user_id
          WHERE ci.customer_id = ? AND ci.vehicle_id IS NULL
          ORDER BY ci.id ASC"
     );
@@ -325,6 +339,8 @@ try {
                 'vehicle_installation_person' => $legacyInstallation['installation_person'],
                 'vehicle_installation_type' => $legacyInstallation['installation_type'],
                 'vehicle_lead_closure_id' => $legacyInstallation['lead_closure_id'],
+                'vehicle_lead_closure_by_user_id' => $legacyInstallation['lead_closure_by_user_id'],
+                'vehicle_lead_closure_by_user' => $legacyInstallation['lead_closure_by_user'],
                 'vehicle_lead_closure' => $legacyInstallation['lead_closure'],
                 'vehicle_installation_date' => $legacyInstallation['installation_date']
             ]);
@@ -441,7 +457,9 @@ $installationStmt = $conn->prepare(
             ELSE t.technician_name
         END AS installation_person,
         ci.lead_closure_id,
-        lc.lead_closure_name AS lead_closure,
+        ci.lead_closure_by_user_id,
+        COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
+        COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), '')) AS lead_closure_by_user,
         ci.installation_date,
         ci.created_at,
         ci.updated_at
@@ -452,6 +470,8 @@ $installationStmt = $conn->prepare(
         ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
     LEFT JOIN lead_closures lc
         ON lc.id = ci.lead_closure_id
+    LEFT JOIN users closure_user
+        ON closure_user.id = ci.lead_closure_by_user_id
     WHERE ci.id = ?
     LIMIT 1"
 );
@@ -637,6 +657,8 @@ $installationStmt = $conn->prepare(
                 'installation_person' => $vehicle['vehicle_installation_person'],
                 'installation_type' => $vehicle['vehicle_installation_type'],
                 'lead_closure_id' => $vehicle['vehicle_lead_closure_id'] ?? null,
+                'lead_closure_by_user_id' => $vehicle['vehicle_lead_closure_by_user_id'] ?? null,
+                'lead_closure_by_user' => $vehicle['vehicle_lead_closure_by_user'] ?? null,
                 'lead_closure' => $vehicle['vehicle_lead_closure'],
                 'installation_date' => $vehicle['vehicle_installation_date']
             ]

@@ -345,7 +345,7 @@ const CustomerDetailsPage = () => {
                 '/customers/delete.php',
                 {
                     data: {
-                        id: Number(deleteTarget.deleteTarget.id)
+                        id: Number(deleteTarget.id)
                     }
                 }
             );
