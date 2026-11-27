@@ -20,22 +20,22 @@ $stmt = $conn->prepare(
      FROM users u
      LEFT JOIN roles r ON r.id = u.role_id
      WHERE LOWER(COALESCE(u.status, 'active')) = 'active'
-       AND LOWER(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, ''))) = 'employee'
+       AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
      ORDER BY employee_name ASC, u.id ASC"
 );
 if (!$stmt) {
     $error = $conn->error;
     $conn->close();
-    sendResponse(false, 'Unable to prepare eligible Employee list: ' . $error, [], [], 500);
+    sendResponse(false, 'Unable to prepare eligible user list: ' . $error, [], [], 500);
 }
 if (!$stmt->execute()) {
     $error = $stmt->error;
     $stmt->close();
     $conn->close();
-    sendResponse(false, 'Unable to load eligible Employees: ' . $error, [], [], 500);
+    sendResponse(false, 'Unable to load eligible users: ' . $error, [], [], 500);
 }
 $employees = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 $conn->close();
-sendResponse(true, 'Eligible Employees loaded successfully.', ['employees' => $employees]);
+sendResponse(true, 'Eligible users loaded successfully.', ['employees' => $employees]);
 ?>

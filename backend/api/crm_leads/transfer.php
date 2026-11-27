@@ -20,7 +20,7 @@ $employeeId = filter_var(is_object($data) ? ($data->employee_id ?? null) : null,
 $reason = trim((string) (is_object($data) ? ($data->reason ?? '') : ''));
 if ($userId <= 0 || $leadId === false || $leadId <= 0 ||
     $employeeId === false || $employeeId <= 0 || $reason === '' || mb_strlen($reason) > 1000) {
-    sendResponse(false, 'A valid lead, Employee, and transfer reason of up to 1,000 characters are required.', [], [], 400);
+    sendResponse(false, 'A valid lead, eligible user, and transfer reason of up to 1,000 characters are required.', [], [], 400);
 }
 
 $conn = (new Database())->getConnection();

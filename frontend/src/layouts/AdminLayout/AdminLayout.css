@@ -137,6 +137,45 @@
     gap: 1rem;
 }
 
+.account-switch-button,
+.account-mode-return {
+    border: 1px solid #cbd5e1;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    background: #fff;
+    color: #334155;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.account-switch-button:hover,
+.account-mode-return:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.account-mode-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    border: 1px solid #f59e0b;
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.45rem 0.35rem 0.7rem;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.account-mode-return {
+    border-color: #fbbf24;
+    background: #fff;
+    color: #92400e;
+    white-space: nowrap;
+}
+
 .notification-menu {
     position: relative;
 }
@@ -259,6 +298,21 @@
     align-items: center;
     gap: 0.75rem;
     font-weight: 500;
+}
+
+@media (max-width: 720px) {
+    .account-mode-indicator {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.75rem;
+    }
+
+    .account-switch-button,
+    .account-mode-return {
+        padding: 0.45rem 0.55rem;
+        font-size: 0.75rem;
+    }
 }
 
 .avatar {

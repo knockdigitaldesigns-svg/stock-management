@@ -15,7 +15,7 @@ if (!is_array($requestBody) || ($requestBody['meaningful_activity'] ?? false) !=
 }
 
 $payload = authenticate();
-$userId = (int) ($payload['user_id'] ?? 0);
+$userId = (int) ($payload['auth_user_id'] ?? $payload['user_id'] ?? 0);
 $sessionId = (string) ($payload['sid'] ?? '');
 
 $conn = (new Database())->getConnection();

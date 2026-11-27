@@ -859,10 +859,7 @@ const CustomerPaymentVerificationPage = () => {
                         {decisionError && <div className="alert alert-danger" role="alert">{decisionError}</div>}
                         <div className="verification-meta">
                             <span><strong>Status:</strong> {selected.status}</span>
-                            <span><strong>Submitted By:</strong> {selected.submitted_by || '—'}</span>
                             <span><strong>Submitted At:</strong> {formatDateValue(selected.submitted_at)}</span>
-                            {selected.reviewed_by && <span><strong>Reviewer:</strong> {selected.reviewed_by}</span>}
-                            {selected.rejection_reason && <span><strong>Rejection Reason:</strong> {selected.rejection_reason}</span>}
                         </div>
                         {!selected.can_decide && (isPendingSubmission || isApplyingSubmission) && (
                             <div className="alert alert-info">
@@ -888,7 +885,13 @@ const CustomerPaymentVerificationPage = () => {
                                 />
                             </label>
                         )}
-                        {detailSections.map(([key, title]) => (
+                        {detailSections.filter(([key]) => {
+                            const value = data[key];
+                            return value !== null
+                                && value !== undefined
+                                && (!Array.isArray(value) || value.length > 0)
+                                && (typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 0);
+                        }).map(([key, title]) => (
                             <section className="verification-section" key={key}>
                                 <h3>{title}</h3>
                                 {key.startsWith('payment_')

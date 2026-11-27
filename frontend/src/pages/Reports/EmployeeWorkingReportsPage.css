@@ -1,0 +1,80 @@
+.employee-report-note {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #1e3a8a;
+    font-size: 13px;
+}
+
+.employee-report-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    align-items: end;
+    padding: 18px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.employee-report-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.employee-report-table small {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+}
+
+.employee-report-status {
+    display: inline-flex;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.employee-report-status.status-generated {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.employee-report-status.status-failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.employee-report-status.status-processing {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.employee-report-error {
+    max-width: 320px;
+    color: #991b1b;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.employee-report-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+    .employee-report-filters {
+        grid-template-columns: 1fr;
+    }
+
+    .employee-report-filter-actions > button {
+        flex: 1;
+    }
+}

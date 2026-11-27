@@ -53,6 +53,12 @@ const summary = (group) => {
     const fields = (group.records || []).map((record) => fieldLabel(record.field_changed));
     return `${fields.slice(0, 2).join(', ')}${fields.length > 2 ? ` +${fields.length - 2} more` : ''} changed`;
 };
+const changedByLabel = (group) => {
+    const actor = group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-';
+    return group.represented_by_username
+        ? `${actor} (as ${group.represented_by_username})`
+        : actor;
+};
 
 const snapshotRecord = (group, key) => (group.records || []).find((record) => record.field_changed === 'record_snapshot')?.[key] || null;
 const snapshotSections = (snapshot) => {
@@ -226,7 +232,7 @@ const HistoryPage = () => {
                                         <td>{group.module}</td>
                                         <td><span className={`badge badge-${String(group.action).toLowerCase()}`}>{actionLabel(group.action)}</span></td>
                                         <td className="history-summary">{summary(group)}</td>
-                                        <td>{group.changed_by_username || group.changed_by_name || group.changed_by_user_id || '-'}</td>
+                                        <td>{changedByLabel(group)}</td>
                                         <td>
                                             <button className="icon-btn view" type="button" title="View details" aria-label="View history details" onClick={() => setSelected(group)}>
                                                 <Eye size={16} />
@@ -241,7 +247,7 @@ const HistoryPage = () => {
                 <Pagination currentPage={pagination.page} totalItems={pagination.total} pageSize={pagination.page_size} onPageChange={(page) => loadHistory(page)} onPageSizeChange={(size) => loadHistory(1, appliedFilters, size)} itemName="history entries" />
             </div>
             <Modal isOpen={Boolean(selected)} onClose={() => setSelected(null)} title="History Details" maxWidth="900px">
-                {selected && <div className="history-details"><div className="history-detail-meta"><div><strong>Date &amp; Time</strong><span>{formatDateTime(selected.changed_at)}</span></div><div><strong>Module</strong><span>{selected.module}</span></div><div><strong>Action</strong><span className={`badge badge-${String(selected.action).toLowerCase()}`}>{actionLabel(selected.action)}</span></div><div><strong>Changed By</strong><span>{selected.changed_by_username || selected.changed_by_name || selected.changed_by_user_id || '-'}</span></div></div>
+                {selected && <div className="history-details"><div className="history-detail-meta"><div><strong>Date &amp; Time</strong><span>{formatDateTime(selected.changed_at)}</span></div><div><strong>Module</strong><span>{selected.module}</span></div><div><strong>Action</strong><span className={`badge badge-${String(selected.action).toLowerCase()}`}>{actionLabel(selected.action)}</span></div><div><strong>Changed By</strong><span>{changedByLabel(selected)}</span></div></div>
                     {selected.action === 'Delete' ? <SnapshotView snapshot={snapshotRecord(selected, 'old_display_snapshot') || cleanSnapshot(parseValue(selected.records?.[0]?.old_value))} title="Deleted Record" /> : selected.action === 'Create' ? <SnapshotView snapshot={snapshotRecord(selected, 'new_display_snapshot') || cleanSnapshot(parseValue(selected.records?.[0]?.new_value))} title="Created Record" /> : <><SnapshotView snapshot={snapshotRecord(selected, 'old_display_snapshot')} title="Old Record" /><SnapshotView snapshot={snapshotRecord(selected, 'new_display_snapshot')} title="New Record" /><div className="history-detail-section"><h4>Changes</h4><table className="history-detail-table"><thead><tr><th>Field</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>{selected.records?.filter((record) => record.field_changed !== 'record_snapshot').map((record) => { let oldValue = auditDisplayValue(record, 'old_display_value'); let newValue = auditDisplayValue(record, 'new_display_value'); if (selected.module === 'Role Permissions') { const oldItems = arrayValue(record.old_display_value); const newItems = arrayValue(record.new_display_value); const added = newItems.filter((item) => !oldItems.includes(item)); const removed = oldItems.filter((item) => !newItems.includes(item)); oldValue = removed.length ? `Permissions Removed:\n${removed.join('\n')}` : '-'; newValue = added.length ? `Permissions Added:\n${added.join('\n')}` : '-'; } return <tr key={record.id}><td>{fieldLabel(record.field_changed)}</td><td><pre>{oldValue}</pre></td><td><pre>{newValue}</pre></td></tr>; })}</tbody></table></div></>}
                 </div>}
             </Modal>

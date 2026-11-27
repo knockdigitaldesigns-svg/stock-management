@@ -19,7 +19,8 @@ if (!$conn) {
 $visibilityCondition = crmNotificationLeadVisibilityCondition(
     'n',
     crmLeadsCanViewAll($userId, $conn),
-    crmLeadsHasSoftDeleteSchema($conn)
+    crmLeadsHasSoftDeleteSchema($conn),
+    userHasPermission($userId, 'crm_closures.approve')
 );
 $stmt = $conn->prepare(
     'SELECT COUNT(*) AS unread_count FROM crm_notifications n

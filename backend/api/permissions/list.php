@@ -19,7 +19,21 @@ ensurePermissionDefinitions([
     'dealer_sim_activation.import', 'dealers.import', 'technicians.import',
     'support.view', 'support.add', 'support.edit', 'support.delete',
     'support.assign', 'support.close', 'support.qa.view', 'support.qa.manage',
-    'crm_leads.transfer', 'crm_leads.transfer_bulk', 'crm_leads.transfer_history'
+    'crm_leads.view', 'crm_leads.assign',
+    'crm_leads.transfer', 'crm_leads.transfer_bulk', 'crm_leads.transfer_history',
+    'crm_pipelines.view', 'crm_pipelines.add', 'crm_pipelines.edit', 'crm_pipelines.delete',
+    'crm_campaigns.view', 'crm_campaigns.add', 'crm_campaigns.edit', 'crm_campaigns.delete',
+    'crm_lead_status.view', 'crm_lead_status.add', 'crm_lead_status.edit', 'crm_lead_status.activate',
+    'crm_closures.view', 'crm_closures.edit',
+    'crm_installations.view', 'crm_installations.assign', 'crm_installations.manage',
+    'crm_notifications.view',
+    'employee_working_reports.view', 'employee_working_reports.own.view',
+    'employee_working_reports.download',
+    'customer_payment_verification.review',
+    'customer_renewals.renew', 'customer_renewals.history',
+    'customers.update', 'users.status',
+    'devices.export', 'sims.export', 'dealers.export', 'technicians.export', 'stock.export',
+    'attendance.view', 'attendance.settings', 'attendance.self.view'
 ]);
 
 $db = new Database();

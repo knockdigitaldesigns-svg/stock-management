@@ -178,11 +178,34 @@ if ($assignedUserId !== '') {
 $sql =
     "SELECT f.id, f.lead_id, f.current_status_id, f.customer_need,
             CASE
+                WHEN f.completed_at IS NULL
+                     AND f.call_outcome IS NULL
+                     AND f.remarks = 'Scheduled during lead assignment'
+                THEN latest_activity.call_outcome
                 WHEN f.call_outcome IS NULL AND f.remarks = 'Scheduled during lead assignment'
                 THEN NULL
                 ELSE f.call_outcome
             END AS call_outcome,
             CASE
+                WHEN f.completed_at IS NULL
+                     AND f.call_outcome IS NULL
+                     AND f.remarks = 'Scheduled during lead assignment'
+                     AND latest_activity.call_outcome IN (
+                    'Did not pick',
+                    'Busy in another call',
+                    'User disconnected the call',
+                    'Switch off',
+                    'Out of coverage area / Network issue',
+                    'Call not connected / Cannot be completed',
+                    'Incorrect / Invalid number',
+                    'Incoming calls not available',
+                    'Number not in use / Does not exist / Out of service',
+                    'Other reason'
+                ) THEN 'Not Connected'
+                WHEN f.completed_at IS NULL
+                     AND f.call_outcome IS NULL
+                     AND f.remarks = 'Scheduled during lead assignment'
+                     AND latest_activity.id IS NOT NULL THEN 'Connected'
                 WHEN f.call_outcome IN (
                     'Did not pick',
                     'Busy in another call',
@@ -203,14 +226,27 @@ $sql =
                 ELSE NULL
             END AS connection_result,
             CASE
+                WHEN f.completed_at IS NULL
+                     AND f.call_outcome IS NULL
+                     AND f.remarks = 'Scheduled during lead assignment'
+                THEN latest_activity.remarks
                 WHEN f.call_outcome IS NULL AND f.remarks = 'Scheduled during lead assignment'
                 THEN NULL
                 ELSE f.remarks
             END AS remarks,
-            (f.call_outcome IS NULL AND f.remarks = 'Scheduled during lead assignment') AS is_assignment_schedule,
+            (f.call_outcome IS NULL
+                AND f.remarks = 'Scheduled during lead assignment'
+                AND latest_activity.id IS NULL) AS is_assignment_schedule,
+            (f.completed_at IS NULL
+                AND f.call_outcome IS NULL
+                AND f.remarks = 'Scheduled during lead assignment') AS is_scheduled_followup,
             CASE WHEN f.completed_at IS NULL THEN f.next_followup_date ELSE NULL END AS next_followup_date,
             CASE WHEN f.completed_at IS NULL THEN f.next_followup_time ELSE NULL END AS next_followup_time,
             f.completed_at, f.updated_by_user_id,
+            CASE WHEN latest_activity.id IS NOT NULL
+                 THEN COALESCE(NULLIF(activity_user.employee_name, ''), activity_user.username, 'Unknown user')
+                 ELSE NULL
+            END AS latest_activity_updated_by,
             f.created_at, f.updated_at, l.created_at AS lead_created_at,
             l.lead_name, l.mobile_no, l.assigned_user_id, l.lead_status_id,
             p.pipeline_name, c.campaign_name,
@@ -225,6 +261,27 @@ $sql =
      LEFT JOIN crm_lead_status_master s ON s.id = f.current_status_id
      LEFT JOIN crm_lead_status_master current_s ON current_s.id = l.lead_status_id
      LEFT JOIN users u ON u.id = l.assigned_user_id
+     LEFT JOIN crm_lead_followups latest_activity
+       ON latest_activity.id = (
+            SELECT activity.id
+            FROM crm_lead_followups activity
+            WHERE f.completed_at IS NULL
+              AND f.call_outcome IS NULL
+              AND f.remarks = 'Scheduled during lead assignment'
+              AND activity.lead_id = f.lead_id
+              AND activity.completed_at IS NOT NULL
+              AND (
+                  activity.completed_at < f.created_at
+                  OR (activity.completed_at = f.created_at AND activity.id < f.id)
+              )
+              AND NOT (
+                  activity.call_outcome IS NULL
+                  AND COALESCE(activity.remarks, '') = 'Scheduled during lead assignment'
+              )
+            ORDER BY activity.completed_at DESC, activity.id DESC
+            LIMIT 1
+       )
+     LEFT JOIN users activity_user ON activity_user.id = latest_activity.updated_by_user_id
      WHERE " . implode(' AND ', $where);
 if ($view === 'Completed') {
     $sql .= ' ORDER BY f.completed_at DESC, f.id DESC';

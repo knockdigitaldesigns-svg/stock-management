@@ -16,7 +16,7 @@ $payload = $isInactivityLogout ? getCurrentUserFromToken() : authenticate();
 if (!$payload) {
     sendResponse(false, 'Invalid or expired token', [], [], 401);
 }
-$userId = (int) ($payload['user_id'] ?? 0);
+$userId = (int) ($payload['auth_user_id'] ?? $payload['user_id'] ?? 0);
 $sessionId = (string) ($payload['sid'] ?? '');
 if (!$userId || $sessionId === '') {
     sendResponse(false, 'Your session is no longer valid.', [], [], 401);
@@ -125,6 +125,14 @@ try {
     }
     $sessionEnded = $clearSession->affected_rows === 1;
     $clearSession->close();
+    if (isSuperAdminUser($userId)) {
+        accountImpersonationEnd(
+            $conn,
+            $userId,
+            $sessionId,
+            $isInactivityLogout ? 'inactivity_logout' : 'logout'
+        );
+    }
     $conn->commit();
 } catch (Throwable $error) {
     $conn->rollback();

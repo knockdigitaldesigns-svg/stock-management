@@ -17,6 +17,22 @@ if (!$userId) {
 
 $permissions = getUserPermissions($userId);
 $user = getCurrentUserDetails($userId);
+if (!$user) {
+    sendResponse(false, 'Unable to load authenticated user details.', [], [], 500);
+}
+$user['impersonation'] = null;
+if (!empty($payload['impersonating'])) {
+    $actingUser = getCurrentUserDetails((int) ($payload['auth_user_id'] ?? 0));
+    $user['impersonation'] = [
+        'active' => true,
+        'acting_user' => [
+            'id' => (int) ($actingUser['id'] ?? 0),
+            'username' => (string) ($actingUser['username'] ?? ''),
+            'employee_name' => (string) ($actingUser['employee_name'] ?? $actingUser['username'] ?? '')
+        ],
+        'started_at' => (string) ($payload['switch_started_at'] ?? '')
+    ];
+}
 
 sendResponse(true, 'Permissions fetched successfully', [
     'user' => $user,

@@ -1,17 +1,37 @@
 <?php
 
-function crmNotificationLeadVisibilityCondition(string $alias, bool $canViewAll, bool $hasSoftDeleteSchema): string
+function crmNotificationLeadVisibilityCondition(
+    string $alias,
+    bool $canViewAll,
+    bool $hasSoftDeleteSchema,
+    bool $canApproveClosures = false
+): string
 {
     if ($canViewAll) {
         return '';
     }
 
     $activeLeadCondition = $hasSoftDeleteSchema ? ' AND visible_lead.deleted_at IS NULL' : '';
+    $targetedEventCondition = "{$alias}.notification_type IN (
+        'new_lead_assigned',
+        'lead_transferred_from_you',
+        'lead_transferred_to_you',
+        'lead_reassigned_returned',
+        'lead_converted',
+        'lead_approved',
+        'lead_rejected',
+        'lead_closure_submitted'
+    )";
+    $approvalCondition = $canApproveClosures
+        ? " OR {$alias}.related_entity_type = 'lead_closure'"
+        : '';
     return " AND (
         (
             COALESCE({$alias}.related_lead_id, 0) = 0
             AND COALESCE({$alias}.related_entity_type, '') NOT IN ('lead', 'lead_closure')
         )
+        OR {$targetedEventCondition}
+        {$approvalCondition}
         OR EXISTS (
             SELECT 1
             FROM crm_leads visible_lead

@@ -1,0 +1,90 @@
+.switch-account-card {
+    padding: 1.25rem;
+}
+
+.switch-account-search {
+    max-width: 520px;
+    margin-bottom: 1.25rem;
+}
+
+.switch-account-search label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: #334155;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.switch-account-table-wrap {
+    overflow-x: auto;
+}
+
+.switch-account-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+
+.switch-account-table th,
+.switch-account-table td {
+    padding: 0.85rem 0.75rem;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+}
+
+.switch-account-table th {
+    color: #475569;
+    background: #f8fafc;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.switch-account-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.switch-account-name svg {
+    color: #64748b;
+}
+
+.switch-account-select {
+    min-width: 76px;
+}
+
+.switch-account-empty {
+    padding: 2rem !important;
+    color: #64748b;
+    text-align: center;
+}
+
+.switch-account-confirm-user {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 1rem;
+    padding: 0.85rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    background: #f8fafc;
+}
+
+.switch-account-confirm-user span {
+    color: #64748b;
+    font-size: 0.875rem;
+}
+
+@media (max-width: 640px) {
+    .switch-account-card {
+        padding: 0.75rem;
+    }
+
+    .switch-account-table th,
+    .switch-account-table td {
+        padding: 0.7rem 0.5rem;
+    }
+}

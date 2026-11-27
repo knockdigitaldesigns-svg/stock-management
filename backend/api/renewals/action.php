@@ -9,7 +9,7 @@ $paymentMode = trim((string)($payload['payment_mode'] ?? ''));
 if ($paymentMode !== '' && !in_array($paymentMode, getPaymentModes(), true)) throw new Exception('Invalid payment mode.');
 $permission = in_array($action, ['Renew SIM', 'Reactivate SIM'], true) ? 'customer_renewals.renew' : 'customer_renewals.edit';
 requirePermission($permission);
-$token = getCurrentUserFromToken();
+$token = authenticate();
 $userId = (int)($token['user_id'] ?? 0);
 $renewalId = (int)($payload['renewal_id'] ?? 0);
 $allowedActions = ['', 'Renew SIM', 'Deactivate SIM', 'Safe Custody', 'Reactivate SIM', 'Renewal Payment'];

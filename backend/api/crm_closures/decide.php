@@ -34,7 +34,7 @@ if ($decision === 'Approve' && $rejectionReason !== '') {
     sendResponse(false, 'A rejection reason is only accepted when rejecting a submission.', [], [], 400);
 }
 if ($decision === 'Approve') {
-    requirePermission('crm_installations.assign');
+    requireAnyPermission(['crm_installations.assign', 'crm_installations.manage']);
 }
 
 $conn = (new Database())->getConnection();

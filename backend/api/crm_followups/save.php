@@ -495,8 +495,8 @@ if ($scheduledFollowup) {
                    customer_need = NULLIF(?, ''),
                    call_outcome = NULLIF(?, ''),
                    remarks = NULLIF(?, ''),
-                   next_followup_date = NULL,
-                   next_followup_time = NULL,
+                   next_followup_date = NULLIF(?, ''),
+                   next_followup_time = NULLIF(?, ''),
                    completed_at = NOW(), updated_by_user_id = ?, created_at = NOW(),
                    closure_reason = NULLIF(?, '')
                WHERE id = ? AND completed_at IS NULL"
@@ -505,8 +505,8 @@ if ($scheduledFollowup) {
                    customer_need = NULLIF(?, ''),
                    call_outcome = NULLIF(?, ''),
                    remarks = NULLIF(?, ''),
-                   next_followup_date = NULL,
-                   next_followup_time = NULL,
+                   next_followup_date = NULLIF(?, ''),
+                   next_followup_time = NULLIF(?, ''),
                    completed_at = NOW(), updated_by_user_id = ?, created_at = NOW()
                WHERE id = ? AND completed_at IS NULL";
         $updateSchedule = $conn->prepare($updateScheduleSql);
@@ -518,22 +518,26 @@ if ($scheduledFollowup) {
         }
         if ($hasClosureReasonColumns) {
             $updateSchedule->bind_param(
-                'isssisi',
+                'isssssisi',
                 $statusId,
                 $customerNeed,
                 $callOutcome,
                 $remarks,
+                $dateValue,
+                $timeValue,
                 $userId,
                 $closureReason,
                 $scheduledFollowup['id']
             );
         } else {
             $updateSchedule->bind_param(
-                'isssii',
+                'isssssii',
                 $statusId,
                 $customerNeed,
                 $callOutcome,
                 $remarks,
+                $dateValue,
+                $timeValue,
                 $userId,
                 $scheduledFollowup['id']
             );
@@ -599,12 +603,12 @@ if (!$isAssignmentScheduleActivity) {
              next_followup_date, next_followup_time, completed_at, closure_reason,
              updated_by_user_id)
            VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
-                   NULL, NULL, NOW(), NULLIF(?, ''), ?)"
+                    NULLIF(?, ''), NULLIF(?, ''), NOW(), NULLIF(?, ''), ?)"
         : "INSERT INTO crm_lead_followups
             (lead_id, current_status_id, customer_need, call_outcome, remarks,
              next_followup_date, next_followup_time, completed_at, updated_by_user_id)
            VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
-                   NULL, NULL, NOW(), ?)";
+                    NULLIF(?, ''), NULLIF(?, ''), NOW(), ?)";
     $insertStmt = $conn->prepare($insertSql);
     if (!$insertStmt) {
         $error = $conn->error;
@@ -614,23 +618,27 @@ if (!$isAssignmentScheduleActivity) {
     }
     if ($hasClosureReasonColumns) {
         $insertStmt->bind_param(
-            'iissssi',
+            'iissssssi',
             $leadId,
             $statusId,
             $customerNeed,
             $callOutcome,
             $remarks,
+            $dateValue,
+            $timeValue,
             $closureReason,
             $userId
         );
     } else {
         $insertStmt->bind_param(
-            'iisssi',
+            'iisssssi',
             $leadId,
             $statusId,
             $customerNeed,
             $callOutcome,
             $remarks,
+            $dateValue,
+            $timeValue,
             $userId
         );
     }

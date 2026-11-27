@@ -46,6 +46,7 @@ export const AuthProvider = ({ children }) => {
     const lastActivityRef = useRef(0);
     const lastActivityWriteRef = useRef(0);
     const lastActivitySyncRef = useRef(0);
+    const authContextRevisionRef = useRef(0);
 
     useEffect(() => {
         if (user) {
@@ -69,6 +70,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         let active = true;
+        const requestRevision = authContextRevisionRef.current;
         const refreshPermissions = async () => {
             try {
                 const response = await api.get('/auth/permissions.php');
@@ -76,8 +78,16 @@ export const AuthProvider = ({ children }) => {
                 if (!response.data?.success || !Array.isArray(permissionList)) {
                     throw new Error(response.data?.message || 'Invalid permissions response.');
                 }
-                if (active) {
+                if (active && requestRevision === authContextRevisionRef.current) {
                     setPermissions(permissionList);
+                    const serverUser = response.data?.data?.user;
+                    if (serverUser && typeof serverUser === 'object') {
+                        setUser((current) => ({
+                            ...serverUser,
+                            inactivity_timeout_seconds: current?.inactivity_timeout_seconds
+                                ?? serverUser.inactivity_timeout_seconds
+                        }));
+                    }
                 }
             } catch (error) {
                 console.error('Unable to refresh authenticated user permissions.', error);
@@ -91,6 +101,7 @@ export const AuthProvider = ({ children }) => {
     }, [user?.id]);
 
     const login = (userData, permissionList = []) => {
+        authContextRevisionRef.current += 1;
         localStorage.removeItem(SESSION_END_STORAGE_KEY);
         localStorage.setItem(ACTIVITY_STORAGE_KEY, String(Date.now()));
         setUser(userData);
@@ -108,8 +119,51 @@ export const AuthProvider = ({ children }) => {
             throw new Error('Unable to refresh user permissions.');
         }
         setPermissions(permissionList);
+        const serverUser = response.data?.data?.user;
+        if (serverUser && typeof serverUser === 'object') {
+            setUser((current) => ({
+                ...serverUser,
+                inactivity_timeout_seconds: current?.inactivity_timeout_seconds
+                    ?? serverUser.inactivity_timeout_seconds
+            }));
+        }
         return permissionList;
     }, []);
+
+    const applyAccountResponse = useCallback((data) => {
+        if (!data?.user || !Array.isArray(data.permissions)) {
+            throw new Error('The server returned an invalid account context.');
+        }
+        authContextRevisionRef.current += 1;
+        const nextUser = {
+            ...data.user,
+            inactivity_timeout_seconds: user?.inactivity_timeout_seconds
+                ?? data.user.inactivity_timeout_seconds
+        };
+        localStorage.setItem('user', JSON.stringify(nextUser));
+        localStorage.setItem('permissions', JSON.stringify(data.permissions));
+        setUser(nextUser);
+        setPermissions(data.permissions);
+        return data;
+    }, [user?.inactivity_timeout_seconds]);
+
+    const switchAccount = useCallback(async (targetUserId) => {
+        const response = await api.post('/auth/switch_account.php', {
+            target_user_id: Number(targetUserId)
+        });
+        if (!response.data?.success) {
+            throw new Error(response.data?.message || 'Unable to switch accounts.');
+        }
+        return applyAccountResponse(response.data.data);
+    }, [applyAccountResponse]);
+
+    const returnToOriginalAccount = useCallback(async () => {
+        const response = await api.post('/auth/return_account.php', {});
+        if (!response.data?.success) {
+            throw new Error(response.data?.message || 'Unable to restore the Super Admin account.');
+        }
+        return applyAccountResponse(response.data.data);
+    }, [applyAccountResponse]);
 
     const logout = async () => {
         const token = localStorage.getItem('token');
@@ -127,6 +181,7 @@ export const AuthProvider = ({ children }) => {
             }
         }
         if (token && localStorage.getItem('token') !== token) return;
+        authContextRevisionRef.current += 1;
         localStorage.setItem(SESSION_END_STORAGE_KEY, JSON.stringify({
             at: Date.now(),
             reason: 'logout',
@@ -215,6 +270,7 @@ export const AuthProvider = ({ children }) => {
             localStorage.removeItem('user');
             localStorage.removeItem('permissions');
             localStorage.removeItem(ACTIVITY_STORAGE_KEY);
+            authContextRevisionRef.current += 1;
             setUser(null);
             setPermissions([]);
             if (window.location.pathname !== '/login') {
@@ -252,6 +308,31 @@ export const AuthProvider = ({ children }) => {
         };
 
         const onStorage = (event) => {
+            if (event.key === 'user') {
+                authContextRevisionRef.current += 1;
+                if (!event.newValue) {
+                    setUser(null);
+                } else {
+                    try {
+                        setUser(JSON.parse(event.newValue));
+                    } catch (error) {
+                        console.error('Unable to read cross-tab account context.', error);
+                    }
+                }
+            }
+            if (event.key === 'permissions') {
+                authContextRevisionRef.current += 1;
+                if (!event.newValue) {
+                    setPermissions([]);
+                } else {
+                    try {
+                        const nextPermissions = JSON.parse(event.newValue);
+                        setPermissions(Array.isArray(nextPermissions) ? nextPermissions : []);
+                    } catch (error) {
+                        console.error('Unable to read cross-tab permissions.', error);
+                    }
+                }
+            }
             if (event.key === ACTIVITY_STORAGE_KEY && event.newValue) {
                 const activityAt = Number(event.newValue);
                 if (Number.isFinite(activityAt) && activityAt > lastActivityRef.current) {
@@ -282,6 +363,7 @@ export const AuthProvider = ({ children }) => {
                 localStorage.removeItem('user');
                 localStorage.removeItem('permissions');
                 localStorage.removeItem(ACTIVITY_STORAGE_KEY);
+                authContextRevisionRef.current += 1;
                 setUser(null);
                 setPermissions([]);
                 if (window.location.pathname !== '/login') {
@@ -304,6 +386,7 @@ export const AuthProvider = ({ children }) => {
                     return;
                 }
                 if (matchesEndEvent) return;
+                authContextRevisionRef.current += 1;
                 setUser(null);
                 setPermissions([]);
                 window.location.assign('/login');
@@ -358,19 +441,33 @@ export const AuthProvider = ({ children }) => {
     }, [permissions]);
 
     const isAuthenticated = Boolean(user && localStorage.getItem('token'));
+    const isImpersonating = user?.impersonation?.active === true;
 
     const value = useMemo(() => ({
         user,
         permissions,
         isAuthenticated,
+        isImpersonating,
         login,
         logout,
+        switchAccount,
+        returnToOriginalAccount,
         updatePermissions,
         refreshPermissions,
         hasPermission,
         role: user?.role ?? null,
         currentUser: user
-    }), [user, permissions, isAuthenticated, updatePermissions, refreshPermissions, hasPermission]);
+    }), [
+        user,
+        permissions,
+        isAuthenticated,
+        isImpersonating,
+        switchAccount,
+        returnToOriginalAccount,
+        updatePermissions,
+        refreshPermissions,
+        hasPermission
+    ]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
