@@ -19,7 +19,14 @@ if (!$conn) {
 }
 
 $forAllocation = isset($_GET['for_allocation']) && $_GET['for_allocation'] === '1';
-$where = ['d.deleted_at IS NULL'];
+$includeArchived = isset($_GET['include_archived']) && $_GET['include_archived'] === '1';
+if ($includeArchived) {
+    requirePermission('devices.delete');
+}
+$where = $includeArchived ? ['d.deleted_at IS NOT NULL'] : ['d.deleted_at IS NULL'];
+if ($forAllocation) {
+    $where[] = 'd.deleted_at IS NULL';
+}
 $params = [];
 $types = '';
 if (($search = trim((string)($_GET['search'] ?? ''))) !== '') { $where[] = '(d.imei_no LIKE ? OR dm.device_type LIKE ? OR d.notes LIKE ?)'; $like = "%$search%"; array_push($params, $like, $like, $like); $types .= 'sss'; }
@@ -60,7 +67,7 @@ if (($status = strtolower(trim((string)($_GET['status'] ?? '')))) !== '') { $whe
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $pageSize = min(100, max(1, (int) ($_GET['page_size'] ?? 10)));
 $sql = "
-                SELECT d.id, d.purchase_date, d.device_model_id, d.imei_no, d.notes,
+                SELECT d.id, d.purchase_date, d.device_model_id, d.imei_no, d.notes, d.deleted_at,
                         $effectiveStatusSql AS status,
                         dm.device_type AS model_name,
                         EXISTS (
@@ -72,7 +79,7 @@ $sql = "
                             UNION ALL
                             SELECT 1 FROM customer_vehicle_details dep
                             WHERE dep.device_id = d.id
-                               OR BINARY dep.imei_no = BINARY d.imei_no
+
                             UNION ALL
                             SELECT 1 FROM courier_requests dep WHERE dep.device_id = d.id
                         ) AS has_history_dependencies,

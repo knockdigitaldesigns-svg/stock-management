@@ -27,6 +27,7 @@ const DeviceMaintenance = () => {
     const [filters, setFilters] = useState(emptyTableFilters);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
+    const [showArchivedDevices, setShowArchivedDevices] = useState(false);
     const [pagination, setPagination] = useState({ total: 0, page: 1, page_size: 10, total_pages: 1 });
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
@@ -46,7 +47,8 @@ const DeviceMaintenance = () => {
                     device_model: targetFilters.deviceModel || '',
                     status: targetFilters.status || '',
                     date_from: targetFilters.date_from || '',
-                    date_to: targetFilters.date_to || ''
+                    date_to: targetFilters.date_to || '',
+                    include_archived: showArchivedDevices ? '1' : '0'
                 }
             });
             if (response.data.success) {
@@ -84,7 +86,7 @@ const DeviceMaintenance = () => {
 
     useEffect(() => {
         fetchDevices(page, pageSize, filters);
-    }, [page, pageSize, filters]);
+    }, [page, pageSize, filters, showArchivedDevices]);
 
     const updateFilters = (nextFilters) => {
         setFilters(nextFilters);
@@ -93,6 +95,11 @@ const DeviceMaintenance = () => {
 
     const updatePageSize = (nextPageSize) => {
         setPageSize(nextPageSize);
+    };
+
+    const toggleArchivedDevices = () => {
+        setShowArchivedDevices((current) => !current);
+        setPage(1);
     };
 
     const getStatusBadge = (status) => {
@@ -112,6 +119,11 @@ const DeviceMaintenance = () => {
                     <p className="page-subtitle">Receive, track, and manage device inventory.</p>
                 </div>
                 <div className="header-actions">
+                    {canDeleteDevices && (
+                        <button className="btn btn-outline" type="button" onClick={toggleArchivedDevices}>
+                            {showArchivedDevices ? 'Hide Archived' : 'Show Archived'}
+                        </button>
+                    )}
                     {hasPermission('devices.add') && (
                         <>
                             <button className="btn btn-outline" onClick={() => setIsExcelModalOpen(true)}>
@@ -174,11 +186,11 @@ const DeviceMaintenance = () => {
                                         <td>{formatDate(device.purchase_date)}</td>
                                         <td className="truncate-cell" title={device.model_name}>{device.model_name}</td>
                                         <td className="truncate-cell" title={device.imei_no}>{device.imei_no}</td>
-                                        <td>{getStatusBadge(device.status)}</td>
+                                        <td>{device.deleted_at ? <span className="badge badge-secondary">Archived</span> : getStatusBadge(device.status)}</td>
                                         <td>
                                             <div className="action-buttons">
                                                 <button className="icon-btn view" type="button" aria-label="View device" title="View" onClick={() => setViewingDevice(device)}><Eye size={16} /></button>
-                                                {canEditDevices && <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>}
+                                                {canEditDevices && !device.deleted_at && <button className="icon-btn edit" type="button" aria-label="Edit device" onClick={() => setEditingDevice(device)}><Edit size={16} /></button>}
                                                 {canDeleteDevices && <button className="icon-btn delete" type="button" aria-label="Delete device" onClick={() => setDeleteTarget(device)}><Trash2 size={16} /></button>}
                                             </div>
                                         </td>
@@ -245,12 +257,10 @@ const DeviceMaintenance = () => {
                         </>
                     }
                 >
-                    <p>Are you sure you want to delete device <strong>{deleteTarget.imei_no}</strong>?</p>
-                    {Number(deleteTarget.has_history_dependencies) === 1 && (
-                        <p className="text-warning">
-                            This device is referenced by allocations, transactions, transfers, courier requests, or customer vehicles. It will be archived so history is preserved and it cannot be allocated again.
-                        </p>
-                    )}
+                    <p>Are you sure you want to permanently delete device <strong>{deleteTarget.imei_no}</strong>?</p>
+                    <p className="text-warning">
+                        This permanently removes the device and its linked allocations, stock/transfer and courier records, CRM installation-device progress, and matching customer vehicle, installation, payment, renewal, and verification records. The customer account and CRM lead remain. This action cannot be undone.
+                    </p>
                 </Modal>
             )}
         </div>

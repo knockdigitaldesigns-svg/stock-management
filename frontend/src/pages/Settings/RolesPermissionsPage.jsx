@@ -526,8 +526,10 @@ const closeFeedback = () => {
 
     const fetchPermissions = async (roleId = selectedRoleId) => {
         try {
-            const definitionsResponse = await api.get('/permissions/list.php');
-            const definitions = definitionsResponse.data.data?.permissions || [];
+            const definitions = await fetchAllPaginated(
+                (page, pageSize) => api.get('/permissions/list.php', { params: { page, page_size: pageSize } }),
+                'permissions'
+            );
             if (!roleId) {
                 setMatrix(buildPermissionMatrix(definitions));
                 return;

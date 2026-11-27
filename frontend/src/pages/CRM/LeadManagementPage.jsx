@@ -306,10 +306,11 @@ const LeadManagementPage = ({ scope = 'all' }) => {
 
     const handleChange = (event) => {
         const { name, value } = event.target;
+        const nextValue = name === 'mobile_no' ? value.replace(/\D/g, '').slice(0, 10) : value;
         setModalError('');
         setForm((current) => ({
             ...current,
-            [name]: value,
+            [name]: nextValue,
             ...(name === 'pipeline_id' ? { campaign_id: '' } : {})
         }));
     };
@@ -1085,8 +1086,8 @@ const LeadManagementPage = ({ scope = 'all' }) => {
                     </div>
                     <div className="lead-form-group">
                         <label htmlFor="mobile_no">Mobile Number <span className="required">*</span></label>
-                        <input id="mobile_no" name="mobile_no" className="form-control" type="tel" inputMode="tel" maxLength={30} value={form.mobile_no} onChange={handleChange} required aria-invalid={Boolean(form.mobile_no && !normalizedFormMobile) || (duplicateCheckIsCurrent && duplicateCheck.status === 'duplicate')} />
-                        <small>Enter 10 digits. Spaces, +, hyphens, and parentheses are ignored.</small>
+                        <input id="mobile_no" name="mobile_no" className="form-control" type="tel" inputMode="numeric" maxLength={10} value={form.mobile_no} onChange={handleChange} required aria-invalid={Boolean(form.mobile_no && !normalizedFormMobile) || (duplicateCheckIsCurrent && duplicateCheck.status === 'duplicate')} />
+                        <small>Enter a 10-digit mobile number.</small>
                         {form.mobile_no && !normalizedFormMobile && <small className="text-danger" role="alert">Enter a valid 10-digit mobile number.</small>}
                         {duplicateCheckStatus === 'checking' && <small>Checking this campaign...</small>}
                         {duplicateCheckStatus === 'duplicate' && <small className="text-danger" role="alert">{duplicateMobileMessage}</small>}
