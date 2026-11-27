@@ -13,7 +13,7 @@ const FIELD_LABELS = {
     role_id: 'Role', vehicle_no: 'Vehicle No', vehicle_type_id: 'Vehicle Type', imei_no: 'IMEI No', device_model_id: 'Device Model',
     sim_no_1: 'SIM No 1', sim_no_2: 'SIM No 2', installation_date: 'Installation Date', validity_months: 'Validity Months',
     platform_id: 'Platform', owner_id: 'Owner', owner: 'Owner', customer_id: 'Customer', customer: 'Customer', device_id: 'Device', device: 'Device', sim: 'SIM',
-    lead_closure_id: 'Lead Closure', installation_person_id: 'Installation Person', record_snapshot: 'Record Snapshot'
+    lead_closure_id: 'Lead Closure', lead_closure_by_user_id: 'Lead Closure By', installation_person_id: 'Installation Person', record_snapshot: 'Record Snapshot'
 };
 
 const fieldLabel = (field) => FIELD_LABELS[field] || String(field || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());

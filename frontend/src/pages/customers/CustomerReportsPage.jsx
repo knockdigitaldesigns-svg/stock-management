@@ -153,7 +153,7 @@ const formatReportAmount = (value) => {
 const CustomerReportsPage = () => {
     const [filters, setFilters] = useState(emptyFilters());
     const [reports, setReports] = useState([]);
-    const [options, setOptions] = useState({ locations: [], months: [], years: [], people: [], leadClosures: [], deviceTypes: [], validities: [] });
+    const [options, setOptions] = useState({ locations: [], months: [], years: [], people: [], leadClosureUsers: [], deviceTypes: [], validities: [] });
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
@@ -342,7 +342,7 @@ const CustomerReportsPage = () => {
                             }} />
                         </div>
                         <SearchableDropdown label="Installation Person" value={filters.installationPerson} options={[{ value: '', label: 'All' }, ...options.people.map(person => ({ value: person.value, label: `${person.label} (${person.type})` }))]} onChange={value => updateFilter('installationPerson', value)} />
-                        <SearchableDropdown label="Lead Closure" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosures.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
+                        <SearchableDropdown label="Lead Closure By" value={filters.leadClosure} options={[{ value: '', label: 'All' }, ...options.leadClosureUsers.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('leadClosure', value)} />
                         <SearchableDropdown label="Payment" value={filters.payment} options={[{ value: '', label: 'All' }, ...PAYMENT_STATUS_FILTERS]} onChange={value => updateFilter('payment', value)} />
                         <SearchableDropdown label="Device Type" value={filters.deviceType} options={[{ value: '', label: 'All' }, ...options.deviceTypes.map(item => ({ value: item.id, label: item.name }))]} onChange={value => updateFilter('deviceType', value)} />
                         <SearchableDropdown label="Validity" value={filters.validity} options={[{ value: '', label: 'All' }, ...options.validities.map(value => ({ value, label: `${value} Months` }))]} onChange={value => updateFilter('validity', value)} />

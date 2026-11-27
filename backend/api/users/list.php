@@ -11,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 
 $campaignUsersOnly = ($_GET['scope'] ?? '') === 'campaign_users';
 $switchAccountsOnly = ($_GET['scope'] ?? '') === 'switch_accounts';
+$leadClosureUsersOnly = ($_GET['scope'] ?? '') === 'lead_closure_by_users';
 if ($switchAccountsOnly) {
     $currentUser = authenticate();
     $actingUserId = (int) ($currentUser['auth_user_id'] ?? $currentUser['user_id'] ?? 0);
@@ -24,6 +25,15 @@ if ($switchAccountsOnly) {
         'crm_campaigns.view',
         'crm_campaigns.add',
         'crm_campaigns.edit'
+    ]);
+} elseif ($leadClosureUsersOnly) {
+    requireAnyPermission([
+        'customers.view',
+        'customers.add',
+        'customers.edit',
+        'courier.view',
+        'courier.add',
+        'courier.edit'
     ]);
 } else {
     requirePermission('users.view');
@@ -57,6 +67,32 @@ if ($switchAccountsOnly) {
 $normalAccountRoleCondition = "LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
     AND NOT EXISTS (SELECT 1 FROM dealers d WHERE d.user_id = u.id)
     AND NOT EXISTS (SELECT 1 FROM technicians t WHERE t.user_id = u.id)";
+
+if ($leadClosureUsersOnly) {
+    $stmt = $conn->prepare(
+        "SELECT u.id, u.employee_name, u.username,
+                COALESCE(NULLIF(r.role_name, ''), u.role) AS role_name
+         FROM users u
+         LEFT JOIN roles r ON r.id = u.role_id
+         WHERE {$normalAccountRoleCondition}
+           AND LOWER(COALESCE(u.status, 'active')) = 'active'
+           AND LOWER(COALESCE(r.status, 'active')) = 'active'
+         ORDER BY COALESCE(NULLIF(u.employee_name, ''), u.username) ASC, u.id ASC"
+    );
+    if (!$stmt) {
+        $conn->close();
+        sendResponse(false, 'Failed to prepare Lead Closure By user query.', [], [], 500);
+    }
+    if (!$stmt->execute()) {
+        $stmt->close();
+        $conn->close();
+        sendResponse(false, 'Failed to fetch Lead Closure By users.', [], [], 500);
+    }
+    $users = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    $conn->close();
+    sendResponse(true, 'Lead Closure By users fetched successfully.', ['users' => $users]);
+}
 
 if ($switchAccountsOnly) {
     $eligibleAccountCondition = $normalAccountRoleCondition . "

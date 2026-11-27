@@ -62,7 +62,7 @@ if ($installationPerson !== '') {
     }
 }
 if ($leadClosure > 0) {
-    $conditions[] = 'ci.lead_closure_id = ?';
+    $conditions[] = 'ci.lead_closure_by_user_id = ?';
     $params[] = $leadClosure;
     $types .= 'i';
 }
@@ -152,7 +152,8 @@ $sql = "
         cv.validity_months,
         ci.installation_person_type,
         CASE WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name ELSE t.technician_name END AS installation_person,
-        lc.lead_closure_name AS lead_closure,
+        ci.lead_closure_by_user_id,
+        COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
         ci.installation_date,
         cp.payment_status,
         cp.amount_paid,
@@ -174,6 +175,7 @@ $sql = "
     LEFT JOIN technicians t ON t.id = ci.installation_person_id AND ci.installation_person_type = 'Technician'
     LEFT JOIN dealers d ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
     LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
+    LEFT JOIN users closure_user ON closure_user.id = ci.lead_closure_by_user_id
     LEFT JOIN customer_payments cp ON cp.id = (
         SELECT id FROM customer_payments
         WHERE customer_id = c.id
@@ -233,9 +235,19 @@ while ($optionResult && ($row = $optionResult->fetch_assoc())) {
     $people[] = ['value' => $row['person_type'] . ':' . $row['id'], 'label' => $row['name'], 'type' => $typeLabel];
 }
 
-$leadClosures = [];
-$optionResult = $conn->query("SELECT id, lead_closure_name FROM lead_closures WHERE status = 'Active' OR status IS NULL ORDER BY lead_closure_name");
-while ($optionResult && ($row = $optionResult->fetch_assoc())) $leadClosures[] = ['id' => (int)$row['id'], 'name' => $row['lead_closure_name']];
+$leadClosureUsers = [];
+$optionResult = $conn->query(
+    "SELECT u.id, COALESCE(NULLIF(u.employee_name, ''), u.username) AS name
+     FROM users u
+     LEFT JOIN roles r ON r.id = u.role_id
+     WHERE LOWER(COALESCE(u.status, 'active')) = 'active'
+       AND LOWER(COALESCE(r.status, 'active')) = 'active'
+       AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(r.role_name, ''), u.role, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('dealer', 'technician')
+       AND NOT EXISTS (SELECT 1 FROM dealers d WHERE d.user_id = u.id)
+       AND NOT EXISTS (SELECT 1 FROM technicians t WHERE t.user_id = u.id)
+     ORDER BY name"
+);
+while ($optionResult && ($row = $optionResult->fetch_assoc())) $leadClosureUsers[] = ['id' => (int)$row['id'], 'name' => $row['name']];
 
 $deviceTypes = [];
 $optionResult = $conn->query("SELECT id, device_type FROM device_types WHERE status IS NULL OR status = '' OR LOWER(status) = 'active' ORDER BY device_type");
@@ -249,6 +261,6 @@ $conn->close();
 sendResponse(true, 'Customer reports fetched successfully.', [
     'reports' => $reports,
     ...($paginated ? ['pagination' => $pagination] : []),
-    'options' => compact('locations', 'months', 'years', 'people', 'leadClosures', 'deviceTypes', 'validities')
+    'options' => compact('locations', 'months', 'years', 'people', 'leadClosureUsers', 'deviceTypes', 'validities')
 ]);
 ?>

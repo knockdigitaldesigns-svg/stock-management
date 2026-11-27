@@ -10,7 +10,7 @@ export const isInstallationPersonRequired = (installationType) =>
 
 export const isInstallationDetailsComplete = (installation) => Boolean(
     installation?.installation_person_type &&
-    installation?.lead_closure_id &&
+    installation?.lead_closure_by_user_id &&
     installation?.installation_date &&
     (!isInstallationPersonRequired(installation.installation_person_type) ||
         installation.installation_person_id)
@@ -30,8 +30,8 @@ export const mergeVehicleDraft = (vehicle, draftVehicle) => {
         mergedVehicle.vehicle_installation_person_id = installation.installation_person_id ||
             installation.vehicle_installation_person_id ||
             '';
-        mergedVehicle.vehicle_lead_closure_id = installation.lead_closure_id ||
-            installation.vehicle_lead_closure_id ||
+        mergedVehicle.vehicle_lead_closure_by_user_id = installation.lead_closure_by_user_id ||
+            installation.vehicle_lead_closure_by_user_id ||
             '';
         mergedVehicle.vehicle_installation_date = installation.installation_date ||
             installation.vehicle_installation_date ||
@@ -42,7 +42,7 @@ export const mergeVehicleDraft = (vehicle, draftVehicle) => {
             'vehicle_installation_person_type',
             'vehicle_installation_person_id',
             'vehicle_installation_person',
-            'vehicle_lead_closure_id',
+            'vehicle_lead_closure_by_user_id',
             'vehicle_lead_closure',
             'vehicle_installation_date'
         ]) {
@@ -115,8 +115,8 @@ export const resolveInstallationFormValues = ({
                 installation.installation_person_id ||
                 ownerId ||
                 '',
-        lead_closure_id: stored.lead_closure_id ||
-            installation.lead_closure_id ||
+        lead_closure_by_user_id: stored.lead_closure_by_user_id ||
+            installation.lead_closure_by_user_id ||
             '',
         installation_date: stored.installation_date ||
             installation.installation_date ||

@@ -81,7 +81,7 @@ const initialNewCustomerForm = {
     installation_person_type: 'Direct',
     installation_person_id: '',
     installation_date: getTodayDate(),
-    lead_closure_id: '',
+    lead_closure_by_user_id: '',
 
     // Step 4 - Payment Part 1
     totalSaleAmount: '',
@@ -213,7 +213,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
     const [platformsList, setPlatformsList]     = useState([]);
     const [vehicleTypesList, setVehicleTypesList] = useState([]);
     const [validitiesList, setValiditiesList]   = useState([]);
-    const [leadClosuresList, setLeadClosuresList] = useState([]);
+    const [closureUsersList, setClosureUsersList] = useState([]);
     const [saleAmountsList, setSaleAmountsList] = useState([]);
     
     const [loadingStock, setLoadingStock]       = useState(false);
@@ -469,13 +469,18 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                     setPlatformsList(data.platforms || []);
                     setVehicleTypesList(data.vehicle_types || []);
                     setValiditiesList(data.validities || []);
-                    setLeadClosuresList(data.lead_closures || []);
                     setSaleAmountsList(data.sale_amounts || []);
                 }
             } catch (err) {
                 console.error('Failed to fetch available stock for courier modal', err);
             } finally {
                 setLoadingStock(false);
+            }
+            try {
+                const response = await api.get('/users/list.php?scope=lead_closure_by_users');
+                setClosureUsersList(response.data?.data?.users || []);
+            } catch (err) {
+                console.error('Failed to fetch Lead Closure By users for courier modal', err);
             }
         };
 
@@ -541,7 +546,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             installation_person_type: 'Direct',
                             installation_person_id: '',
                             installation_date: parsed.step3.installation_date || getTodayDate(),
-                            lead_closure_id: parsed.step3.lead_closure_id || ''
+                            lead_closure_by_user_id: parsed.step3.lead_closure_by_user_id || ''
                         } : {}),
                         ...(parsed.step4 ? {
                             totalSaleAmount: parsed.step4.totalSaleAmount || '',
@@ -588,7 +593,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                             installation_person_type: parsed.step3.installation_person_type || 'Direct',
                             installation_person_id: parsed.step3.installation_person_id || '',
                             installation_date: parsed.step3.installation_date || getTodayDate(),
-                            lead_closure_id: parsed.step3.lead_closure_id || ''
+                            lead_closure_by_user_id: parsed.step3.lead_closure_by_user_id || ''
                         } : {}),
                         ...(parsed.step4 ? {
                             totalSaleAmount: parsed.step4.totalSaleAmount || '',
@@ -963,7 +968,7 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                         ? null
                         : Number(newCustomerForm.installation_person_id),
                     installation_date: newCustomerForm.installation_date,
-                    lead_closure_id: newCustomerForm.lead_closure_id ? Number(newCustomerForm.lead_closure_id) : null
+                    lead_closure_by_user_id: newCustomerForm.lead_closure_by_user_id ? Number(newCustomerForm.lead_closure_by_user_id) : null
                 },
                 ...paymentWorkflowData
             } : null;
@@ -1440,14 +1445,14 @@ const CourierModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
                                         <label className="form-label small font-weight-bold">Lead Closure By</label>
                                         <select
                                             className="form-control"
-                                            name="lead_closure_id"
-                                            value={newCustomerForm.lead_closure_id}
+                                            name="lead_closure_by_user_id"
+                                            value={newCustomerForm.lead_closure_by_user_id}
                                             onChange={handleNewCustomerChange}
                                             disabled={saving}
                                         >
-                                            <option value="">Select Lead Closure</option>
-                                            {leadClosuresList.map(lc => (
-                                                <option key={lc.id} value={lc.id}>{lc.name}</option>
+                                            <option value="">Select User</option>
+                                            {closureUsersList.map(user => (
+                                                <option key={user.id} value={user.id}>{user.employee_name || user.username}</option>
                                             ))}
                                         </select>
                                     </div>

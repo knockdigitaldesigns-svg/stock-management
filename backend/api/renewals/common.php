@@ -325,8 +325,9 @@ function renewalRowQuery($conn) {
             ELSE 'Not Paid'
         END AS payment_status,
         dt.device_type AS device_model, vt.vehicle_type, ci.id AS installation_record_id,
-        ci.installation_person_id, ci.lead_closure_id, ci.installation_date,
-        ci.installation_person_type, lc.lead_closure_name AS lead_closure,
+        ci.installation_person_id, ci.lead_closure_id, ci.lead_closure_by_user_id, ci.installation_date,
+        ci.installation_person_type,
+        COALESCE(NULLIF(TRIM(closure_user.employee_name), ''), NULLIF(TRIM(closure_user.username), ''), lc.lead_closure_name) AS lead_closure,
         CASE WHEN ci.installation_person_type = 'Dealer' THEN d.dealer_name ELSE t.technician_name END AS installation_person
         FROM customer_renewals cr
         INNER JOIN customers c ON c.id = cr.customer_id
@@ -338,6 +339,7 @@ function renewalRowQuery($conn) {
         LEFT JOIN technicians t ON t.id = ci.installation_person_id AND ci.installation_person_type = 'Technician'
         LEFT JOIN dealers d ON d.id = ci.installation_person_id AND ci.installation_person_type = 'Dealer'
         LEFT JOIN lead_closures lc ON lc.id = ci.lead_closure_id
+        LEFT JOIN users closure_user ON closure_user.id = ci.lead_closure_by_user_id
         LEFT JOIN (
             SELECT renewal_id,
                    SUM(payment_amount) AS total_payment_amount,

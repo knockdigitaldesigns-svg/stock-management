@@ -48,9 +48,6 @@ if ($action === 'complete') {
     if (!preg_match('/^\d{15}$/', $imei)) {
         sendResponse(false, 'Enter the installed 15-digit device IMEI.', [], [], 400);
     }
-    if (!preg_match('/^\d{10}$|^\d{13}$/', $simNumber1)) {
-        sendResponse(false, 'Enter the installed primary SIM number (10 or 13 digits).', [], [], 400);
-    }
     if ($simNumber2 !== '' &&
         (!preg_match('/^\d{10}$|^\d{13}$/', $simNumber2) || $simNumber2 === $simNumber1)) {
         sendResponse(false, 'Enter a valid secondary SIM number different from the primary SIM.', [], [], 400);
@@ -307,16 +304,22 @@ try {
     $assignedPersonType = (string) $closure['installation_person_type'];
     $assignedPersonId = (int) $closure['installation_person_id'];
     $expectedOwnerType = $assignedPersonType === 'Technician' ? 'technician' : 'dealer';
+    if (!crmClosureSimNumberIsOptional($deviceTypeName) &&
+        !preg_match('/^\d{10}$|^\d{13}$/', $simNumber1)) {
+        throw new DomainException('Enter the installed primary SIM number (10 or 13 digits).');
+    }
 
     $assetIds = [];
     $assetInputs = [
-        ['device', 'devices', 'imei_no', $imei],
-        ['sim', 'sims', 'sim_no', $simNumber1]
+        ['device', 'devices', 'imei_no', $imei, 'device']
     ];
-    if ($simNumber2 !== '') {
-        $assetInputs[] = ['sim', 'sims', 'sim_no', $simNumber2];
+    if ($simNumber1 !== '') {
+        $assetInputs[] = ['sim', 'sims', 'sim_no', $simNumber1, 'sim1'];
     }
-    foreach ($assetInputs as [$assetType, $table, $column, $assetNumber]) {
+    if ($simNumber2 !== '') {
+        $assetInputs[] = ['sim', 'sims', 'sim_no', $simNumber2, 'sim2'];
+    }
+    foreach ($assetInputs as [$assetType, $table, $column, $assetNumber, $assetKey]) {
         $assetStmt = $conn->prepare("SELECT id, status" . ($assetType === 'device' ? ', device_model_id' : '') . " FROM {$table} WHERE {$column} = ? LIMIT 1 FOR UPDATE");
         if (!$assetStmt) {
             throw new RuntimeException('Unable to prepare inventory lookup: ' . $conn->error);
@@ -398,11 +401,12 @@ try {
         if (($lastTransaction['transaction_type'] ?? '') === 'USE') {
             throw new DomainException("The entered {$assetType} already has a recorded usage transaction.");
         }
-        $assetIds[$assetType][] = $assetId;
+        $assetIds[$assetKey] = $assetId;
     }
-    $deviceId = (int) $assetIds['device'][0];
-    $simId1 = (int) $assetIds['sim'][0];
-    $simId2 = isset($assetIds['sim'][1]) ? (int) $assetIds['sim'][1] : null;
+    $deviceId = (int) $assetIds['device'];
+    $simId1 = $assetIds['sim1'] ?? null;
+    $simId2 = $assetIds['sim2'] ?? null;
+    $simNumber1Value = $simNumber1 !== '' ? $simNumber1 : null;
     $simNumber2Value = $simNumber2 !== '' ? $simNumber2 : null;
 
     $dateTimeValue = $dateTime->format('Y-m-d H:i:s');
@@ -480,7 +484,7 @@ try {
         $deviceTypeId,
         $imei,
         $simId1,
-        $simNumber1,
+        $simNumber1Value,
         $simId2,
         $simNumber2Value,
         $validityMonths
@@ -498,7 +502,7 @@ try {
         'device_model_id' => $deviceTypeId,
         'imei_no' => $imei,
         'sim_id_1' => $simId1,
-        'sim_no_1' => $simNumber1,
+        'sim_no_1' => $simNumber1Value,
         'sim_id_2' => $simId2,
         'sim_no_2' => $simNumber2 ?: null,
         'validity_months' => $validityMonths
@@ -637,7 +641,7 @@ try {
         $deviceId,
         $imei,
         $simId1,
-        $simNumber1,
+        $simNumber1Value,
         $simId2,
         $simNumber2Value,
         $validityMonths,

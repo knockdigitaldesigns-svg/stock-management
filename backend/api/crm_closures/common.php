@@ -6,6 +6,10 @@ require_once __DIR__ . '/../crm_followups/common.php';
 require_once __DIR__ . '/../../utils/payment_modes.php';
 require_once __DIR__ . '/../../utils/transaction_ids.php';
 
+function crmClosureSimNumberIsOptional(string $deviceType): bool {
+    return strtolower(trim($deviceType)) === 'bharat101 - ais 140';
+}
+
 function crmClosureValidateInstallationPayment(object $data, float $saleAmount): array {
     if ($saleAmount <= 0 || $saleAmount > 9999999999.99) {
         throw new DomainException('Enter a valid Total Sale Amount for this vehicle.');

@@ -78,7 +78,7 @@ const changedVehicleFieldCategories = {
     installation: new Set([
         'vehicle_installation_type',
         'vehicle_installation_person_id',
-        'vehicle_lead_closure_id',
+        'vehicle_lead_closure_by_user_id',
         'vehicle_installation_date'
     ]),
     paymentPart1: new Set([
@@ -239,7 +239,7 @@ const CustomerViewPage = () => {
         saleAmounts: [],
         technicians: [],
         dealers: [],
-        leadClosures: []
+        closureUsers: []
     });
 
     const triggerError = useCallback((msg) => {
@@ -539,7 +539,7 @@ const CustomerViewPage = () => {
                     validitiesResponse,
                     techniciansResponse,
                     dealersResponse,
-                    leadClosuresResponse
+                    closureUsersResponse
                 ] = await Promise.all([
                     api.get('/platforms/list.php'),
                     api.get('/vehicle_types/list.php'),
@@ -547,7 +547,7 @@ const CustomerViewPage = () => {
                     api.get('/sim_validities/list.php'),
                     api.get('/technicians/list.php'),
                     api.get('/dealers/list.php?for_installation=1'),
-                    api.get('/lead_closures/list.php')
+                    api.get('/users/list.php?scope=lead_closure_by_users')
                 ]);
 
                 const list = (response, key) => response.data?.data?.[key] || [];
@@ -563,7 +563,7 @@ const CustomerViewPage = () => {
                     validities: list(validitiesResponse, 'validities'),
                     technicians: list(techniciansResponse, 'technicians'),
                     dealers: list(dealersResponse, 'dealers'),
-                    leadClosures: list(leadClosuresResponse, 'lead_closures')
+                    closureUsers: list(closureUsersResponse, 'users')
                 });
                 try {
                     const saleAmountsResponse = await api.get('/sale_amounts/list.php');
@@ -710,7 +710,7 @@ const CustomerViewPage = () => {
                     ? `${type === 'Technician' ? 'Technician' : type} is required.`
                     : '',
                 vehicle_installation_date: dateError,
-                vehicle_lead_closure_id: vehicle.vehicle_lead_closure_id ? '' : 'Lead Closure By is required.'
+                vehicle_lead_closure_by_user_id: vehicle.vehicle_lead_closure_by_user_id ? '' : 'Lead Closure By user is required.'
             };
         }
         if (activeEditStep === 4) {
@@ -1155,14 +1155,14 @@ const CustomerViewPage = () => {
                     const changed = changedVehicles[vehicle.id] || {};
                     const installationValues = [
                         vehicle.vehicle_installation_type,
-                        vehicle.vehicle_lead_closure_id,
+                        vehicle.vehicle_lead_closure_by_user_id,
                         vehicle.vehicle_installation_date
                     ];
                     const hasInstallationData = installationValues.some((value) => value !== null && value !== undefined && value !== '');
                     const hasCompleteInstallation = isInstallationDetailsComplete({
                         installation_person_type: vehicle.vehicle_installation_type,
                         installation_person_id: vehicle.vehicle_installation_person_id,
-                        lead_closure_id: vehicle.vehicle_lead_closure_id,
+                        lead_closure_by_user_id: vehicle.vehicle_lead_closure_by_user_id,
                         installation_date: vehicle.vehicle_installation_date
                     });
                     if (changed.installation && hasInstallationData && !hasCompleteInstallation) {
@@ -1181,7 +1181,7 @@ const CustomerViewPage = () => {
                             installation_person_id: vehicle.vehicle_installation_person_id
                                 ? Number(vehicle.vehicle_installation_person_id)
                                 : null,
-                            lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
+                            lead_closure_by_user_id: Number(vehicle.vehicle_lead_closure_by_user_id),
                             installation_date: vehicle.vehicle_installation_date
                         } : vehicle.installation || null,
                         payment_part1: changed.paymentPart1 ? {
@@ -1403,7 +1403,7 @@ const CustomerViewPage = () => {
                         installation_person_id: vehicle.vehicle_installation_person_id
                             ? Number(vehicle.vehicle_installation_person_id)
                             : null,
-                        lead_closure_id: Number(vehicle.vehicle_lead_closure_id),
+                        lead_closure_by_user_id: Number(vehicle.vehicle_lead_closure_by_user_id),
                         installation_date: vehicle.vehicle_installation_date
                     });
                 } else if (activeEditStep === 4) {
@@ -1475,7 +1475,7 @@ const CustomerViewPage = () => {
                         ...persistedVehicle,
                         vehicle_installation_type: vehicle.vehicle_installation_type,
                         vehicle_installation_person_id: vehicle.vehicle_installation_person_id,
-                        vehicle_lead_closure_id: vehicle.vehicle_lead_closure_id,
+                        vehicle_lead_closure_by_user_id: vehicle.vehicle_lead_closure_by_user_id,
                         vehicle_installation_date: vehicle.vehicle_installation_date
                     };
                 } else if (activeEditStep === 4) {
@@ -1748,7 +1748,7 @@ const CustomerViewPage = () => {
                                                                     {viewField('Installation Type', vehicle.vehicle_installation_type)}
                                                                     {viewField('Installation Person', vehicle.vehicle_installation_person)}
                                                                     {viewField('Installation Person Type', vehicle.vehicle_installation_person_type)}
-                                                                    {viewField('Lead Closure By', vehicle.vehicle_lead_closure)}
+                                                                    {viewField('Lead Closure By', vehicle.vehicle_lead_closure_by_user || vehicle.vehicle_lead_closure)}
                                                                     {viewField('Installation Date', vehicle.vehicle_installation_date)}
                                                                 </div>
                                                             </section>
@@ -2107,12 +2107,12 @@ const CustomerViewPage = () => {
                                             )}
                                             <EditSelect
                                                 label="Lead Closure By"
-                                                value={vehicle.vehicle_lead_closure_id}
-                                                onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_lead_closure_id', value)}
-                                                options={existingOption(masterData.leadClosures, vehicle.vehicle_lead_closure_id, 'lead_closure_name', vehicle.vehicle_lead_closure)}
+                                                value={vehicle.vehicle_lead_closure_by_user_id}
+                                                onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_lead_closure_by_user_id', value)}
+                                                options={existingOption(masterData.closureUsers, vehicle.vehicle_lead_closure_by_user_id, 'employee_name', vehicle.vehicle_lead_closure_by_user || vehicle.vehicle_lead_closure)}
                                                 getValue={(option) => option.id}
-                                                getLabel={(option) => option.lead_closure_name}
-                                                {...fieldPresentation('vehicle_lead_closure_id', activeStepErrors)}
+                                                getLabel={(option) => option.employee_name || option.username}
+                                                {...fieldPresentation('vehicle_lead_closure_by_user_id', activeStepErrors)}
                                             />
                                             <EditField label="Installation Date" value={vehicle.vehicle_installation_date} onChange={(value) => updateVehicleField(vehicle.id, 'vehicle_installation_date', value)} type="date" max={getTodayDate()} {...fieldPresentation('vehicle_installation_date', activeStepErrors)} />
                                         </>
@@ -2121,7 +2121,7 @@ const CustomerViewPage = () => {
                                             <div style={fieldStyle}><strong>Installation Type</strong><span>{renderValue(vehicle.vehicle_installation_type)}</span></div>
                                             <div style={fieldStyle}><strong>Installation Person</strong><span>{renderValue(vehicle.vehicle_installation_person)}</span></div>
                                             <div style={fieldStyle}><strong>Installation Person Type</strong><span>{renderValue(vehicle.vehicle_installation_person_type)}</span></div>
-                                            <div style={fieldStyle}><strong>Lead Closure By</strong><span>{renderValue(vehicle.vehicle_lead_closure)}</span></div>
+                                            <div style={fieldStyle}><strong>Lead Closure By</strong><span>{renderValue(vehicle.vehicle_lead_closure_by_user || vehicle.vehicle_lead_closure)}</span></div>
                                             <div style={fieldStyle}><strong>Installation Date</strong><span>{formatDate(vehicle.vehicle_installation_date)}</span></div>
                                         </>
                                     )}
