@@ -418,6 +418,13 @@ export const AuthProvider = ({ children }) => {
 
     const hasPermission = useCallback((permissionKey) => {
         if (!permissionKey) return true;
+        const roleName = user?.role?.name
+            ?? user?.role_name
+            ?? (typeof user?.role === 'string' ? user.role : '');
+        if (String(roleName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') === 'superadmin') {
+            return true;
+        }
+
         const requested = String(permissionKey).trim();
         const allowed = Array.isArray(permissions) ? permissions.map((item) => String(item).trim()) : [];
 
@@ -438,7 +445,7 @@ export const AuthProvider = ({ children }) => {
         const pluralModule = module.endsWith('s') ? module : `${module}s`;
 
         return allowed.includes(`${singularModule}.${action}`) || allowed.includes(`${pluralModule}.${action}`);
-    }, [permissions]);
+    }, [permissions, user]);
 
     const isAuthenticated = Boolean(user && localStorage.getItem('token'));
     const isImpersonating = user?.impersonation?.active === true;

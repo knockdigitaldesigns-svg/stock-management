@@ -501,6 +501,13 @@ function getUserPermissions($userId) {
 }
 
 function userHasPermission($userId, $permissionKey) {
+    if (!$userId) {
+        return false;
+    }
+    if (isSuperAdminUser($userId)) {
+        return true;
+    }
+
     $permissions = getUserPermissions($userId);
     return in_array($permissionKey, $permissions, true);
 }

@@ -6,6 +6,15 @@ import usePagination from '../../hooks/usePagination';
 import { formatDate } from '../../utils/date';
 import './ClosureWorkflowPages.css';
 
+const getPaymentStatus = (amountPaid, totalAmount) => {
+    const paid = Number(amountPaid) || 0;
+    const total = Number(totalAmount) || 0;
+
+    if (paid <= 0) return 'Not Paid';
+    if (total > 0 && paid >= total) return 'Paid';
+    return 'Partially Paid';
+};
+
 const InstallerJobsPage = () => {
     const [jobs, setJobs] = useState([]);
     const [vehicleTypes, setVehicleTypes] = useState([]);
@@ -97,6 +106,7 @@ const InstallerJobsPage = () => {
         const form = completionForms[formKey] || {};
         const totalAmount = form.total_amount ?? saleAmount ?? '';
         const amountPaid = form.amount_paid ?? '0';
+        const paymentStatus = getPaymentStatus(amountPaid, totalAmount);
         const paymentMode = form.payment_mode ?? '';
         return (
             <>
@@ -110,12 +120,7 @@ const InstallerJobsPage = () => {
                     <input className="form-control" type="number" min="0" max={totalAmount || undefined} step="0.01" required value={amountPaid} onChange={(event) => updateCompletionField(formKey, 'amount_paid', event.target.value)} />
                 </label>
                 <label>Payment Status
-                    <select className="form-control" required value={form.payment_status || 'Pending'} onChange={(event) => updateCompletionField(formKey, 'payment_status', event.target.value)}>
-                        <option value="Pending">Pending</option>
-                        <option value="Not Paid">Not Paid</option>
-                        <option value="Partially Paid">Partially Paid</option>
-                        <option value="Paid">Paid</option>
-                    </select>
+                    <input className="form-control" value={paymentStatus} readOnly />
                 </label>
                 <label>Payment Method
                     <select className="form-control" required={Number(amountPaid) > 0} value={paymentMode} onChange={(event) => {
@@ -196,7 +201,7 @@ const InstallerJobsPage = () => {
                 sale_amount: saleAmount,
                 total_amount: totalAmount,
                 amount_paid: form.amount_paid ?? '0',
-                payment_status: form.payment_status || 'Pending',
+                payment_status: getPaymentStatus(form.amount_paid ?? '0', totalAmount),
                 payment_mode: form.payment_mode ?? '',
                 transaction_id: form.transaction_id ?? '',
                 ...(isMultiDevice && shareUsername ? { username: sharedUsername } : {})

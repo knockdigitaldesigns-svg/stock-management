@@ -31,15 +31,9 @@ function crmClosureValidateInstallationPayment(object $data, float $saleAmount):
         throw new DomainException('Amount Paid must be between zero and Total Amount.');
     }
     $amountPaid = round((float) $amountPaidInput, 2);
-    $paymentStatus = trim((string) ($data->payment_status ?? ''));
-    if (!in_array($paymentStatus, ['Paid', 'Not Paid', 'Partially Paid', 'Pending'], true)) {
-        throw new DomainException('Select a valid Payment Status.');
-    }
-    if (($paymentStatus === 'Paid' && $amountPaid !== $totalAmount) ||
-        ($paymentStatus === 'Partially Paid' && ($amountPaid <= 0 || $amountPaid >= $totalAmount)) ||
-        (in_array($paymentStatus, ['Not Paid', 'Pending'], true) && $amountPaid > 0)) {
-        throw new DomainException('Payment Status must match Total Amount and Amount Paid.');
-    }
+    $paymentStatus = $amountPaid <= 0
+        ? 'Not Paid'
+        : ($amountPaid >= $totalAmount ? 'Paid' : 'Partially Paid');
 
     $paymentMode = trim((string) ($data->payment_mode ?? ''));
     if ($paymentMode !== '' && !in_array($paymentMode, getPaymentModes(), true)) {

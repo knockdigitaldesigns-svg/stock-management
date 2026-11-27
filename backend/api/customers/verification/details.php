@@ -3,6 +3,7 @@
 require_once '../../../config/database.php';
 require_once '../../../utils/response.php';
 require_once '../../../utils/customer_payment_verification.php';
+require_once '../../../utils/customer_verification_display.php';
 
 function customerVerificationLookup(mysqli $conn, string $table, string $labelColumn, int $id): ?string
 {
@@ -1101,6 +1102,47 @@ if (!$displayPaymentPart2 && !empty($snapshot['payment_status'])) {
         'Payment Status' => $snapshot['payment_status']
     ];
 }
+$snapshotDisplayData = customerVerificationSnapshotDisplayData($conn, $snapshot);
+$mergeDisplayRows = static function (array $current, array $fallback): array {
+    $current = array_values($current);
+    foreach (array_values($fallback) as $index => $fallbackRow) {
+        if (!isset($current[$index]) || !is_array($current[$index])) {
+            $current[$index] = $fallbackRow;
+            continue;
+        }
+        foreach ($fallbackRow as $field => $value) {
+            if (($current[$index][$field] ?? null) === null
+                || (is_string($current[$index][$field] ?? null) && trim($current[$index][$field]) === '')) {
+                $current[$index][$field] = $value;
+            }
+        }
+    }
+    return $current;
+};
+$customerDisplay = customerVerificationMergeMissing(
+    $customerDisplay,
+    $snapshotDisplayData['customer'] ?? []
+);
+if ($source === 'crm_installation') {
+    foreach ($snapshotDisplayData['payment_part1'] ?? [] as $index => $payment) {
+        $paymentStatus = $payment['Payment Status'] ?? null;
+        if ($paymentStatus === null || trim((string) $paymentStatus) === '') {
+            continue;
+        }
+        $part2Index = array_key_exists($index, $snapshotDisplayData['payment_part2'] ?? [])
+            ? $index
+            : count($snapshotDisplayData['payment_part2'] ?? []);
+        if (!isset($snapshotDisplayData['payment_part2'][$part2Index])) {
+            $snapshotDisplayData['payment_part2'][$part2Index] = ['Payment Status' => $paymentStatus];
+        } elseif (empty($snapshotDisplayData['payment_part2'][$part2Index]['Payment Status'])) {
+            $snapshotDisplayData['payment_part2'][$part2Index]['Payment Status'] = $paymentStatus;
+        }
+    }
+}
+$displayVehicles = $mergeDisplayRows($displayVehicles, $snapshotDisplayData['vehicle'] ?? []);
+$displayInstallations = $mergeDisplayRows($displayInstallations, $snapshotDisplayData['installation'] ?? []);
+$displayPaymentPart1 = $mergeDisplayRows($displayPaymentPart1, $snapshotDisplayData['payment_part1'] ?? []);
+$displayPaymentPart2 = $mergeDisplayRows($displayPaymentPart2, $snapshotDisplayData['payment_part2'] ?? []);
 $row['display_data'] = [
     'customer' => $customerDisplay,
     'vehicle' => $displayVehicles,

@@ -120,7 +120,7 @@ const formatDetailValue = (label, value) => {
     if (parsed === null || parsed === undefined || parsed === '') return '—';
     if (typeof parsed === 'boolean') return parsed ? 'Yes' : 'No';
     if (typeof parsed === 'object') return null;
-    if (/date|at|time/i.test(label)) return formatDateValue(parsed);
+    if (/\b(?:date|time|at)\b/i.test(label)) return formatDateValue(parsed);
     if (
         ['Total Sale Amount', 'Device Charge', 'Software Charge', 'Technician Charge',
             'SIM Charge', 'Courier Charge', 'Courier Payment Amount', 'Total Amount',
