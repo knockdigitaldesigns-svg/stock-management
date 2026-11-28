@@ -106,10 +106,9 @@ if (!preg_match('/^\d{15}$/', $imeiNo)) {
     );
 }
 
-if (
-    !preg_match('/^\d{10}$/', $simNo1) &&
-    !preg_match('/^\d{13}$/', $simNo1)
-) {
+if ($simNo1 !== ''
+    && !preg_match('/^\d{10}$/', $simNo1)
+    && !preg_match('/^\d{13}$/', $simNo1)) {
     sendResponse(
         false,
         'SIM No 1 must contain exactly 10 or 13 digits.',
@@ -284,6 +283,23 @@ try {
 
     $stmt->close();
 
+    $deviceTypeStmt = $conn->prepare('SELECT device_type FROM device_types WHERE id = ? LIMIT 1');
+    if (!$deviceTypeStmt) {
+        throw new Exception('Failed to prepare device model query.');
+    }
+    $deviceTypeStmt->bind_param('i', $deviceModelId);
+    $deviceTypeStmt->execute();
+    $deviceType = $deviceTypeStmt->get_result()->fetch_assoc();
+    $deviceTypeStmt->close();
+    if (!$deviceType) {
+        throw new Exception('Selected device model does not exist.');
+    }
+    $primarySimOptional = strtolower(trim((string) $deviceType['device_type'])) === 'bharat101 - ais 140';
+    if ($simNo1 === '' && !$primarySimOptional) {
+        throw new Exception('SIM No 1 is required.');
+    }
+    $cleanSimNo1 = $simNo1 !== '' ? $simNo1 : null;
+
     $findAsset = static function ($conn, $table, $numberColumn, $number, $allowedArchivedId) {
         $allocationColumn = $numberColumn === 'imei_no' ? 'device_id' : 'sim_id';
         $statusExpression = $table === 'devices'
@@ -297,13 +313,15 @@ try {
         return $asset;
     };
     $device = $findAsset($conn, 'devices', 'imei_no', $imeiNo, (int) ($old['device_id'] ?? 0));
-    $sim1 = $findAsset($conn, 'sims', 'sim_no', $simNo1, (int) ($old['sim_id_1'] ?? 0));
+    $sim1 = $simNo1 !== ''
+        ? $findAsset($conn, 'sims', 'sim_no', $simNo1, (int) ($old['sim_id_1'] ?? 0))
+        : null;
     $sim2 = $simNo2 === '' ? null : $findAsset($conn, 'sims', 'sim_no', $simNo2, (int) ($old['sim_id_2'] ?? 0));
-    if (!$device || !$sim1 || ($simNo2 !== '' && !$sim2)) {
+    if (!$device || ($simNo1 !== '' && !$sim1) || ($simNo2 !== '' && !$sim2)) {
         throw new Exception('Selected device or SIM was not found.');
     }
     $newDeviceId = (int) $device['id'];
-    $newSimId1 = (int) $sim1['id'];
+    $newSimId1 = $sim1 ? (int) $sim1['id'] : null;
     $newSimId2 = $sim2 ? (int) $sim2['id'] : null;
     $assetChecks = [
         [$device, 'device_id', 'IMEI is already assigned to another customer.', 'This IMEI is not available for allocation.'],
@@ -388,7 +406,7 @@ try {
         'device_model_id' => $deviceModelId,
         'imei_no' => $imeiNo,
         'sim_id_1' => $newSimId1,
-        'sim_no_1' => $simNo1,
+        'sim_no_1' => $cleanSimNo1,
         'sim_id_2' => $newSimId2,
         'sim_no_2' => $simNo2,
         'validity_months' => $validityId
@@ -530,6 +548,7 @@ try {
     |--------------------------------------------------------------------------
     */
 
+    if ($simNo1 !== '') {
     $stmt = $conn->prepare(
         'SELECT id
          FROM customer_vehicle_details
@@ -566,6 +585,7 @@ try {
     }
 
     $stmt->close();
+    }
 
 
     if ($simNo2 !== '') {

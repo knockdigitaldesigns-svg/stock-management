@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../services/api';
+import { fetchAllPaginatedRecords } from '../utils/fetchAllPaginatedRecords';
 
 const useDeviceModels = () => {
     const [models, setModels] = useState([]);
@@ -9,9 +9,8 @@ const useDeviceModels = () => {
     useEffect(() => {
         const fetchModels = async () => {
             try {
-                const response = await api.get('/device_types/list.php');
-                if (!response.data.success) throw new Error(response.data.message || 'Failed to fetch device types');
-                setModels((response.data.data?.device_types || []).map((type) => ({ value: type.id, label: type.device_type })));
+                const deviceTypes = await fetchAllPaginatedRecords('/device_types/list.php', 'device_types');
+                setModels(deviceTypes.map((type) => ({ value: type.id, label: type.device_type })));
             } catch (err) {
                 setModels([]);
                 setError(err.message || 'Failed to fetch device models');

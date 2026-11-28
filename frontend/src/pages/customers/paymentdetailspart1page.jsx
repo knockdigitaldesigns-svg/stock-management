@@ -18,37 +18,12 @@ import {
     ensureCustomerSubmissionData,
     saveCustomerDraft
 } from '../../utils/customerSubmission';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const initialForm = {
     totalSaleAmount: '',
     transactionId: '',
     paymentMode: ''
-};
-
-const extractList = (response, keys = []) => {
-    const responseData = response?.data;
-
-    if (Array.isArray(responseData)) {
-        return responseData;
-    }
-
-    const dataObject = responseData?.data;
-
-    if (Array.isArray(dataObject)) {
-        return dataObject;
-    }
-
-    for (const key of keys) {
-        if (Array.isArray(dataObject?.[key])) {
-            return dataObject[key];
-        }
-
-        if (Array.isArray(responseData?.[key])) {
-            return responseData[key];
-        }
-    }
-
-    return [];
 };
 
 const paymentModeOptions = PAYMENT_MODES;
@@ -75,6 +50,12 @@ const PaymentDetailsPart1Page = () => {
     const [showValidation, setShowValidation] = useState(false);
     const [showStep5BlockedModal, setShowStep5BlockedModal] = useState(false);
     const [showPendingSaveModal, setShowPendingSaveModal] = useState(false);
+    const [transactionIdCheck, setTransactionIdCheck] = useState({
+        value: '',
+        status: 'idle',
+        message: ''
+    });
+    const [originalTransactionId, setOriginalTransactionId] = useState('');
 
     const [newVehicleFlow, setNewVehicleFlow] = useState(false);
     const isEditMode = Boolean(customerId) && !newVehicleFlow;
@@ -98,13 +79,36 @@ const PaymentDetailsPart1Page = () => {
     const shouldGoToPart2 =
         Boolean(form.paymentMode);
 
+    const transactionIdCheckIsCurrent =
+        transactionIdCheck.value === form.transactionId;
+    const transactionIdCheckRequired =
+        Boolean(form.transactionId) &&
+        form.transactionId !== originalTransactionId;
+    const transactionIdAlreadyUsed =
+        transactionIdCheckRequired &&
+        transactionIdCheckIsCurrent &&
+        transactionIdCheck.status === 'duplicate';
+    const transactionIdCheckFailed =
+        transactionIdCheckRequired &&
+        transactionIdCheckIsCurrent &&
+        transactionIdCheck.status === 'error';
+    const transactionIdCheckPending =
+        transactionIdCheckRequired &&
+        (!transactionIdCheckIsCurrent ||
+            transactionIdCheck.status === 'idle' ||
+            transactionIdCheck.status === 'checking');
+
     const paymentErrors = {
         totalSaleAmount: showValidation && !form.totalSaleAmount ? 'Total Sale Amount is required.' : '',
         transactionId: form.transactionId && !/^\d{6}$/.test(form.transactionId)
             ? 'Transaction ID must contain exactly 6 digits.'
-            : form.transactionId && !form.paymentMode
-                ? 'Payment Mode is required when Transaction ID is entered.'
-                : '',
+            : transactionIdAlreadyUsed
+                ? 'Transaction ID is already in use.'
+                : transactionIdCheckFailed
+                    ? transactionIdCheck.message || 'Unable to verify this transaction ID.'
+                    : form.transactionId && !form.paymentMode
+                        ? 'Payment Mode is required when Transaction ID is entered.'
+                        : '',
         paymentMode: form.paymentMode && form.paymentMode !== 'Cash' && !form.transactionId
             ? 'Transaction ID is required for this payment mode.'
             : ''
@@ -115,13 +119,9 @@ const PaymentDetailsPart1Page = () => {
             setLoading(true);
             setError('');
 
-            const response = await api.get(
-                '/sale_amounts/list.php'
-            );
-
-            const saleAmountsData = extractList(
-                response,
-                ['sale_amounts']
+            const saleAmountsData = await fetchAllPaginatedRecords(
+                '/sale_amounts/list.php',
+                'sale_amounts'
             );
 
             const activeSaleAmounts = saleAmountsData
@@ -166,6 +166,7 @@ const PaymentDetailsPart1Page = () => {
     };
 
     const loadSavedPaymentPart1 = async () => {
+        setOriginalTransactionId('');
         if (!customerId) {
             return;
         }
@@ -207,6 +208,8 @@ const PaymentDetailsPart1Page = () => {
 
             const paymentPart1 =
                 response.data?.data?.payment_part1 || {};
+            const savedTransactionId = String(paymentPart1.transaction_id ?? '').trim();
+            setOriginalTransactionId(savedTransactionId);
 
             const hasSavedPaymentRecord =
                 Number(
@@ -279,6 +282,50 @@ const PaymentDetailsPart1Page = () => {
     }, [customerId]);
 
     useEffect(() => {
+        const transactionId = String(form.transactionId || '');
+        if (!/^[0-9]{6}$/.test(transactionId) || transactionId === originalTransactionId) {
+            return undefined;
+        }
+
+        let isCurrentRequest = true;
+
+        const timer = window.setTimeout(async () => {
+            try {
+                const response = await api.get('/customers/payments/check_transaction_id.php', {
+                    params: { transaction_id: transactionId },
+                    skipGlobalError: true
+                });
+                if (!response.data?.success) {
+                    throw new Error(response.data?.message || 'Unable to verify this transaction ID.');
+                }
+                if (isCurrentRequest) {
+                    setTransactionIdCheck({
+                        value: transactionId,
+                        status: response.data?.data?.available ? 'available' : 'duplicate',
+                        message: response.data?.message || ''
+                    });
+                }
+            } catch (checkError) {
+                console.error('Transaction ID check error:', checkError);
+                if (isCurrentRequest) {
+                    setTransactionIdCheck({
+                        value: transactionId,
+                        status: 'error',
+                        message: checkError.response?.data?.message
+                            || checkError.message
+                            || 'Unable to verify this transaction ID.'
+                    });
+                }
+            }
+        }, 250);
+
+        return () => {
+            isCurrentRequest = false;
+            window.clearTimeout(timer);
+        };
+    }, [form.transactionId, originalTransactionId]);
+
+    useEffect(() => {
         if (!form.totalSaleAmount) {
             return;
         }
@@ -322,6 +369,11 @@ const PaymentDetailsPart1Page = () => {
             updatedValue = value
                 .replace(/\D/g, '')
                 .slice(0, 6);
+            setTransactionIdCheck({
+                value: updatedValue,
+                status: 'idle',
+                message: ''
+            });
         }
 
         setForm((previous) => ({
@@ -343,6 +395,7 @@ const PaymentDetailsPart1Page = () => {
         }
 
         if (paymentErrors.transactionId) return paymentErrors.transactionId;
+        if (transactionIdCheckPending) return 'Please wait while the transaction ID is checked.';
 
         /*
          * Transaction ID without Payment Mode
@@ -703,7 +756,7 @@ const PaymentDetailsPart1Page = () => {
                                 const needsTxn = hasMode && form.paymentMode !== 'Cash' && !form.transactionId;
                                 const txnInvalid = form.transactionId && !/^\d{6}$/.test(form.transactionId);
 
-                                if (!hasMode || needsTxn || txnInvalid) {
+                                if (!hasMode || needsTxn || txnInvalid || paymentErrors.transactionId || transactionIdCheckPending) {
                                     setShowStep5BlockedModal(true);
                                     return;
                                 }
@@ -799,6 +852,13 @@ const PaymentDetailsPart1Page = () => {
                                 pattern="[0-9]{6}"
                                 disabled={saving}
                             />
+                            {transactionIdCheckRequired &&
+                                transactionIdCheckIsCurrent &&
+                                transactionIdCheckPending && (
+                                    <small style={{ color: '#64748b', display: 'block', marginTop: '4px' }}>
+                                        Checking transaction ID...
+                                    </small>
+                                )}
                             {paymentErrors.transactionId && <small style={{ color: '#dc2626', display: 'block', marginTop: '4px' }}>✕ {paymentErrors.transactionId}</small>}
                         </div>
 

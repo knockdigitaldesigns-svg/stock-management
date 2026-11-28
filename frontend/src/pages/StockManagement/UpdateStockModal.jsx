@@ -6,6 +6,7 @@ import { formatDate } from '../../utils/date';
 import { softwareDropdownOptions } from '../../constants/software';
 import PaymentModal from '../../components/PaymentModal/PaymentModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     const [ownerOptions, setOwnerOptions] = useState([]);
@@ -47,19 +48,19 @@ const UpdateStockModal = ({ onClose, onSuccess, initialOwner = '' }) => {
     useEffect(() => {
         const fetchOwners = async () => {
             try {
-                const [dealersRes, techniciansRes] = await Promise.all([
-                    api.get('/dealers/list.php'),
-                    api.get('/technicians/list.php')
+                const [dealersList, techniciansList] = await Promise.all([
+                    fetchAllPaginatedRecords('/dealers/list.php?for_alert=1', 'dealers'),
+                    api.get('/technicians/list.php?for_lookup=1')
                 ]);
 
-                const dealers = (dealersRes?.data?.data?.dealers || [])
+                const dealers = dealersList
                     .filter((dealer) => ['Onsite', 'Offsite'].includes(dealer.installation_status))
                     .map((dealer) => ({
                         value: `dealer:${dealer.id}`,
                         label: `Dealer — ${dealer.dealer_name}`
                     }));
 
-                const technicians = (techniciansRes?.data?.data?.technicians || [])
+                const technicians = (techniciansList?.data?.data?.technicians || [])
                     .map((tech) => ({
                         value: `technician:${tech.id}`,
                         label: `Technician — ${tech.technician_name}`

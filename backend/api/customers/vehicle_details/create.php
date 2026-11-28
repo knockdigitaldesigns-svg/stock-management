@@ -87,14 +87,9 @@ if (!preg_match('/^\d{15}$/', $imeiNo)) {
     sendResponse(false, 'IMEI No must contain exactly 15 digits.', [], [], 400);
 }
 
-if ($simNo1 === '') {
-    sendResponse(false, 'SIM No 1 is required.', [], [], 400);
-}
-
-if (
-    !preg_match('/^\d{10}$/', $simNo1) &&
-    !preg_match('/^\d{13}$/', $simNo1)
-) {
+if ($simNo1 !== ''
+    && !preg_match('/^\d{10}$/', $simNo1)
+    && !preg_match('/^\d{13}$/', $simNo1)) {
     sendResponse(false, 'SIM No 1 must contain exactly 10 or 13 digits.', [], [], 400);
 }
 
@@ -279,7 +274,7 @@ try {
     | DEVICE MODEL CHECK
     |--------------------------------------------------------------------------
     */
-    $stmt = $conn->prepare('SELECT id FROM device_types WHERE id = ? LIMIT 1');
+    $stmt = $conn->prepare('SELECT id, device_type FROM device_types WHERE id = ? LIMIT 1');
     if (!$stmt) {
         throw new Exception('Failed to prepare device model query.');
     }
@@ -290,7 +285,13 @@ try {
         $stmt->close();
         throw new Exception('Selected device model does not exist.');
     }
+    $deviceType = $result->fetch_assoc();
     $stmt->close();
+    $primarySimOptional = strtolower(trim((string) $deviceType['device_type'])) === 'bharat101 - ais 140';
+    if ($simNo1 === '' && !$primarySimOptional) {
+        throw new Exception('SIM No 1 is required.');
+    }
+    $cleanSimNo1 = $simNo1 !== '' ? $simNo1 : null;
 
     /*
     |--------------------------------------------------------------------------
@@ -494,6 +495,10 @@ try {
     | FIND SIM 1 FROM INVENTORY
     |--------------------------------------------------------------------------
     */
+    $simId1 = null;
+    $sim1OwnerType = '';
+    $sim1OwnerId = 0;
+    if ($simNo1 !== '') {
     $stmt = $conn->prepare(
         'SELECT s.id,
                 CASE
@@ -582,6 +587,7 @@ try {
         // OK
     } else {
         throw new Exception('SIM No 1 is not available for allocation.');
+    }
     }
 
     /*
@@ -722,7 +728,7 @@ try {
         writeChangedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', $existingRow, [
             'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId, 'device_id' => $deviceId,
             'device_model_id' => $deviceModelId, 'imei_no' => $imeiNo, 'sim_id_1' => $simId1,
-            'sim_no_1' => $simNo1, 'sim_id_2' => $simId2, 'sim_no_2' => $cleanSimNo2,
+            'sim_no_1' => $cleanSimNo1, 'sim_id_2' => $simId2, 'sim_no_2' => $cleanSimNo2,
             'validity_months' => $validityMonths
         ], $currentUser);
         $stmt = $conn->prepare(
@@ -751,7 +757,7 @@ try {
             $deviceModelId,
             $imeiNo,
             $simId1,
-            $simNo1,
+            $cleanSimNo1,
             $simId2,
             $cleanSimNo2,
             $validityMonths,
@@ -793,7 +799,7 @@ try {
             $deviceModelId,
             $imeiNo,
             $simId1,
-            $simNo1,
+            $cleanSimNo1,
             $simId2,
             $cleanSimNo2,
             $validityMonths,
@@ -824,7 +830,7 @@ try {
         writeCreatedFields($conn, $vehicleDetailsId, 'Customer Vehicle Details', [
             'customer_id' => $customerId, 'vehicle_no' => $vehicleNo, 'vehicle_type_id' => $vehicleTypeId,
             'device_id' => $deviceId, 'device_model_id' => $deviceModelId, 'imei_no' => $imeiNo,
-            'sim_id_1' => $simId1, 'sim_no_1' => $simNo1, 'sim_id_2' => $simId2,
+            'sim_id_1' => $simId1, 'sim_no_1' => $cleanSimNo1, 'sim_id_2' => $simId2,
             'sim_no_2' => $cleanSimNo2, 'validity_months' => $validityMonths
         ], $currentUser);
     }

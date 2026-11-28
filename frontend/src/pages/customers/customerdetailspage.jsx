@@ -20,6 +20,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import DateInput from '../../components/DateInput';
 import Modal from '../../components/Modal/Modal';
 import { formatDate, getTodayDate } from '../../utils/date';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const CUSTOMER_DETAILS_RETURN_STATE_KEY = 'customer_details_return_state';
 
@@ -195,8 +196,7 @@ const CustomerDetailsPage = () => {
 
     const loadPlatforms = async () => {
         try {
-            const res = await api.get('/platforms/list.php').catch(() => null);
-            const raw = res?.data?.data?.platforms || [];
+            const raw = await fetchAllPaginatedRecords('/platforms/list.php', 'platforms');
 
             const active = raw
                 .filter(p => !p.status || String(p.status).toLowerCase() === 'active')

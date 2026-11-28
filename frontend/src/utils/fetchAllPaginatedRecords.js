@@ -2,14 +2,15 @@ import api from '../services/api';
 
 const PAGE_SIZE = 100;
 
-export const fetchAllPaginatedRecords = async (endpoint, recordsKey) => {
+export const fetchAllPaginatedRecords = async (endpoint, recordsKey, requestConfig = {}) => {
     const records = [];
     let page = 1;
     let totalPages = 1;
 
     while (page <= totalPages) {
         const response = await api.get(endpoint, {
-            params: { page, page_size: PAGE_SIZE }
+            ...requestConfig,
+            params: { ...requestConfig.params, page, page_size: PAGE_SIZE }
         });
         const payload = response.data;
 

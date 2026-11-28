@@ -7,6 +7,7 @@ import { PAYMENT_MODES } from '../../constants/paymentModes';
 import { formatDate } from '../../utils/date';
 import DateInput from '../../components/DateInput';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
     const [allocation, setAllocation] = useState(null);
@@ -24,14 +25,14 @@ const StockAllocationEditModal = ({ allocationId, onClose, onSuccess }) => {
     useEffect(() => {
         Promise.all([
             api.get(`/stock/allocation.php?id=${allocationId}`),
-            api.get('/dealers/list.php'),
-            api.get('/technicians/list.php')
-        ]).then(async ([allocationResponse, dealersResponse, techniciansResponse]) => {
+            fetchAllPaginatedRecords('/dealers/list.php', 'dealers'),
+            api.get('/technicians/list.php?for_lookup=1')
+        ]).then(async ([allocationResponse, dealersList, techniciansResponse]) => {
             const item = allocationResponse.data.data?.allocation;
             if (!item) throw new Error('Allocation not found');
             setAllocation(item);
             setForm({ owner_type: item.owner_type, owner_id: String(item.owner_id), allocation_type: item.allocation_type || 'ET', allocation_date: item.allocation_date || '', software: item.software || '', total_amount: String(item.total_amount ?? 0), amount_paid: String(item.amount_paid ?? 0), payment_mode: item.payment_mode || '', transaction_id: item.transaction_id || '', notes: item.notes || '' });
-            const dealers = (dealersResponse.data.data?.dealers || []).map((dealer) => ({ value: `dealer:${dealer.id}`, label: `Dealer — ${dealer.dealer_name}` }));
+            const dealers = dealersList.map((dealer) => ({ value: `dealer:${dealer.id}`, label: `Dealer — ${dealer.dealer_name}` }));
             const technicians = (techniciansResponse.data.data?.technicians || []).map((technician) => ({ value: `technician:${technician.id}`, label: `Technician — ${technician.technician_name}` }));
             setOwnerOptions([...dealers, ...technicians]);
         }).catch((loadError) => triggerError(loadError.response?.data?.message || loadError.message || 'Unable to load allocation.')).finally(() => setLoading(false));

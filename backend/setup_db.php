@@ -1145,6 +1145,7 @@ $permissionDefinitions = [
     ['stock_transfer.edit', 'Stock Transfer Edit', 'stock_transfer', 'EDIT'],
     ['stock_transfer.delete', 'Stock Transfer Delete', 'stock_transfer', 'DELETE'],
     ['customers.view', 'Customer Details View', 'customers', 'VIEW'],
+    ['transaction_ids.lookup', 'Transaction ID Lookup', 'transaction_ids', 'LOOKUP'],
     ['customer_payment_verification.review', 'Customer Payment Verification Review', 'customer_payment_verification', 'REVIEW'],
     ['customers.add', 'Customer Details Add', 'customers', 'ADD'],
     ['customers.edit', 'Customer Details Edit', 'customers', 'EDIT'],
@@ -1265,6 +1266,7 @@ foreach ($permissionDefinitions as $permission) {
 $conn->query("INSERT IGNORE INTO attendance_settings (id, office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone) VALUES (1, '09:30:00', '18:30:00', 8.00, 4.00, 5, 'Asia/Kolkata')");
 $conn->query("INSERT INTO attendance_settings_history (office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone, updated_by_user_id, effective_at_utc) SELECT office_start_time, office_end_time, full_day_hours, half_day_hours, inactivity_minutes, timezone, updated_by_user_id, UTC_TIMESTAMP() FROM attendance_settings WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM attendance_settings_history)");
 $conn->query("INSERT IGNORE INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r JOIN permissions p ON p.permission_key IN ('attendance.view', 'attendance.settings') WHERE LOWER(TRIM(r.role_name)) = 'admin'");
+$conn->query("INSERT IGNORE INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r JOIN permissions p ON p.permission_key = 'transaction_ids.lookup' WHERE LOWER(TRIM(r.role_name)) = 'admin'");
 $conn->query("INSERT IGNORE INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r JOIN permissions p ON p.permission_key = 'attendance.self.view' WHERE LOWER(TRIM(r.role_name)) IN ('employee', 'tl')");
 
 $roleCheck = $conn->query("SELECT id FROM roles WHERE role_name = 'Super Admin' LIMIT 1");

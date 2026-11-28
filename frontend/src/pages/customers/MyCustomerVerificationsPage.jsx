@@ -177,7 +177,16 @@ const MyCustomerVerificationsPage = () => {
             const linkedCustomerId = Number(item.linked_customer_id || data.linked_customer_id || 0);
             const linkedVehicleId = Number(item.linked_vehicle_id || data.linked_vehicle_id || 0);
             const linkedPaymentId = Number(item.linked_payment_id || data.linked_payment_id || 0);
-            const customerRouteId = existingCustomerId || linkedCustomerId;
+            const isLegacyCustomerReview = Boolean(data.legacy_customer_review) && linkedCustomerId > 0;
+            const isLinkedExistingCustomerFlow = linkedCustomerId > 0 && (
+                isLegacyCustomerReview ||
+                ['customer_vehicle_addition', 'payment_installment', 'courier'].includes(data.source)
+            );
+            const isExistingCustomerCorrection = existingCustomerId > 0 || isLinkedExistingCustomerFlow;
+            const customerRouteId = existingCustomerId || (isLinkedExistingCustomerFlow ? linkedCustomerId : 0);
+            const resumableLinkedCustomerId = isExistingCustomerCorrection ? linkedCustomerId : 0;
+            const resumableLinkedVehicleId = isExistingCustomerCorrection ? linkedVehicleId : 0;
+            const resumableLinkedPaymentId = isExistingCustomerCorrection ? linkedPaymentId : 0;
             sessionStorage.setItem(MY_VERIFICATION_RETURN_STATE_KEY, JSON.stringify({
                 page,
                 pageSize,
@@ -188,13 +197,14 @@ const MyCustomerVerificationsPage = () => {
             }));
             if (
                 customerRouteId > 0 &&
-                (Array.isArray(data.vehicles) || linkedCustomerId > 0)
+                isExistingCustomerCorrection &&
+                (Array.isArray(data.vehicles) || resumableLinkedCustomerId > 0)
             ) {
                 sessionStorage.setItem(`customer_edit_verification_${customerRouteId}`, JSON.stringify({
                     id: Number(item.id),
-                    linked_customer_id: linkedCustomerId || null,
-                    linked_vehicle_id: linkedVehicleId || null,
-                    linked_payment_id: linkedPaymentId || null,
+                    linked_customer_id: resumableLinkedCustomerId || null,
+                    linked_vehicle_id: resumableLinkedVehicleId || null,
+                    linked_payment_id: resumableLinkedPaymentId || null,
                     rejection_reason: item.rejection_reason || '',
                     submission_data: data
                 }));
@@ -213,13 +223,17 @@ const MyCustomerVerificationsPage = () => {
                     draft_id: Number(item.id),
                     resumed_verification: true,
                     existing_customer_id: existingCustomerId || null,
-                    linked_customer_id: linkedCustomerId || null,
-                    linked_vehicle_id: linkedVehicleId || null,
-                    linked_payment_id: linkedPaymentId || null,
+                    linked_customer_id: resumableLinkedCustomerId || null,
+                    linked_vehicle_id: resumableLinkedVehicleId || null,
+                    linked_payment_id: resumableLinkedPaymentId || null,
                     customer_id: existingCustomerId || -Number(item.id),
                     step1: data.customer || data.step1 || {},
                     step2: vehicle ? {
                         ...vehicle,
+                        id: isExistingCustomerCorrection ? vehicle.id : undefined,
+                        vehicle_record_id: isExistingCustomerCorrection
+                            ? vehicle.vehicle_record_id || null
+                            : null,
                         vehicle_no: vehicle.vehicle_no || '',
                         vehicle_type_id: vehicle.vehicle_type_id || '',
                         imei_no: vehicle.imei_no || '',
@@ -228,9 +242,11 @@ const MyCustomerVerificationsPage = () => {
                         device_model_id: vehicle.device_model_id || '',
                         validity_id: vehicle.validity_id || vehicle.validity_months || ''
                     } : undefined,
-                    vehicle_record_id: vehicle?.vehicle_record_id || vehicle?.id ||
-                        data.vehicle_record_id || data.vehicle_id ||
-                        (Array.isArray(data.vehicles) && data.vehicles.length === 1 ? linkedVehicleId : 0) || null,
+                    vehicle_record_id: isExistingCustomerCorrection
+                        ? vehicle?.vehicle_record_id || vehicle?.id ||
+                            data.vehicle_record_id || data.vehicle_id ||
+                            (Array.isArray(data.vehicles) && data.vehicles.length === 1 ? resumableLinkedVehicleId : 0) || null
+                        : null,
                     append_vehicle: Boolean(vehicle?.append_vehicle),
                     new_vehicle_flow: true,
                     step3: installation,
@@ -252,9 +268,9 @@ const MyCustomerVerificationsPage = () => {
                     draft_id: Number(item.id),
                     resumed_verification: true,
                     existing_customer_id: existingCustomerId || null,
-                    linked_customer_id: linkedCustomerId || null,
-                    linked_vehicle_id: linkedVehicleId || null,
-                    linked_payment_id: linkedPaymentId || null,
+                    linked_customer_id: resumableLinkedCustomerId || null,
+                    linked_vehicle_id: resumableLinkedVehicleId || null,
+                    linked_payment_id: resumableLinkedPaymentId || null,
                     customer_id: existingCustomerId || -Number(item.id),
                     new_vehicle_flow: true
                 };

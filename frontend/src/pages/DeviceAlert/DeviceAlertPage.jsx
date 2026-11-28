@@ -9,6 +9,7 @@ import usePagination from '../../hooks/usePagination';
 import TableFilterBar, { emptyTableFilters, filterTableRows } from '../../components/TableFilterBar/TableFilterBar';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const getStatusClass = (status) => {
     if (status === 'ALERT') return 'badge-danger';
@@ -65,11 +66,11 @@ const DeviceAlertPage = () => {
     const fetchOwnerOptions = async () => {
         try {
             const [dealerRes, technicianRes] = await Promise.all([
-                api.get('/dealers/list.php?for_alert=1'),
-                api.get('/technicians/list.php')
+                fetchAllPaginatedRecords('/dealers/list.php?for_alert=1', 'dealers'),
+                api.get('/technicians/list.php?for_lookup=1')
             ]);
 
-            const dealerOptions = (dealerRes?.data?.data?.dealers || [])
+            const dealerOptions = dealerRes
                 .filter((dealer) => isEligibleDealer(dealer.installation_status))
                 .map((dealer) => ({
                     value: String(dealer.id),
@@ -92,12 +93,12 @@ const DeviceAlertPage = () => {
     
     const fetchModelsAndSims = async () => {
         try {
-            const [modelsRes, simsRes] = await Promise.all([
-                api.get('/device_types/list.php'),
-                api.get('/sim_types/list.php')
+            const [deviceTypes, simTypes] = await Promise.all([
+                fetchAllPaginatedRecords('/device_types/list.php', 'device_types'),
+                fetchAllPaginatedRecords('/sim_types/list.php', 'sim_types')
             ]);
-            setDeviceModels((modelsRes.data.data?.device_types || []).map(t => ({ value: String(t.id), label: t.device_type })));
-            setSimTypes((simsRes.data.data?.sim_types || []).map(t => ({ value: String(t.id), label: t.sim_type })));
+            setDeviceModels(deviceTypes.map(t => ({ value: String(t.id), label: t.device_type })));
+            setSimTypes(simTypes.map(t => ({ value: String(t.id), label: t.sim_type })));
         } catch (err) {
             console.error('Failed to fetch device models or sim types', err);
         }

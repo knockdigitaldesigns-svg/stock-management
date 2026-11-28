@@ -5,6 +5,7 @@ import Pagination from '../../components/Pagination/Pagination';
 import DateInput from '../../components/DateInput';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 import { formatDate, getTodayDate } from '../../utils/date';
 import RecordViewModal from '../../components/RecordViewModal/RecordViewModal';
 import Modal from '../../components/Modal/Modal';
@@ -180,12 +181,15 @@ const StockTransferPage = () => {
         setToOwnerId('');
         try {
             if (type === 'technician') {
-                const res = await api.get('/technicians/list.php', { skipGlobalError: true });
-                const list = res.data?.data?.technicians || [];
+                const list = await api.get('/technicians/list.php?for_lookup=1', { skipGlobalError: true })
+                    .then((res) => res.data?.data?.technicians || []);
                 setToOwnerList(list.map(t => ({ id: t.id, name: t.technician_name })));
             } else {
-                const res = await api.get('/dealers/list.php?installation_status=Onsite,Offsite', { skipGlobalError: true });
-                const list = res.data?.data?.dealers || [];
+                const list = await fetchAllPaginatedRecords(
+                    '/dealers/list.php?installation_status=Onsite,Offsite',
+                    'dealers',
+                    { skipGlobalError: true }
+                );
                 setToOwnerList(
                     list
                         .filter(d => d.installation_status !== 'Not Willing')

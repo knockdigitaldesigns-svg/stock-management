@@ -17,6 +17,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { showGlobalError } from '../../context/ErrorContext';
 import { useConfirmation } from '../../components/Modal/useConfirmation';import { saveCustomerDraft } from '../../utils/customerSubmission';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 
 const initialForm = {
@@ -143,6 +144,11 @@ const CustomerVehicleDetailsPage = () => {
             form.imei_no === existingVehicleImei &&
             Boolean(form.device_model_id)
         );
+    const selectedDeviceType = deviceTypes.find(
+        (item) => String(item.id) === String(form.device_model_id)
+    );
+    const isPrimarySimOptional =
+        String(selectedDeviceType?.device_type || '').trim().toLowerCase() === 'bharat101 - ais 140';
 
 
     /*
@@ -166,6 +172,10 @@ const CustomerVehicleDetailsPage = () => {
         response,
         possibleKeys = []
     ) => {
+
+        if (Array.isArray(response)) {
+            return response;
+        }
 
         const responseData =
             response?.data;
@@ -334,16 +344,19 @@ const CustomerVehicleDetailsPage = () => {
             validityResponse
         ] = await Promise.all([
 
-            api.get(
-                '/vehicle_types/list.php'
+            fetchAllPaginatedRecords(
+                '/vehicle_types/list.php',
+                'vehicle_types'
             ),
 
-            api.get(
-                '/device_types/list.php'
+            fetchAllPaginatedRecords(
+                '/device_types/list.php',
+                'device_types'
             ),
 
-            api.get(
-                '/sim_validities/list.php'
+            fetchAllPaginatedRecords(
+                '/sim_validities/list.php',
+                'validities'
             )
 
         ]);
@@ -1522,34 +1535,18 @@ const CustomerVehicleDetailsPage = () => {
         }
 
 
-        if (
-            !form.sim_no_1
-        ) {
+        if (!isPrimarySimOptional || form.sim_no_1) {
+            if (!form.sim_no_1) {
+                return 'SIM No 1 is required.';
+            }
 
-            return (
-                'SIM No 1 is required.'
-            );
+            if (simLookup.sim_no_1 && simLookup.sim_no_1.startsWith('✕')) return simLookup.sim_no_1.replace('✕ ', '');
 
-        }
+            if (!simLookup.sim_no_1.startsWith('✓')) return 'Please wait for SIM No 1 validation to complete.';
 
-        if (simLookup.sim_no_1 && simLookup.sim_no_1.startsWith('✕')) return simLookup.sim_no_1.replace('✕ ', '');
-
-        if (!simLookup.sim_no_1.startsWith('✓')) return 'Please wait for SIM No 1 validation to complete.';
-
-
-        if (
-            !/^\d{10}$/.test(
-                form.sim_no_1
-            ) &&
-            !/^\d{13}$/.test(
-                form.sim_no_1
-            )
-        ) {
-
-            return (
-                'SIM No 1 must contain exactly 10 or 13 digits.'
-            );
-
+            if (!/^\d{10}$/.test(form.sim_no_1) && !/^\d{13}$/.test(form.sim_no_1)) {
+                return 'SIM No 1 must contain exactly 10 or 13 digits.';
+            }
         }
 
 
@@ -2460,9 +2457,7 @@ const CustomerVehicleDetailsPage = () => {
 
                                     Vehicle No
 
-                                    <span className="required">
-                                        *
-                                    </span>
+                                    <span className="required">*</span>
 
                                 </label>
 
@@ -2643,9 +2638,7 @@ const CustomerVehicleDetailsPage = () => {
 
                                     SIM No 1
 
-                                    <span className="required">
-                                        *
-                                    </span>
+                                    {!isPrimarySimOptional && <span className="required">*</span>}
 
                                 </label>
 

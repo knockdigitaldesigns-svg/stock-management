@@ -228,7 +228,10 @@ try {
         ? 'id = ? AND customer_id = ?'
         : 'customer_id = ? ORDER BY created_at DESC, id DESC LIMIT 1';
     $vehicleStmt = $conn->prepare(
-        "SELECT id, device_id, sim_id_1 FROM customer_vehicle_details WHERE {$vehicleLookup} FOR UPDATE"
+        "SELECT id, device_id, sim_id_1, device_model_id
+         FROM customer_vehicle_details
+         WHERE {$vehicleLookup}
+         FOR UPDATE"
     );
     if ($vehicleId > 0) {
         $vehicleStmt->bind_param('ii', $vehicleId, $customerId);
@@ -238,8 +241,30 @@ try {
     $vehicleStmt->execute();
     $vehicle = $vehicleStmt->get_result()->fetch_assoc();
     $vehicleStmt->close();
-    if (!$vehicle || empty($vehicle['device_id']) || empty($vehicle['sim_id_1'])) {
+    if (!$vehicle || empty($vehicle['device_id'])) {
         throw new Exception('Device and SIM are required before saving installation details.');
+    }
+
+    if (empty($vehicle['sim_id_1'])) {
+        $deviceTypeStmt = $conn->prepare(
+            'SELECT device_type FROM device_types WHERE id = ? LIMIT 1'
+        );
+        if (!$deviceTypeStmt) {
+            throw new Exception('Unable to prepare device model lookup.');
+        }
+        $deviceTypeId = (int) ($vehicle['device_model_id'] ?? 0);
+        $deviceTypeStmt->bind_param('i', $deviceTypeId);
+        if (!$deviceTypeStmt->execute()) {
+            $deviceTypeStmt->close();
+            throw new Exception('Unable to load the selected device model.');
+        }
+        $deviceType = $deviceTypeStmt->get_result()->fetch_assoc();
+        $deviceTypeStmt->close();
+        $primarySimOptional = $deviceType &&
+            strtolower(trim((string) $deviceType['device_type'])) === 'bharat101 - ais 140';
+        if (!$primarySimOptional) {
+            throw new Exception('Device and SIM are required before saving installation details.');
+        }
     }
 
     $assertNotUsedByAnotherCustomer = static function ($conn, string $assetColumn, int $assetId, string $assetLabel) use ($customerId): void {
@@ -255,7 +280,9 @@ try {
         }
     };
     $assertNotUsedByAnotherCustomer($conn, 'device_id', (int) $vehicle['device_id'], 'Device');
-    $assertNotUsedByAnotherCustomer($conn, 'sim_id_1', (int) $vehicle['sim_id_1'], 'SIM');
+    if (!empty($vehicle['sim_id_1'])) {
+        $assertNotUsedByAnotherCustomer($conn, 'sim_id_1', (int) $vehicle['sim_id_1'], 'SIM');
+    }
 
     $installationWhere = $vehicleId > 0 ? 'vehicle_id = ?' : 'customer_id = ?';
     $checkStmt = $conn->prepare(
@@ -329,7 +356,9 @@ try {
     };
 
     $deviceOwner = $resolveOwner($conn, 'device_id', (int) $vehicle['device_id']);
-    $simOwner = $resolveOwner($conn, 'sim_id', (int) $vehicle['sim_id_1']);
+    $simOwner = !empty($vehicle['sim_id_1'])
+        ? $resolveOwner($conn, 'sim_id', (int) $vehicle['sim_id_1'])
+        : null;
     if (
         !$installationOwnerUnchanged &&
         $installationPersonType !== 'Direct' &&

@@ -6,6 +6,7 @@ import SearchableDropdown from '../../../components/SearchableDropdown/Searchabl
 import { formatDate } from '../../../utils/date';
 import Pagination from '../../../components/Pagination/Pagination';
 import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
+import { fetchAllPaginatedRecords } from '../../../utils/fetchAllPaginatedRecords';
 
 const tabs = [
     { key: 'dealer-sim', label: 'Dealer SIM Report', owner: 'Dealer', type: 'SIM' },
@@ -46,13 +47,10 @@ const DealerReports = () => {
 
     useEffect(() => {
         Promise.all([
-            api.get('/device_types/list.php').catch(() => null),
-            api.get('/sim_validities/list.php').catch(() => null),
-            api.get('/sim_types/list.php').catch(() => null)
-        ]).then(([deviceTypesResponse, validitiesResponse, simTypesResponse]) => {
-            const deviceTypes = deviceTypesResponse?.data.data?.device_types || [];
-            const validities = validitiesResponse?.data.data?.validities || [];
-            const masterSimTypes = simTypesResponse?.data.data?.sim_types || [];
+            fetchAllPaginatedRecords('/device_types/list.php', 'device_types').catch(() => []),
+            fetchAllPaginatedRecords('/sim_validities/list.php', 'validities').catch(() => []),
+            fetchAllPaginatedRecords('/sim_types/list.php', 'sim_types').catch(() => [])
+        ]).then(([deviceTypes, validities, masterSimTypes]) => {
             setDeviceModels(deviceTypes
                 .filter((type) => String(type.status || 'Active').trim().toLowerCase() === 'active')
                 .map((type) => type.device_type));

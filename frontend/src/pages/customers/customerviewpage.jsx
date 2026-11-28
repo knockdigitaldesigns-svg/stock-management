@@ -14,6 +14,7 @@ import {
 
 import api from '../../services/api';
 import { showGlobalError } from '../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 import { useAuth } from '../../context/AuthContext';
 import { PAYMENT_MODES } from '../../constants/paymentModes';
 import {
@@ -533,18 +534,18 @@ const CustomerViewPage = () => {
         const loadMasters = async () => {
             try {
                 const [
-                    platformsResponse,
-                    vehicleTypesResponse,
-                    deviceTypesResponse,
-                    validitiesResponse,
+                    platforms,
+                    vehicleTypes,
+                    deviceTypes,
+                    validities,
                     techniciansResponse,
                     dealersResponse,
                     closureUsersResponse
                 ] = await Promise.all([
-                    api.get('/platforms/list.php'),
-                    api.get('/vehicle_types/list.php'),
-                    api.get('/device_types/list.php'),
-                    api.get('/sim_validities/list.php'),
+                    fetchAllPaginatedRecords('/platforms/list.php', 'platforms'),
+                    fetchAllPaginatedRecords('/vehicle_types/list.php', 'vehicle_types'),
+                    fetchAllPaginatedRecords('/device_types/list.php', 'device_types'),
+                    fetchAllPaginatedRecords('/sim_validities/list.php', 'validities'),
                     api.get('/technicians/list.php'),
                     api.get('/dealers/list.php?for_installation=1'),
                     api.get('/users/list.php?scope=lead_closure_by_users')
@@ -552,24 +553,24 @@ const CustomerViewPage = () => {
 
                 const list = (response, key) => response.data?.data?.[key] || [];
                 setMasterData({
-                    platforms: list(platformsResponse, 'platforms').filter((item) =>
+                    platforms: platforms.filter((item) =>
                         item?.status === undefined ||
                         item?.status === null ||
                         item?.status === '' ||
                         String(item.status).toLowerCase() === 'active'
                     ),
-                    vehicleTypes: list(vehicleTypesResponse, 'vehicle_types'),
-                    deviceTypes: list(deviceTypesResponse, 'device_types'),
-                    validities: list(validitiesResponse, 'validities'),
+                    vehicleTypes,
+                    deviceTypes,
+                    validities,
                     technicians: list(techniciansResponse, 'technicians'),
                     dealers: list(dealersResponse, 'dealers'),
                     closureUsers: list(closureUsersResponse, 'users')
                 });
                 try {
-                    const saleAmountsResponse = await api.get('/sale_amounts/list.php');
+                    const saleAmounts = await fetchAllPaginatedRecords('/sale_amounts/list.php', 'sale_amounts');
                     setMasterData((previous) => ({
                         ...previous,
-                        saleAmounts: list(saleAmountsResponse, 'sale_amounts')
+                        saleAmounts
                     }));
                 } catch (saleAmountError) {
                     console.error('Customer edit sale amount loading error:', saleAmountError);

@@ -307,6 +307,7 @@ function ensurePermissionDefinitions($permissionKeys = []) {
         'stock_transfer.edit' => ['permission_name' => 'Stock Transfer Edit', 'module' => 'stock_transfer', 'action' => 'EDIT'],
         'stock_transfer.delete' => ['permission_name' => 'Stock Transfer Delete', 'module' => 'stock_transfer', 'action' => 'DELETE'],
         'customers.view' => ['permission_name' => 'Customer Details View', 'module' => 'customers', 'action' => 'VIEW'],
+        'transaction_ids.lookup' => ['permission_name' => 'Transaction ID Lookup', 'module' => 'transaction_ids', 'action' => 'LOOKUP'],
         'customer_payment_verification.review' => ['permission_name' => 'Customer Payment Verification Review', 'module' => 'customer_payment_verification', 'action' => 'REVIEW'],
         'customers.add' => ['permission_name' => 'Customer Details Add', 'module' => 'customers', 'action' => 'ADD'],
         'customers.edit' => ['permission_name' => 'Customer Details Edit', 'module' => 'customers', 'action' => 'EDIT'],

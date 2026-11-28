@@ -10,6 +10,7 @@ import StockAllocationEditModal from './StockAllocationEditModal';
 import { formatDate } from '../../utils/date';
 import { showGlobalError } from '../../context/ErrorContext';
 import { useAuth } from '../../context/AuthContext';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 
 const StockManagement = () => {
     const { hasPermission } = useAuth();
@@ -65,8 +66,7 @@ const StockManagement = () => {
 
     const fetchPlatforms = async () => {
         try {
-            const res = await api.get('/platforms/list.php').catch(() => ({ data: { success: true, data: { platforms: [] } } }));
-            const rawPlatforms = res.data?.data?.platforms || [];
+            const rawPlatforms = await fetchAllPaginatedRecords('/platforms/list.php', 'platforms');
             const active = rawPlatforms
                 .filter((p) => !p.status || String(p.status).toLowerCase() === 'active')
                 .map((p) => p.platform_name);

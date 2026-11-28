@@ -139,6 +139,7 @@ try {
     $userLock->close();
 
     $wasRejectedSubmission = false;
+    $clearRejectedProgressLinks = false;
     if ($submissionId > 0) {
         $stmt = $conn->prepare(
             "SELECT submitter_user_id, existing_customer_id, status, submission_data
@@ -165,6 +166,18 @@ try {
         }
         $wasRejectedSubmission = $draft['status'] === 'Rejected';
         $existingCustomerId = (int) ($draft['existing_customer_id'] ?? $existingCustomerId);
+        $previousSubmissionData = json_decode((string) $draft['submission_data'], true);
+        if (!is_array($previousSubmissionData)) {
+            $previousSubmissionData = [];
+        }
+        $clearRejectedProgressLinks = $wasRejectedSubmission
+            && $existingCustomerId <= 0
+            && empty($previousSubmissionData['legacy_customer_review'])
+            && !in_array(
+                (string) ($previousSubmissionData['source'] ?? ''),
+                ['customer_vehicle_addition', 'payment_installment', 'crm_installation', 'courier'],
+                true
+            );
         $stmt = $conn->prepare(
             "UPDATE customer_payment_verification_submissions
              SET submission_data = ?,
@@ -218,6 +231,25 @@ try {
         $submissionId = (int) $stmt->insert_id;
     }
     $stmt->close();
+    if ($clearRejectedProgressLinks) {
+        $clearLinks = $conn->prepare(
+            'UPDATE customer_payment_verification_submissions
+             SET linked_customer_id = NULL,
+                 linked_vehicle_id = NULL,
+                 linked_payment_id = NULL,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?'
+        );
+        if (!$clearLinks) {
+            throw new RuntimeException('Unable to clear stale links from the rejected customer draft.');
+        }
+        $clearLinks->bind_param('i', $submissionId);
+        if (!$clearLinks->execute()) {
+            $clearLinks->close();
+            throw new RuntimeException('Unable to clear stale links from the rejected customer draft.');
+        }
+        $clearLinks->close();
+    }
     if ($wasRejectedSubmission) {
         insertCustomerPaymentVerificationHistory(
             $conn,

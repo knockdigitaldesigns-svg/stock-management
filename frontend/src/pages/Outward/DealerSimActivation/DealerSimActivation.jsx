@@ -14,6 +14,7 @@ import DealerSimActivationEditModal from './DealerSimActivationEditModal';
 import DealerSimActivationBulkUploadModal from './DealerSimActivationBulkUploadModal';
 import DealerSimActivationBulkPaymentModal from './DealerSimActivationBulkPaymentModal';
 import './DealerSimActivation.css';
+import { fetchAllPaginatedRecords } from '../../../utils/fetchAllPaginatedRecords';
 
 const simStatusBadgeClass = (status) => ({
     available: 'badge-info',
@@ -129,15 +130,15 @@ const DealerSimActivation = () => {
 
     const fetchMasters = async () => {
         try {
-            const [dealersRes, simTypesRes, simValiditiesRes] = await Promise.all([
+            const [dealersRes, simTypes, simValidities] = await Promise.all([
                 api.get('/dealers/list.php?for_lookup=1'),
-                api.get('/sim_types/list.php'),
-                api.get('/sim_validities/list.php')
+                fetchAllPaginatedRecords('/sim_types/list.php', 'sim_types'),
+                fetchAllPaginatedRecords('/sim_validities/list.php', 'validities')
             ]);
             setMasters({
                 dealers: dealersRes.data.data?.dealers || [],
-                simTypes: simTypesRes.data.data?.sim_types || [],
-                simValidities: simValiditiesRes.data.data?.validities || []
+                simTypes,
+                simValidities
             });
         } catch (err) {
             console.error('Failed to fetch filter masters', err);

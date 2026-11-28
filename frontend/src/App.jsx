@@ -84,6 +84,7 @@ import HistoryPage from './pages/History/HistoryPage';
 import SupportPage from './pages/Support/SupportPage';
 import AttendancePage from './pages/Attendance/AttendancePage';
 import AttendanceSettingsPage from './pages/Attendance/AttendanceSettingsPage';
+import TransactionIdLookupPage from './pages/Settings/TransactionIdLookupPage';
 import EmployeeWorkingReportsPage from './pages/Reports/EmployeeWorkingReportsPage';
 import PipelineManagementPage from './pages/CRM/PipelineManagementPage';
 import CampaignManagementPage from './pages/CRM/CampaignManagementPage';
@@ -452,6 +453,15 @@ function App() {
                                 permission="users.view"
                             >
                                 <UsersPage />
+                            </ProtectedRoute>
+                        }
+                    />
+
+                    <Route
+                        path="settings/transaction-id-lookup"
+                        element={
+                            <ProtectedRoute permission="transaction_ids.lookup">
+                                <TransactionIdLookupPage />
                             </ProtectedRoute>
                         }
                     />

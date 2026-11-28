@@ -343,6 +343,9 @@ const showCRM =
     const canViewUsers =
         hasPermission('users.view');
 
+    const canLookupTransactionIds =
+        hasPermission('transaction_ids.lookup');
+
     const canChangePassword =
         hasPermission('password.change');
 
@@ -363,6 +366,7 @@ const showCRM =
         showMasterSettings ||
         canViewRoles ||
         canViewUsers ||
+        canLookupTransactionIds ||
         canChangePassword ||
         canManageAttendanceSettings;
 
@@ -1192,6 +1196,18 @@ const showCRM =
                                             <span>
                                                 Add User
                                             </span>
+                                        </NavLink>
+                                    )}
+
+                                    {canLookupTransactionIds && (
+                                        <NavLink
+                                            to="/settings/transaction-id-lookup"
+                                            className={({ isActive }) =>
+                                                `nav-sub-item ${isActive ? 'active' : ''}`
+                                            }
+                                        >
+                                            <FileText size={18} />
+                                            <span>Transaction ID Lookup</span>
                                         </NavLink>
                                     )}
 

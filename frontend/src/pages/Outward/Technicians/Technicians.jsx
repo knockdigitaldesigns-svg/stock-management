@@ -13,6 +13,7 @@ import RecordViewModal from '../../../components/RecordViewModal/RecordViewModal
 import CustomerCashCollections from '../../../components/CustomerCashCollections/CustomerCashCollections';
 import { useAuth } from '../../../context/AuthContext';
 import { showGlobalError } from '../../../context/ErrorContext';
+import { fetchAllPaginatedRecords } from '../../../utils/fetchAllPaginatedRecords';
 
 const Technicians = () => {
     const { hasPermission, refreshPermissions } = useAuth();
@@ -76,28 +77,24 @@ const Technicians = () => {
 
     const fetchFilterMasters = async () => {
         try {
-            const [platformsRes, deviceTypesRes, validitiesRes, simTypesRes, techniciansRes] = await Promise.all([
-                api.get('/platforms/list.php'),
-                api.get('/device_types/list.php'),
-                api.get('/sim_validities/list.php'),
-                api.get('/sim_types/list.php'),
+            const [rawPlatforms, rawDeviceTypes, rawValidities, rawSimTypes, techniciansRes] = await Promise.all([
+                fetchAllPaginatedRecords('/platforms/list.php', 'platforms'),
+                fetchAllPaginatedRecords('/device_types/list.php', 'device_types'),
+                fetchAllPaginatedRecords('/sim_validities/list.php', 'validities'),
+                fetchAllPaginatedRecords('/sim_types/list.php', 'sim_types'),
                 api.get('/technicians/list.php?for_lookup=1')
             ]);
 
-            const rawPlatforms = platformsRes.data?.data?.platforms || [];
             const activePlatforms = rawPlatforms
                 .filter((p) => !p.status || String(p.status).toLowerCase() === 'active')
                 .map((p) => p.platform_name);
 
-            const rawDeviceTypes = deviceTypesRes.data?.data?.device_types || [];
             const deviceModels = rawDeviceTypes.map((dt) => dt.device_type);
 
-            const rawValidities = validitiesRes.data?.data?.validities || [];
             const simValidities = rawValidities
                 .filter((v) => !v.status || String(v.status).toLowerCase() === 'active')
                 .map((v) => `${v.months} Months`);
 
-            const rawSimTypes = simTypesRes.data?.data?.sim_types || [];
             const simTypes = [...new Set(rawSimTypes.map((simType) => simType.sim_type).filter(Boolean))];
 
             setMasterData({

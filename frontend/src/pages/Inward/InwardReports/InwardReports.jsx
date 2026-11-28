@@ -6,6 +6,7 @@ import './InwardReports.css';
 import { formatDate } from '../../../utils/date';
 import Pagination from '../../../components/Pagination/Pagination';
 import TableFilterBar, { emptyTableFilters } from '../../../components/TableFilterBar/TableFilterBar';
+import { fetchAllPaginatedRecords } from '../../../utils/fetchAllPaginatedRecords';
 
 const InwardReports = () => {
     const [activeTab, setActiveTab] = useState('sim'); // 'sim' or 'device'
@@ -48,13 +49,15 @@ const InwardReports = () => {
     }, {});
 
     useEffect(() => {
-        Promise.all([api.get('/device_types/list.php'), api.get('/sim_types/list.php')])
-            .then(([response, simTypesResponse]) => {
-                const deviceTypes = response.data.data?.device_types || [];
+        Promise.all([
+            fetchAllPaginatedRecords('/device_types/list.php', 'device_types'),
+            fetchAllPaginatedRecords('/sim_types/list.php', 'sim_types')
+        ])
+            .then(([deviceTypes, simTypes]) => {
                 setDeviceModels(deviceTypes
                     .filter((type) => String(type.status || 'Active').trim().toLowerCase() === 'active')
                     .map((type) => type.device_type));
-                setSimTypes((simTypesResponse.data.data?.sim_types || []).map((simType) => simType.sim_type));
+                setSimTypes(simTypes.map((simType) => simType.sim_type));
             })
             .catch((error) => {
                 console.error('Failed to load report filter options', error);

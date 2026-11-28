@@ -21,6 +21,7 @@ import {
     sanitizeCustomerField,
     validateCustomerForm
 } from '../../utils/customerValidation';
+import { fetchAllPaginatedRecords } from '../../utils/fetchAllPaginatedRecords';
 import { useConfirmation } from '../../components/Modal/useConfirmation';
 const initialForm = {
     platform_id: '',
@@ -116,20 +117,10 @@ const CustomerCreatePage = () => {
             setLoadingPlatforms(true);
             setError('');
 
-            const response = await api.get('/platforms/list.php');
-
-            if (!response.data?.success) {
-                throw new Error(
-                    response.data?.message ||
-                    'Failed to load platforms.'
-                );
-            }
-
-            const platformList =
-                response.data?.data?.platforms ||
-                response.data?.platforms ||
-                response.data?.data ||
-                [];
+            const platformList = await fetchAllPaginatedRecords(
+                '/platforms/list.php',
+                'platforms'
+            );
 
             const activePlatforms = Array.isArray(platformList)
                 ? platformList.filter((item) => {
@@ -429,9 +420,10 @@ const loadCustomer = async () => {
             );
             setForm((previous) => ({
                 ...previous,
-                ...(hadSelectedCustomer ? emptyCustomerDetails : {}),
+                ...(hadSelectedCustomer
+                    ? { ...emptyCustomerDetails, username: '' }
+                    : {}),
                 primary_mobile_no: updatedValue,
-                username: ''
             }));
             setError('');
             setSuccess('');

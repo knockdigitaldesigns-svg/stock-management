@@ -4,6 +4,7 @@ import Modal from '../../../components/Modal/Modal';
 import DateInput from '../../../components/DateInput';
 import { PAYMENT_MODES } from '../../../constants/paymentModes';
 import { formatDate } from '../../../utils/date';
+import { fetchAllPaginatedRecords } from '../../../utils/fetchAllPaginatedRecords';
 
 const localToday = () => {
     const today = new Date();
@@ -78,20 +79,17 @@ const DealerSimActivationEditModal = ({
         let isCurrent = true;
         Promise.all([
             api.get(`/dealers/sim_activation_get.php?allocation_id=${encodeURIComponent(allocationId)}`),
-            api.get('/sim_validities/list.php')
+            fetchAllPaginatedRecords('/sim_validities/list.php', 'validities')
         ]).then(([allocationResponse, validitiesResponse]) => {
             const details = allocationResponse.data.data?.allocation;
             if (!allocationResponse.data.success || !details) {
                 throw new Error(allocationResponse.data.message || 'Dealer SIM activation record not found.');
             }
-            if (!validitiesResponse.data.success) {
-                throw new Error(validitiesResponse.data.message || 'Failed to load SIM validities.');
-            }
             if (!isCurrent) return;
             setAllocation(details);
             setPayments(allocationResponse.data.data?.payments || []);
             setLifecyclePayments(allocationResponse.data.data?.lifecycle_payments || []);
-            setSimValidities(validitiesResponse.data.data?.validities || []);
+            setSimValidities(validitiesResponse);
             setForm({
                 activation_date: details.activation_date || '',
                 sim_validity_id: String(details.sim_validity_id || ''),
